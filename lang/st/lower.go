@@ -1611,7 +1611,7 @@ func (l *lowerer) lowerCallExpr(n *CallExpr) (ir.Expr, error) {
 			return nil, errNode(srcArgs[i], fmt.Errorf("function %s arg %d: cannot pass %s as %s", sig.Name, i+1, args[i].ExprType(), p))
 		}
 	}
-	return &ir.Call{Name: sig.Name, Args: args, Fn: fn, T: resultT}, nil
+	return &ir.Call{Name: sig.Name, Args: args, Fn: fn, HostFn: sig.HostFn, T: resultT}, nil
 }
 
 // lowerUserFuncCall resolves a CallExpr against a user-defined FUNCTION.
