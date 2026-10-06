@@ -75,6 +75,7 @@ type env struct {
 	preludeLines int
 	segs         []stproject.Segment
 	tags         []runtime.TagDef
+	libs         []string // library sources in their original languages (the Logix rules read them)
 }
 
 // TypeMember is one member of a UDT, as declared.

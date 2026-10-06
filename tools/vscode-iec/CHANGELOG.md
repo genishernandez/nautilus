@@ -5,6 +5,16 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Added
+
+- **A Logix project's target rules squiggle as you type.** In a project
+  whose `nautilus.yaml` has a `target: logix` section, a construct the
+  Allen-Bradley writer cannot express (a `TP` instance, a user FUNCTION,
+  an array that does not start at 0) is an error on its line while you
+  type, with the rule ID (`logix/fb`) in the Problems panel. These are the
+  diagnostics `naut check` already printed for such a project; they show
+  once the file compiles. Needs a `naut` newer than 0.16.1.
+
 ## [0.15.0] - 2026-10-12
 
 The pre-release line after the stable release 0.14.0. Same contents as

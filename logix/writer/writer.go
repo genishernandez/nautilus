@@ -232,6 +232,8 @@ type lowered struct {
 	aois     map[string]*aoiDef
 	aoiOrder []*aoiDef
 	inAOI    bool
+	// libIx indexes what the libraries declare (aoi.go).
+	libIx *libIndex
 }
 
 // blockType is the Logix structure behind a block instance: TIMER and
