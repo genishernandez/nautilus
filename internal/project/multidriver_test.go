@@ -108,15 +108,20 @@ func TestDriversBuildAMultiWithStatusRows(t *testing.T) {
 		t.Fatalf("row names: %q %q", rows[0].Name, rows[1].Name)
 	}
 
-	// And the Sparkplug device: health gate is ALL children healthy — with
-	// neither broker connected it must read unhealthy, never nil (nil would
-	// birth the device unconditionally).
-	health := driverHealth(p.Runtime.Driver)
-	if health == nil {
-		t.Fatal("driverHealth(multi of hosts) = nil, want a real gate")
+	// And each child is its own Sparkplug device with its own health gate —
+	// with neither broker connected both must read unhealthy, never nil
+	// (nil would birth the device unconditionally).
+	devs, err := sparkplugDevices(p.drivers)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if health() {
-		t.Fatal("both brokers are unreachable; the device must not read healthy")
+	if len(devs) != 2 || devs[0].ID != "sparkplug-host" || devs[1].ID != "sparkplug-host-2" {
+		t.Fatalf("devices = %+v, want one per child, named after it", devs)
+	}
+	for _, d := range devs {
+		if d.Health == nil || d.Health() {
+			t.Errorf("device %s: its broker is unreachable; it must not read healthy", d.ID)
+		}
 	}
 	if h := driverHealth(nio.NewMemory()); h != nil {
 		t.Fatal("memory has no connection to be down; its health gate must stay nil")

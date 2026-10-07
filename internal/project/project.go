@@ -178,10 +178,14 @@ type SparkplugConfig struct {
 	PrimaryHost     string   `yaml:"primary-host"` // gate births on a SCADA host's STATE
 	PublishInterval Duration `yaml:"publish-interval"`
 	BdSeqFile       string   `yaml:"bdseq-file"` // persists bdSeq across restarts
-	// Device publishes the field driver's input tags as a Sparkplug DEVICE
-	// with this id (DBIRTH/DDEATH follow the driver's connection health).
-	// Empty = everything publishes at node level.
+	// Device was the one Sparkplug device every driver's tags rode on. It
+	// is gone: each field connection is now its own device (see
+	// sparkplugDevices). Kept so Load can say so instead of "unknown field".
 	Device string `yaml:"device"`
+	// Writable opens NCMD/DCMD writes for the tags (or UDT members) these
+	// globs match. Empty, the default, refuses every write: the node is
+	// read-only and only Node Control/Rebirth is honoured.
+	Writable []string `yaml:"writable"`
 	// StoreForward buffers up to this many data messages while the broker
 	// (or the primary host) is unreachable and replays them, marked
 	// historical, on reconnect. Zero disables (the default).
@@ -364,7 +368,7 @@ type Project struct {
 	Runtime   runtime.Options
 	Server    server.Options
 	sparkplug *SparkplugConfig
-	inputTags []string // role-input tag names, for the Sparkplug device
+	drivers   []nio.NamedDriver // the configured drivers, named; nil for the implicit memory loopback
 
 	// HMIDir is server.hmi's path, cleaned and relative to the project
 	// (e.g. "hmi/build") — "" when unset. `naut build` uses it to warn
@@ -461,20 +465,62 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 	for class, patterns := range c.MetricClasses {
 		opts = append(opts, sparkplug.WithMetricClass(class, patterns...))
 	}
-	if c.Device != "" {
-		// The field driver's tags as a Sparkplug DEVICE: its DBIRTH/DDEATH
-		// track the driver's own connection health when it reports one.
-		tags := p.inputTags
-		if n, ok := p.Runtime.Driver.(interface{ InputNames() []string }); ok {
-			tags = n.InputNames()
-		}
-		opts = append(opts, sparkplug.WithDevice(sparkplug.Device{
-			ID:     c.Device,
-			Tags:   tags,
-			Health: driverHealth(p.Runtime.Driver),
-		}))
+	devices, err := sparkplugDevices(p.drivers)
+	if err != nil {
+		return nil, err
 	}
+	for _, d := range devices {
+		opts = append(opts, sparkplug.WithDevice(d))
+	}
+	opts = append(opts, sparkplug.WithWritable(c.Writable...))
 	return sparkplug.New(rt, cfg, opts...)
+}
+
+// sparkplugDevices makes each field connection a Sparkplug device
+// (edge-collector.md §3): one per source of a driver that holds several
+// (modbus, snmp, redfish, prometheus), named by the source id, and one per
+// driver that is a single connection (eip, sparkplug-host, replay), named
+// by the driver. Each births and dies with its own connection, so one dead
+// meter never takes another device's DBIRTH with it. The memory loopback
+// is no connection and makes no device; its tags, like every tag no
+// connection delivers (program state, outputs), publish at node level.
+func sparkplugDevices(drivers []nio.NamedDriver) ([]sparkplug.Device, error) {
+	var out []sparkplug.Device
+	from := map[string]string{} // device id → where it came from, for a collision
+	add := func(d sparkplug.Device, origin string) error {
+		if prev, dup := from[d.ID]; dup {
+			return fmt.Errorf("sparkplug: device %q is both %s and %s — each connection is its own Sparkplug device, so rename one", d.ID, prev, origin)
+		}
+		from[d.ID] = origin
+		out = append(out, d)
+		return nil
+	}
+	for _, nd := range drivers {
+		switch drv := nd.Driver.(type) {
+		case nio.ConnectionReporter:
+			for _, c := range drv.Connections() {
+				id := c.ID
+				err := add(sparkplug.Device{
+					ID:     id,
+					Tags:   c.Inputs,
+					Health: func() bool { return drv.ConnectionUp(id) },
+				}, fmt.Sprintf("source %q of driver %q", id, nd.Name))
+				if err != nil {
+					return nil, err
+				}
+			}
+		case interface{ InputNames() []string }:
+			err := add(sparkplug.Device{
+				ID:     nd.Name,
+				Tags:   drv.InputNames(),
+				Health: driverHealth(nd.Driver),
+			}, fmt.Sprintf("driver %q", nd.Name))
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
 }
 
 // hasProgramDecl reports whether src contains a PROGRAM declaration,
@@ -688,8 +734,12 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 	}
 	opts.Tags = append(opts.Tags, gvlTags(libs, opts.Tags)...)
 	opts.Meta = applyTagMeta(opts.Tags, m.TagMeta)
-	if opts.Driver, err = buildDrivers(fsys, m); err != nil {
+	var drivers []nio.NamedDriver
+	if opts.Driver, drivers, err = buildDrivers(fsys, m); err != nil {
 		return nil, err
+	}
+	if m.Sparkplug != nil && m.Sparkplug.Device != "" {
+		return nil, fmt.Errorf("sparkplug.device: removed — each field connection is now its own Sparkplug device, named after its driver (eip, sparkplug-host) or its source id (modbus, snmp, redfish, prometheus); delete device: %s, and give a driver a name: to choose its device id", m.Sparkplug.Device)
 	}
 
 	addr := m.Server.Addr
@@ -699,12 +749,6 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 	projName := m.Name
 	if projName == "" {
 		projName = "nautilus"
-	}
-	var inputs []string
-	for _, t := range m.Tags {
-		if strings.EqualFold(t.Role, "input") {
-			inputs = append(inputs, t.Name)
-		}
 	}
 	var hmiFS fs.FS
 	var hmiDir string
@@ -749,7 +793,7 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 			HMI:          hmiFS,
 		},
 		sparkplug:  m.Sparkplug,
-		inputTags:  inputs,
+		drivers:    drivers,
 		Retain:     m.Retain,
 		Redundancy: m.Redundancy,
 		Alarms:     m.Alarms,
@@ -978,37 +1022,16 @@ func normalize(v any) any {
 	return v
 }
 
-// driverHealth adapts a field driver's connection state onto the bool the
-// Sparkplug device: wiring gates DBIRTH/DDEATH with. nil means the driver
-// has no notion of a connection (memory) and the device is always healthy —
-// the behaviour that existed before health reporting did. A multi-driver
-// set is healthy only when EVERY child that has an opinion is: an operator
-// reading the device online should be able to trust all of its tags, not
-// the lucky subset whose bus is up.
+// driverHealth adapts a field driver's connection state onto the bool a
+// Sparkplug device gates DBIRTH/DDEATH with, for a driver that is one
+// connection as a whole. nil means the driver has no notion of a
+// connection (replay) and its device is always healthy.
 func driverHealth(d nio.Driver) func() bool {
 	switch drv := d.(type) {
 	case *eip.Driver:
 		return func() bool { return drv.Health().Connected }
 	case *sphost.Driver:
 		return func() bool { return drv.Status().Connected }
-	case *nio.Multi:
-		var checks []func() bool
-		for _, c := range drv.Children() {
-			if h := driverHealth(c.Driver); h != nil {
-				checks = append(checks, h)
-			}
-		}
-		if len(checks) == 0 {
-			return nil
-		}
-		return func() bool {
-			for _, h := range checks {
-				if !h() {
-					return false
-				}
-			}
-			return true
-		}
 	}
 	return nil
 }
@@ -1018,51 +1041,61 @@ func driverHealth(d nio.Driver) func() bool {
 // construction path serves both; two or more wrap in nio.Multi, which is
 // where duplicate tag ownership across drivers is refused (a load-time
 // error naming both drivers — the same no-last-wins rule tag files keep).
-func buildDrivers(fsys fs.FS, m Manifest) (nio.Driver, error) {
+// It also returns every configured driver with its name — a lone one
+// included, since a Sparkplug device is named after its driver — and
+// none for the implicit memory loopback.
+func buildDrivers(fsys fs.FS, m Manifest) (nio.Driver, []nio.NamedDriver, error) {
 	configs := m.Drivers
 	if !reflect.DeepEqual(m.Driver, DriverConfig{}) {
 		if len(configs) > 0 {
-			return nil, fmt.Errorf("%s: driver: and drivers: are both set — drivers: is the plural of the same section, so move the single driver into the list", ManifestName)
+			return nil, nil, fmt.Errorf("%s: driver: and drivers: are both set — drivers: is the plural of the same section, so move the single driver into the list", ManifestName)
 		}
 		configs = []DriverConfig{m.Driver}
-	}
-	switch len(configs) {
-	case 0:
-		// No driver section at all: the memory loopback, as ever.
-		return buildDriver(fsys, DriverConfig{})
-	case 1:
-		return buildDriver(fsys, configs[0])
 	}
 	// Names default to the type, deduped "eip-2" — stable, predictable, and
 	// only needed once two drivers share a manifest. An explicit name that
 	// collides is caught by NewMulti, which checks the final set.
 	counts := map[string]int{}
+	nameOf := func(c DriverConfig) string {
+		if c.Name != "" {
+			return c.Name
+		}
+		base := strings.ToLower(c.Type)
+		if base == "" {
+			base = "memory"
+		}
+		counts[base]++
+		if n := counts[base]; n > 1 {
+			return fmt.Sprintf("%s-%d", base, n)
+		}
+		return base
+	}
+	switch len(configs) {
+	case 0:
+		// No driver section at all: the memory loopback, as ever.
+		d, err := buildDriver(fsys, DriverConfig{})
+		return d, nil, err
+	case 1:
+		d, err := buildDriver(fsys, configs[0])
+		if err != nil {
+			return nil, nil, err
+		}
+		return d, []nio.NamedDriver{{Name: nameOf(configs[0]), Driver: d}}, nil
+	}
 	named := make([]nio.NamedDriver, 0, len(configs))
 	for i, c := range configs {
-		name := c.Name
-		if name == "" {
-			base := strings.ToLower(c.Type)
-			if base == "" {
-				base = "memory"
-			}
-			counts[base]++
-			if n := counts[base]; n > 1 {
-				name = fmt.Sprintf("%s-%d", base, n)
-			} else {
-				name = base
-			}
-		}
+		name := nameOf(c)
 		d, err := buildDriver(fsys, c)
 		if err != nil {
-			return nil, fmt.Errorf("drivers[%d] (%s): %w", i, name, err)
+			return nil, nil, fmt.Errorf("drivers[%d] (%s): %w", i, name, err)
 		}
 		named = append(named, nio.NamedDriver{Name: name, Driver: d})
 	}
 	multi, err := nio.NewMulti(named...)
 	if err != nil {
-		return nil, fmt.Errorf("drivers: %w", err)
+		return nil, nil, fmt.Errorf("drivers: %w", err)
 	}
-	return multi, nil
+	return multi, named, nil
 }
 
 func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {

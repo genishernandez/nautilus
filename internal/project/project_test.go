@@ -205,7 +205,7 @@ func TestSparkplugConfig(t *testing.T) {
 sparkplug:
   broker: "tcp://localhost:1883"
   group-id: Joy
-  device: plc
+  writable: ["Setpoint"]
   store-forward: 5000
   default-class: { deadband: 0.5, max-interval: 30s }
   classes:

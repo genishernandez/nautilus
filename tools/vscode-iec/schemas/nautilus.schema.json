@@ -677,9 +677,17 @@
           "description": "File persisting bdSeq across restarts."
         },
         "device": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Publish the field driver's input tags as a Sparkplug DEVICE with this id; its DBIRTH/DDEATH follow the driver's connection health. Empty means everything publishes at node level."
+          "not": {},
+          "deprecated": true,
+          "description": "Removed. Each field connection is now its own Sparkplug device, named after its driver (eip, sparkplug-host) or its source id (modbus, snmp, redfish, prometheus), with its own DBIRTH/DDEATH. Delete this key; give a driver a name: to choose its device id."
+        },
+        "writable": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Globs over tag names or UDT member paths (Motor1.START, Pump*.SpeedSP) that NCMD/DCMD may write. A pattern on a tag opens its members. Omit and the node is read-only: every write is refused and only Node Control/Rebirth is honoured."
         },
         "store-forward": {
           "type": "integer",
