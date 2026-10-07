@@ -23,6 +23,18 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   On a Logix target they are `S:FS` and `GSV(WallClockTime,,
   LocalDateTime,…)`. Needs a `naut` newer than 0.16.1.
 
+### Fixed
+
+- **A rung's coils see one evaluation of its condition.** In a rung where
+  a coil writes a tag the condition reads, such as `/Lamp ( Lamp ) ( Horn )`,
+  later coils re-evaluated the condition after the earlier coil's write, so
+  `Horn` got the opposite of the rung's result. The condition is now
+  evaluated once, as the ladder page says and as a controller does, and held
+  in a generated BOOL, `<rung>__power`, which shows among the program's
+  locals. **Programs with such a rung compute different (correct) values
+  after upgrading.** Rungs without the pattern are unchanged. Comes from the
+  runtime and `naut lsp`, so it needs a `naut` newer than 0.16.1. (#258)
+
 ## [0.15.0] - 2026-10-12
 
 The pre-release line after the stable release 0.14.0. Same contents as
