@@ -47,8 +47,10 @@ END_PROGRAM
 
 // newCommandNode builds a Node over a real runtime whose Motor1 UDT tag is
 // seeded with distinguishable values at every level, plus a logger writing
-// into buf so the log-once diagnostics are assertable.
-func newCommandNode(t *testing.T, buf *bytes.Buffer) *Node {
+// into buf so the log-once diagnostics are assertable. Every tag is writable
+// unless opts say otherwise — these tests are about what a write does once
+// the gate (writegate_test.go) lets it through.
+func newCommandNode(t *testing.T, buf *bytes.Buffer, opts ...Option) *Node {
 	t.Helper()
 	rt, err := runtime.New(runtime.Options{
 		Program:   cmdProgramST,
@@ -79,7 +81,10 @@ func newCommandNode(t *testing.T, buf *bytes.Buffer) *Node {
 	rt.Tags().Set("Motor1", m)
 
 	log := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	n, err := New(rt, Config{GroupID: "G", EdgeNode: "E", Log: log})
+	if len(opts) == 0 {
+		opts = []Option{WithWritable("*")}
+	}
+	n, err := New(rt, Config{GroupID: "G", EdgeNode: "E", Log: log}, opts...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -134,7 +139,7 @@ func TestCommandPartialTemplateKeepsOtherMembers(t *testing.T) {
 	var buf bytes.Buffer
 	n := newCommandNode(t, &buf)
 
-	n.applyCommand(Payload{Metrics: []Metric{
+	n.applyCommand("", Payload{Metrics: []Metric{
 		memberCmd("Motor1", "Motor", Metric{Name: "START", Datatype: spb.DataType_Boolean, Value: true}),
 	}})
 
@@ -161,7 +166,7 @@ func TestCommandNestedPartialTemplate(t *testing.T) {
 	var buf bytes.Buffer
 	n := newCommandNode(t, &buf)
 
-	n.applyCommand(Payload{Metrics: []Metric{
+	n.applyCommand("", Payload{Metrics: []Metric{
 		memberCmd("Motor1", "Motor", memberCmd("Drive", "Drv",
 			Metric{Name: "Torque", Datatype: spb.DataType_Double, Value: 12.25})),
 	}})
@@ -192,8 +197,8 @@ func TestCommandTemplateUnknownMemberIgnored(t *testing.T) {
 			{Name: "HSP", Datatype: spb.DataType_Double, Value: 99.0},
 		},
 	}}
-	n.applyCommand(Payload{Metrics: []Metric{cmd}})
-	n.applyCommand(Payload{Metrics: []Metric{cmd}}) // twice: the warning is log-ONCE
+	n.applyCommand("", Payload{Metrics: []Metric{cmd}})
+	n.applyCommand("", Payload{Metrics: []Metric{cmd}}) // twice: the warning is log-ONCE
 
 	got := motor1(t, n)
 	if !fld(t, got, "START").B {
@@ -218,7 +223,7 @@ func TestCommandTemplateForScalarTagIgnored(t *testing.T) {
 	var buf bytes.Buffer
 	n := newCommandNode(t, &buf)
 
-	n.applyCommand(Payload{Metrics: []Metric{
+	n.applyCommand("", Payload{Metrics: []Metric{
 		memberCmd("SpeedSP", "Motor", Metric{Name: "START", Datatype: spb.DataType_Boolean, Value: true}),
 	}})
 
@@ -240,7 +245,7 @@ func TestCommandTemplateForUnknownTagIgnored(t *testing.T) {
 	var buf bytes.Buffer
 	n := newCommandNode(t, &buf)
 
-	n.applyCommand(Payload{Metrics: []Metric{
+	n.applyCommand("", Payload{Metrics: []Metric{
 		memberCmd("Nope", "Motor", Metric{Name: "START", Datatype: spb.DataType_Boolean, Value: true}),
 	}})
 
@@ -258,7 +263,7 @@ func TestCommandScalarStillReplaces(t *testing.T) {
 	var buf bytes.Buffer
 	n := newCommandNode(t, &buf)
 
-	n.applyCommand(Payload{Metrics: []Metric{
+	n.applyCommand("", Payload{Metrics: []Metric{
 		{Name: "SpeedSP", Datatype: spb.DataType_Double, Value: 61.5},
 	}})
 

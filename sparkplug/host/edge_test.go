@@ -251,7 +251,7 @@ func TestEdgeToHostDogfood(t *testing.T) {
 		BdSeqFile:       bdFile,
 		PublishInterval: 50 * time.Millisecond,
 		Log:             quietLogger(),
-	})
+	}, sparkplug.WithWritable("SpeedSP", "Pump1.Speed", "Pump1.Drive.Torque")) // what the host writes back
 	if err != nil {
 		t.Fatalf("sparkplug.New: %v", err)
 	}
@@ -532,7 +532,7 @@ func startDogfoodEdge(t *testing.T, host *Driver, addr string, speedSP float64) 
 		BdSeqFile:       filepath.Join(t.TempDir(), "w6.bdseq"),
 		PublishInterval: 50 * time.Millisecond,
 		Log:             quietLogger(),
-	})
+	}, sparkplug.WithWritable("SpeedSP", "Pump1.Speed", "Pump1.Drive.Torque")) // what the host writes back
 	if err != nil {
 		t.Fatalf("sparkplug.New: %v", err)
 	}

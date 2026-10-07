@@ -10,32 +10,33 @@ import (
 
 // handleCommand processes NCMD/DCMD. A "Node Control/Rebirth" = true triggers
 // a rebirth (NBIRTH+DBIRTH, bdSeq unchanged, seq reset). Other command metrics
-// are written back into the tag store (a SCADA host writing a setpoint), which
-// the program then acts on and a driver may propagate to the field.
+// are writes into the tag store (a SCADA host writing a setpoint), which the
+// program then acts on and a driver may propagate to the field — but only
+// through the write gate (writegate.go): the tag must be opted in with
+// WithWritable, and it must belong to the node or device the command was
+// addressed to. Everything else is refused and logged.
 //
 // A Template metric is a UDT (struct) tag, and Sparkplug allows a PARTIAL
 // template update — a template carrying only the members that changed — in
 // NCMD/DCMD just as it does in NDATA. So a template command MERGES into the
 // tag's current value member by member rather than replacing it: a host
 // commanding Motor1.START must not zero the Speed the edge is holding.
-// Scalars are unchanged: they replace, as they always did.
-//
-// Writable policy is unchanged too. Command writes are not gated per tag on
-// this node — every tag named by a command metric is written — so at member
-// granularity the root tag's policy is what applies: a member of a writable
-// (i.e. any) tag is writable, and nothing new is opened up.
+// Scalars are unchanged: they replace, as they always did. The gate applies
+// per member: a template carrying a writable member and a read-only one
+// writes the first and refuses the second.
 func (n *Node) handleCommand(_ mqtt.Client, msg mqtt.Message) {
 	payload, err := DecodePayload(msg.Payload())
 	if err != nil {
 		n.log.Warn("sparkplug: bad command payload", "topic", msg.Topic(), "error", err)
 		return
 	}
-	n.applyCommand(payload)
+	n.applyCommand(commandDevice(msg.Topic()), payload)
 }
 
 // applyCommand is handleCommand minus the decode — the seam command_test.go
 // drives, so the write semantics are testable without an MQTT message.
-func (n *Node) applyCommand(payload Payload) {
+// device is the DCMD's device id, "" for an NCMD.
+func (n *Node) applyCommand(device string, payload Payload) {
 	for _, m := range payload.Metrics {
 		if m.Name == "Node Control/Rebirth" {
 			if b, ok := m.Value.(bool); ok && b {
@@ -52,11 +53,26 @@ func (n *Node) applyCommand(payload Payload) {
 	// junk top-level tag that the next NBIRTH would publish back at it.
 	tags := n.rt.Tags()
 	for _, m := range payload.Metrics {
-		if m.Name == "" || m.IsNull {
+		if m.Name == "" || m.IsNull || m.Name == "Node Control/Rebirth" {
+			continue
+		}
+		if owner := n.tagOwner[rootTag(m.Name)]; owner != device {
+			n.refuseCommand("addressed to the wrong device", m.Name,
+				"addressedTo", deviceLabel(device), "publishedOn", deviceLabel(owner))
 			continue
 		}
 		if m.Datatype == spb.DataType_Template {
-			n.commandTemplate(m)
+			pruned, refused := n.writableTemplate(m.Name, m)
+			for _, r := range refused {
+				n.refuseCommand("not writable", r)
+			}
+			if t, _ := pruned.Value.(*Template); t != nil && len(t.Metrics) > 0 {
+				n.commandTemplate(pruned)
+			}
+			continue
+		}
+		if !n.writeAllowed(m.Name) {
+			n.refuseCommand("not writable", m.Name)
 			continue
 		}
 		if v, ok := commandValue(m); ok {
@@ -64,6 +80,15 @@ func (n *Node) applyCommand(payload Payload) {
 			n.log.Debug("sparkplug: command write", "tag", m.Name, "value", m.Value)
 		}
 	}
+}
+
+// deviceLabel names a command destination for a log line: the device id, or
+// "node" for the edge node itself.
+func deviceLabel(device string) string {
+	if device == "" {
+		return "node"
+	}
+	return device
 }
 
 // commandTemplate merges a Template command metric into the struct tag it
