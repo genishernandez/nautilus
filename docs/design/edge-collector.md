@@ -281,3 +281,27 @@ Each step useful on its own, smallest and most unblocking first:
 8. The component package and the example application (§7); then argonaut's central
    override editor over the broker (§2.2).
 9. Parallel collectors (§5.5).
+
+### Step 1, as built (2026-10-07)
+
+Choices the building made, for review:
+
+- **Device naming.** A driver holding several sources (`modbus`, `snmp`, `redfish`,
+  `prometheus`) makes one device per source, named by the source id; a driver that is one
+  connection (`eip`, `sparkplug-host`, `replay`) makes one, named by the driver's `name:`
+  (default: its type). The `memory` loopback is no connection and makes none. A device
+  carries its connection's input tags, `__Online` included; everything else (program
+  state, outputs) stays at node level. Two connections with one id are a load error naming
+  both. Drivers report connections through `io.ConnectionReporter`.
+- **No knob, no compatibility mode.** `sparkplug.device` is refused at load with what to
+  do instead. Projects with only the memory loopback publish exactly as before.
+- **The gate is in the `sparkplug` package**, so the Go tier is read-only by default too:
+  `WithWritable(globs...)`, manifest `sparkplug.writable:`. Until the rules and lock of §2
+  exist, the allowlist lives there; it moves into the rules with step 4. Patterns match a
+  tag or a UDT member path; a pattern on a tag opens its members; a template command is
+  split member by member.
+- **Commands are scoped to where a tag is born:** a DCMD writes only its device's tags, an
+  NCMD only node-level ones. Not in §6, but a host addresses a metric by its birth topic,
+  so anything else is a host bug or a probe.
+- Refusals are logged once per tag and reason, and counted in the node's status
+  (`commandsRefused`), ready for the management interface of §7.
