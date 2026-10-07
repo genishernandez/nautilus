@@ -295,6 +295,10 @@ func (d *Driver) SetWriteGate(g func() bool) { d.base.SetWriteGate(g) }
 // StructDefs is the contract type set.
 func (d *Driver) StructDefs() map[string]*ir.StructDef { return d.base.StructDefs() }
 
+// Connections and ConnectionUp are io.ConnectionReporter: one per BMC.
+func (d *Driver) Connections() []nio.Connection { return d.base.Connections() }
+func (d *Driver) ConnectionUp(id string) bool   { return d.base.ConnectionUp(id) }
+
 // Health is one row per BMC plus driver totals. A row with no current
 // error carries the last refused command instead (see source.writeErr):
 // a poll or transport error is the more pressing news, and it wins.
