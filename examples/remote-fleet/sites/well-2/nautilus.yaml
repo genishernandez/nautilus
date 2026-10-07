@@ -50,6 +50,7 @@ sparkplug:
   edge-node: Well2
   bdseq-file: .bdseq
   store-forward: 2000
+  writable: ["Pump1.SpeedSP"]   # the setpoint the SCADA dispatch commands; every other write is refused
   default-class: { deadband: 0.1, max-interval: 30s }
   classes:
     fast: { deadband: 0.0, max-interval: 5s }

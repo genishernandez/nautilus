@@ -1,7 +1,7 @@
 # booster-1 — a pressure-boosting station: two pumps under one PID
 # (pressure.fbd), a live Modbus discharge flow meter, and a Sparkplug B
-# publish where the flow meter's tags ride along as a Sparkplug DEVICE
-# ("plc1") — DBIRTH/DDEATH tracking the Modbus driver's own connection
+# publish where the flow meter is its own Sparkplug DEVICE ("FM1", its
+# Modbus source id) — DBIRTH/DDEATH tracking that meter's own connection
 # health. Everything else (the pumps, pressure, the shared tank level) is
 # simulated (sim.st). Publishes to the "Water" group as "Booster1".
 #
@@ -73,16 +73,18 @@ drivers:
     scan-rate: 1s
 
 # Sparkplug B: publishes this node's tags to the "Water" group as
-# "Booster1". `device: plc1` rides the Modbus driver's own tags
-# (FM1_FlowLps) along as a Sparkplug DEVICE, DBIRTH/DDEATH tracking the
-# driver's connection health.
+# "Booster1". Each field connection is its own Sparkplug DEVICE: the flow
+# meter's tags (FM1_FlowLps, FM1__Online) ride device "FM1", named after
+# its Modbus source, DBIRTH/DDEATH tracking that meter's connection. The
+# node is read-only except for `writable:` — the pump speed setpoints the
+# fleet's dispatch commands.
 sparkplug:
   broker: "tcp://127.0.0.1:1883"   # temporary local broker — see ../../README.md
   group-id: Water
   edge-node: Booster1
   bdseq-file: .bdseq
   store-forward: 2000
-  device: plc1
+  writable: ["Pump1.SpeedSP", "Pump2.SpeedSP"]
   default-class: { deadband: 0.5, max-interval: 30s }
   classes:
     fast: { deadband: 0.0, max-interval: 5s }   # the tank level: the dispatch's own input

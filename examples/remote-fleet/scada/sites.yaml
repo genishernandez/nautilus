@@ -46,8 +46,9 @@ sites:
       - { name: Pump1,     type: Pump, writable: [SpeedSP], desc: "Well 2 pump" }
 
   # Booster1 — a pressure-boosting station: two pumps (the same Pump
-  # Template), node-level pressure and tank instruments, plus a `plc1`
-  # device carrying its one real field device (a Modbus flow meter).
+  # Template), node-level pressure and tank instruments, plus an `FM1`
+  # device: its one real field device, a Modbus flow meter, which the
+  # edge publishes as a Sparkplug device named after its Modbus source.
   # unit:/desc: below are copied verbatim from booster-1's own local
   # tags (nautilus.yaml / tags/modbus.yaml) — see README.md's diff proof:
   # matching them here is what makes a live `--broker` import byte-
@@ -60,6 +61,6 @@ sites:
       - { name: Pump1,          type: Pump, writable: [SpeedSP], desc: "Booster 1 lead pump" }
       - { name: Pump2,          type: Pump, writable: [SpeedSP], desc: "Booster 1 lag pump" }
     devices:
-      - device: plc1
+      - device: FM1
         metrics:
           - { name: FM1_FlowLps, type: Double, unit: "L/s", desc: "Booster 1 discharge flow meter — discharge flow" }
