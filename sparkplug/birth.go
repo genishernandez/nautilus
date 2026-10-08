@@ -65,7 +65,7 @@ func (n *Node) birth() error {
 	}
 	var births []dbirth
 	for _, d := range n.devices {
-		healthy := d.Health == nil || d.Health()
+		healthy := deviceReady(d, func(name string) bool { _, ok := snap[name]; return ok })
 		n.devHealth[d.ID] = healthy
 		if !healthy {
 			continue
@@ -169,6 +169,30 @@ func (n *Node) metricFor(name string, v ir.Value) (Metric, error) {
 		t = n.rt.Tags().TypeOf(name)
 	}
 	return MetricFromTypedValue(name, v, t, tmplRef)
+}
+
+// deviceReady reports whether a device may be born: its connection is
+// healthy AND has delivered — at least one of the tags it contributes is in
+// the store. A driver connects before its first read
+// completes, and a DBIRTH sent in between carries no metrics, only for the
+// tags arriving a moment later to rebirth the whole node. A driver hands the
+// runtime one read's values together, so the first tag present means the
+// first read has landed; one that never reads must not keep the device
+// unborn, and a tag arriving after the birth is a new metric, which rebirths
+// as any new metric does. A device with no tags is ready when healthy.
+func deviceReady(d Device, has func(string) bool) bool {
+	if d.Health != nil && !d.Health() {
+		return false
+	}
+	if len(d.Tags) == 0 {
+		return true
+	}
+	for _, name := range d.Tags {
+		if has(name) {
+			return true
+		}
+	}
+	return false
 }
 
 // attachMeta states a tag's documentation as birth properties: `unit:` as

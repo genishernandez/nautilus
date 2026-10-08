@@ -42,6 +42,8 @@ type Config struct {
 
 // Device is a Sparkplug device behind this edge node — one io.Driver's worth
 // of tags, with a lifecycle (DBIRTH/DDEATH) that tracks its connection health.
+// It is born once healthy and its first read has reached the tag store
+// (deviceReady), so a DBIRTH never goes out empty ahead of the data.
 type Device struct {
 	ID     string      // Sparkplug device_id
 	Tags   []string    // tag-store names this device contributes

@@ -309,11 +309,12 @@ func (n *Node) collectChanged(snap map[string]runtime.Sample, now time.Time, own
 
 // deviceHealthLocked detects device health transitions and returns closures
 // that publish the corresponding DBIRTH/DDEATH after the lock is released.
+// "Healthy" is deviceReady: connected, and its first read delivered.
 // Caller holds n.mu.
 func (n *Node) deviceHealthLocked(snap map[string]runtime.Sample) []func(*Node) {
 	var events []func(*Node)
 	for _, d := range n.devices {
-		healthy := d.Health == nil || d.Health()
+		healthy := deviceReady(d, func(name string) bool { _, ok := snap[name]; return ok })
 		was := n.devHealth[d.ID]
 		if healthy == was {
 			continue
