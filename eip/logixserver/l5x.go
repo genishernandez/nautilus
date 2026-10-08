@@ -47,7 +47,7 @@ var builtinTypes = map[string][]MemberSpec{
 // SurfaceFromL5X derives a tag surface from a parsed L5X export:
 //
 //   - every DataType (and every Add-On Instruction, by its Input/Output
-//     parameters) becomes a template; a UDT's BIT overlays become BOOL
+//     parameters and then its local tags) becomes a template; a UDT's BIT overlays become BOOL
 //     members and their hidden host bytes are dropped. STRING, TIMER and
 //     COUNTER are supplied when referenced.
 //   - every controller-scope tag becomes a symbol; every program-scope tag
@@ -167,6 +167,19 @@ func (b *l5xBuilder) ensure(typeName string) bool {
 			}
 			src = append(src, MemberSpec{Name: p.Name, Datatype: p.DataType, Dimension: p.Dimension})
 		}
+		// Local tags follow the parameters: a controller's template for
+		// an AOI carries them as members of the backing tag (a Flow
+		// Totalizer's gettime : ARRAY [0..6] OF DINT is a local), and a
+		// browse of a real one sees them.
+		for _, lt := range a.LocalTags {
+			dim, ok := localDimension(lt.Dimensions)
+			if !ok {
+				b.skip(fmt.Sprintf("member %s.%s: multi-dimensional local %q is not served",
+					typeName, lt.Name, lt.Dimensions))
+				continue
+			}
+			src = append(src, MemberSpec{Name: lt.Name, Datatype: lt.DataType, Dimension: dim})
+		}
 	case builtinTypes[key] != nil:
 		typeName = key
 		src = builtinTypes[key]
@@ -191,6 +204,20 @@ func (b *l5xBuilder) ensure(typeName string) bool {
 	b.canon[key] = typeName
 	b.state[key] = 2
 	return true
+}
+
+// localDimension reads an AOI local tag's Dimensions ("", "7"): ok is false
+// for a multi-dimensional local, which a template member cannot be here.
+func localDimension(dims string) (int, bool) {
+	f := strings.Fields(dims)
+	switch len(f) {
+	case 0:
+		return 0, true
+	case 1:
+		n, err := strconv.Atoi(f[0])
+		return n, err == nil && n >= 0
+	}
+	return 0, false
 }
 
 func (b *l5xBuilder) skip(msg string) {
