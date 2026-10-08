@@ -1026,10 +1026,15 @@ func normalize(v any) any {
 // Sparkplug device gates DBIRTH/DDEATH with, for a driver that is one
 // connection as a whole. nil means the driver has no notion of a
 // connection (replay) and its device is always healthy.
+//
+// eip is healthy once connected AND primed: its snapshot fills tag by tag
+// during a poll, and on a controller where the first poll is slow (struct
+// roots refused, read member by member) a DBIRTH sent as soon as the link
+// came up carried only the tags read so far, and the rest rebirthed the node.
 func driverHealth(d nio.Driver) func() bool {
 	switch drv := d.(type) {
 	case *eip.Driver:
-		return func() bool { return drv.Health().Connected }
+		return func() bool { h := drv.Health(); return h.Connected && h.Primed }
 	case *sphost.Driver:
 		return func() bool { return drv.Status().Connected }
 	}
