@@ -61,8 +61,16 @@ func (n *Node) applyCommand(device string, payload Payload) {
 				"addressedTo", deviceLabel(device), "publishedOn", deviceLabel(owner))
 			continue
 		}
+		if isArrayType(m.Datatype) {
+			n.refuseCommand(arrayWriteRefusal, m.Name, "datatype", m.Datatype.String())
+			continue
+		}
 		if m.Datatype == spb.DataType_Template {
-			pruned, refused := n.writableTemplate(m.Name, m)
+			pruned, arrays := WithoutArrays(m.Name, m)
+			for _, r := range arrays {
+				n.refuseCommand(arrayWriteRefusal, r)
+			}
+			pruned, refused := n.writableTemplate(m.Name, pruned)
 			for _, r := range refused {
 				n.refuseCommand("not writable", r)
 			}
@@ -80,6 +88,46 @@ func (n *Node) applyCommand(device string, payload Payload) {
 			n.log.Debug("sparkplug: command write", "tag", m.Name, "value", m.Value)
 		}
 	}
+}
+
+// arrayWriteRefusal is the reason an array write is refused. Sparkplug can
+// carry one (an Int64Array in an NCMD), but the edge node does not apply
+// array writes yet, so a command carrying one is refused — counted and
+// logged like the write gate's refusals — rather than dropped silently or
+// half-applied.
+const arrayWriteRefusal = "array writes are not supported"
+
+// WithoutArrays strips the array members out of a template metric, at any
+// depth, and returns their dotted paths (under p) so each can be refused by
+// name — the edge for a command it receives, the host for one it sends. The
+// template's other members are kept; a non-template metric is returned as is.
+func WithoutArrays(p string, m Metric) (Metric, []string) {
+	t, ok := m.Value.(*Template)
+	if !ok || t == nil {
+		return m, nil
+	}
+	var kept []Metric
+	var arrays []string
+	for _, member := range t.Metrics {
+		mp := p + "." + member.Name
+		if isArrayType(member.Datatype) {
+			arrays = append(arrays, mp)
+			continue
+		}
+		if _, nested := member.Value.(*Template); nested {
+			pruned, a := WithoutArrays(mp, member)
+			arrays = append(arrays, a...)
+			member = pruned
+		}
+		kept = append(kept, member)
+	}
+	if len(arrays) == 0 {
+		return m, nil
+	}
+	out := *t
+	out.Metrics = kept
+	m.Value = &out
+	return m, arrays
 }
 
 // deviceLabel names a command destination for a log line: the device id, or

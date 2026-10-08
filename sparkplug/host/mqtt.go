@@ -25,6 +25,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -622,6 +623,19 @@ func (d *Driver) flushWrites() {
 		if err != nil {
 			d.log.Warn("host: encode write failed", "tag", name, "metric", b.Metric, "error", err)
 			continue
+		}
+		// A struct output whose type has array members goes out WITHOUT
+		// them: array writes are not supported, and a partial template is
+		// legal — the edge keeps the arrays it has. Each stripped member is
+		// counted and logged once, never sent mangled or dropped unsaid.
+		if pruned, arrays := sparkplug.WithoutArrays(b.Metric, m); len(arrays) > 0 {
+			m = pruned
+			d.mu.Lock()
+			d.stats.WritesRefused += uint64(len(arrays))
+			d.warnOnceLocked("arraywrite:"+name,
+				"host: struct write sent without its array members — array writes are not supported",
+				"tag", name, "metric", b.Metric, "members", strings.Join(arrays, ", "))
+			d.mu.Unlock()
 		}
 		m.Timestamp = uint64(time.Now().UnixMilli())
 		at[topic][b.Metric] = len(byTopic[topic])

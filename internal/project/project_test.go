@@ -413,6 +413,7 @@ func TestHostStatusHoldsStillWhileOnlyTrafficMoves(t *testing.T) {
 		{"a sequence gap", func(st *sphost.Status) { st.SeqGaps++ }},
 		{"an unmanifested metric", func(st *sphost.Status) { st.Unknown++ }},
 		{"a write dropped", func(st *sphost.Status) { st.WriteDrops++ }},
+		{"an array write refused", func(st *sphost.Status) { st.WritesRefused++ }},
 		{"a command parked for a dark site", func(st *sphost.Status) { st.QueuedWrites++ }},
 		{"a rebirth stamp", func(st *sphost.Status) { st.Nodes[1].BirthMs += 1000 }},
 		{"the broker dropping", func(st *sphost.Status) { st.Connected = false }},

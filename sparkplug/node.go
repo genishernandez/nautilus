@@ -94,6 +94,13 @@ type Node struct {
 	cmdWarned map[string]bool
 	// cmdRefused counts command writes the write gate refused (writegate.go).
 	cmdRefused uint64
+	// unpublishable names the tags a birth found no Sparkplug shape for (an
+	// array of structs, a multi-dimensional array — see publishable). They
+	// are left out of the birth and its data rather than failing it, so one
+	// such tag does not take every other metric down with it; each is
+	// logged once, and counted as born so it does not request a rebirth
+	// every tick. Kept across births.
+	unpublishable map[string]bool
 	// rebirthPending is set the moment a rebirth is requested — synchronously
 	// in the NCMD handler, before the rebirth itself is scheduled — and
 	// cleared by the birth that answers it. While it is set the node is not

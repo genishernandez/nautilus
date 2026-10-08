@@ -51,12 +51,9 @@ func (n *Node) birth() error {
 	// UDT template definitions precede instances so a host can resolve them.
 	nbirth = append(nbirth, n.templateDefs(snap, ts)...)
 	for _, name := range nodeTags {
-		m, err := n.birthMetric(name, snap[name], ts)
-		if err != nil {
-			n.mu.Unlock()
-			return err
+		if m, ok := n.birthMetric(name, snap[name], ts); ok {
+			nbirth = append(nbirth, m)
 		}
-		nbirth = append(nbirth, m)
 	}
 	nbirthSeq := n.seq
 
@@ -75,12 +72,9 @@ func (n *Node) birth() error {
 		}
 		var ms []Metric
 		for _, name := range devTags[d.ID] {
-			m, err := n.birthMetric(name, snap[name], ts)
-			if err != nil {
-				n.mu.Unlock()
-				return err
+			if m, ok := n.birthMetric(name, snap[name], ts); ok {
+				ms = append(ms, m)
 			}
-			ms = append(ms, m)
 		}
 		births = append(births, dbirth{device: d.ID, seq: n.nextSeq(), metrics: ms})
 	}
@@ -129,15 +123,26 @@ func (n *Node) birth() error {
 
 // birthMetric builds a birth metric (name + datatype + value + properties)
 // and seeds its RBE baseline + known table. Caller holds n.mu.
-func (n *Node) birthMetric(name string, v ir.Value, ts uint64) (Metric, error) {
-	tmplRef := ""
-	if v.Kind == ir.TypeStruct && v.Struct != nil {
-		tmplRef = v.Struct.Name
-	}
-	m, err := MetricFromValue(name, v, tmplRef)
+//
+// ok=false is a tag Sparkplug has no datatype for (an array of structs, say):
+// it is logged once and left out of the birth — not allowed to fail it, which
+// would take every other metric down with it — and marked known so it does
+// not ask for a rebirth on every tick (see Node.unpublishable).
+func (n *Node) birthMetric(name string, v ir.Value, ts uint64) (Metric, bool) {
+	m, err := n.metricFor(name, v)
 	if err != nil {
-		return Metric{}, err
+		if !n.unpublishable[name] {
+			n.log.Warn("sparkplug: tag left out of the birth — no Sparkplug datatype for it",
+				"tag", name, "error", err)
+		}
+		if n.unpublishable == nil {
+			n.unpublishable = map[string]bool{}
+		}
+		n.unpublishable[name] = true
+		n.known[name] = true
+		return Metric{}, false
 	}
+	delete(n.unpublishable, name)
 	m.Timestamp = ts
 	attachMeta(&m, name, n.rt.Meta())
 	n.known[name] = true
@@ -147,7 +152,23 @@ func (n *Node) birthMetric(name string, v ir.Value, ts uint64) (Metric, error) {
 	// values once — conservative, and births are rare.
 	st.record(v, 0, timeFromMs(ts))
 	n.rbeState[name] = st
-	return m, nil
+	return m, true
+}
+
+// metricFor builds the metric for one tag's value, birth or data. A struct
+// instance references its type's definition by name; an array takes its
+// element type from the tag's declared type when the value is empty and
+// cannot say.
+func (n *Node) metricFor(name string, v ir.Value) (Metric, error) {
+	tmplRef := ""
+	if v.Kind == ir.TypeStruct && v.Struct != nil {
+		tmplRef = v.Struct.Name
+	}
+	var t *ir.Type
+	if v.Kind == ir.TypeArray && len(v.Arr) == 0 {
+		t = n.rt.Tags().TypeOf(name)
+	}
+	return MetricFromTypedValue(name, v, t, tmplRef)
 }
 
 // attachMeta states a tag's documentation as birth properties: `unit:` as
