@@ -81,6 +81,57 @@ three edge sites (`examples/remote-fleet/sites/*`) — its README ("Proof:
 offline and live agree") walks both generation paths side by side, and
 `docs/design/examples-dogfood.md` has the walkthrough as actually run.
 
+## Types
+
+`types:` and `tags:` name Sparkplug datatypes. A metric lands in the tag
+store as the IEC type of the same width, and `sparkplug_types.st` declares
+it that way:
+
+| Sparkplug datatype | ST type |
+|---|---|
+| Boolean | `BOOL` |
+| Int8, Int16, Int32, Int64 | `SINT`, `INT`, `DINT`, `LINT` |
+| UInt8, UInt16, UInt32, UInt64 | `USINT`, `UINT`, `UDINT`, `ULINT` |
+| DateTime | `LINT`, epoch milliseconds |
+| Float, Double | `REAL`, `LREAL` |
+| String, Text, UUID | `STRING` |
+| Template | the generated `TYPE` |
+| an array (Int32Array, BooleanArray, …) | `ARRAY [0..n-1] OF` its element |
+
+The width is documentation: every integer is held as 64 bits and every
+real as a double. An array is written as its element plus a length, the
+way `eip_manifest.yaml` writes one:
+
+```yaml
+types:
+  - name: Get_TOD
+    fields:
+      - { name: EnableIn, type: Boolean }
+      - { name: gettime,  type: Int64, arraylen: 7 }    # ARRAY [0..6] OF LINT
+tags:
+  - { name: W6_Levels, node: W6, metric: Levels, type: Double, arraylen: 3 }
+```
+
+The length is the contract. An array metric or template member of any
+other length does not fit its binding: it is logged once and refused,
+and the tag keeps its last value. It is never truncated or resized. A
+template definition does not say how long its array members are, so
+`naut sparkplug import` reads the length from an instance in the same
+births. If two instances disagree, the import fails. An array member
+with no instance in the births, and an empty array, are reported and
+left out.
+
+Sparkplug has no array of Templates, and no array of Text or UUID. The
+manifest refuses those, along with `type: Int32Array` (write
+`type: Int32, arraylen: N`).
+
+Array writes are not supported yet, so an array binding cannot be
+`writable:`. The manifest refuses it, and the import binds an array a
+`--writable` glob matches as read-only and says so. A writable struct
+binding whose type has array members sends its commands without them.
+Each array member left out is logged once and counted under
+`writes refused` on `/api/drivers`.
+
 ## The `__Online`/`__Rebirth` companions
 
 The driver never invents or zeroes a value on death: **Sparkplug's own
