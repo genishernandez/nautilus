@@ -49,10 +49,13 @@ func (n *Node) birth() error {
 		{Name: "Node Control/Rebirth", Datatype: spb.DataType_Boolean, Timestamp: ts, Value: false},
 	}
 	// UDT template definitions precede instances so a host can resolve them.
-	nbirth = append(nbirth, n.templateDefs(snap, ts)...)
+	// Flattened, there are no Template metrics to resolve.
+	if !n.flatten {
+		nbirth = append(nbirth, n.templateDefs(snap, ts)...)
+	}
 	for _, name := range nodeTags {
 		if m, ok := n.birthMetric(name, snap[name], ts); ok {
-			nbirth = append(nbirth, m)
+			nbirth = append(nbirth, n.expand(m)...)
 		}
 	}
 	nbirthSeq := n.seq
@@ -73,7 +76,7 @@ func (n *Node) birth() error {
 		var ms []Metric
 		for _, name := range devTags[d.ID] {
 			if m, ok := n.birthMetric(name, snap[name], ts); ok {
-				ms = append(ms, m)
+				ms = append(ms, n.expand(m)...)
 			}
 		}
 		births = append(births, dbirth{device: d.ID, seq: n.nextSeq(), metrics: ms})
