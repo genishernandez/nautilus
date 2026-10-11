@@ -128,6 +128,10 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		}
 	}
 	go rt.Run(ctx)
+	// Optional read-only OPC UA server.
+	if proj.OPCUA != nil && proj.OPCUA.Enabled {
+		go startOPCUAServer(ctx, rt, proj.OPCUA)
+	}
 
 	// Sparkplug B retransmission, when the manifest asks for it.
 	spNode, err := proj.Sparkplug(rt)
