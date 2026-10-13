@@ -40,6 +40,9 @@ param(
     # Overridable so a second install (a test, or a second SDK revision on
     # one box) does not unregister the one already running.
     [string] $TaskName    = 'logixd',
+    # Stamped into the build (GET /v1/health reports it). Default: the VERSION
+    # file a release's logixd.zip carries; a clone has none.
+    [string] $Version     = '',
     [switch] $Uninstall
 )
 
@@ -188,7 +191,11 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 # hostfxr from that directory -- so self-contained ships the very trap the
 # preflight above refuses. See README, "Packaging: what does NOT work".
 $env:DOTNET_ROOT_X64 = $DotnetRoot
-& $dotnet publish $src -c Release -o $InstallDir --nologo -v quiet
+if (-not $Version -and (Test-Path (Join-Path $src 'VERSION'))) {
+    $Version = (Get-Content (Join-Path $src 'VERSION') -Raw).Trim()
+}
+$stamp = @(if ($Version) { "-p:Version=$($Version.TrimStart('v'))" })
+& $dotnet publish $src -c Release -o $InstallDir --nologo -v quiet @stamp
 if ($LASTEXITCODE -ne 0) { Die "build failed" }
 Ok "published (framework-dependent) to $InstallDir"
 
