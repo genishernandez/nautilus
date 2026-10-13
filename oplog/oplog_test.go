@@ -68,6 +68,11 @@ func (b *bench) close() {
 	for _, s := range b.servers {
 		s.Close()
 	}
+	// Release the log files too: Windows cannot delete an open file, so
+	// t.TempDir's cleanup fails if a node still holds one.
+	for _, n := range b.nodes {
+		n.Close()
+	}
 }
 
 func TestProposeFromFollowerCommitsEverywhere(t *testing.T) {
