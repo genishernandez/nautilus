@@ -49,6 +49,11 @@ func TestNewLeaderMissingCommitted(t *testing.T) {
 	}
 	os.Remove(filepath.Join(dir, "c.jsonl")) // node C rescheduled: its file is gone
 	ns = start(2, 2)                         // the lease moves to C, term 2
+	defer func() {
+		for _, n := range ns {
+			n.Close() // Windows cannot delete the temp dir under an open file
+		}
+	}()
 	for _, n := range ns {
 		n.Heartbeat(ctx)
 		_ = n.CatchUp(ctx)
