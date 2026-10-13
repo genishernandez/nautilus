@@ -67,6 +67,6 @@ test('functionItems: the project FUNCTIONs by declared name, then the standard o
 	const items = functionItems([{ name: 'ScaleAnalog', prefix: 's', detail: '(Raw, EngLo, EngHi) → REAL', result: 'REAL' }]);
 	assert.deepEqual(items[0], { name: 'ScaleAnalog', detail: '(Raw, EngLo, EngHi) → REAL' });
 	assert.ok(items.some((i) => i.name === 'LIMIT'));
-	assert.deepEqual(filterItems(items, 'Sca').map((i) => i.name), ['ScaleAnalog']);
+	assert.deepEqual(filterItems(items, 'Scal').map((i) => i.name), ['ScaleAnalog']);
 	assert.equal(functionItems(undefined).length, items.length - 1);
 });

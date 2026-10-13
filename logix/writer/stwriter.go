@@ -100,7 +100,8 @@ func lowerST(src string, opts Options) (*lowered, error) {
 		}
 	}
 	lw := &lowered{model: m, opts: opts, vars: map[string]ld.VarDecl{},
-		presetVars: map[string]bool{}, genNames: map[string]bool{}, st: true, aois: map[string]*aoiDef{}, src: src}
+		presetVars: map[string]bool{}, genNames: map[string]bool{}, st: true, aois: map[string]*aoiDef{}, src: src,
+		clocks: map[string]bool{}, clockUsed: map[string]bool{}}
 	if len(prog.FBDecls) > 0 || len(prog.TypeDecls) > 0 {
 		// Blocks and types declared beside an ST program are its own
 		// library.
@@ -274,6 +275,15 @@ func (w *stWriter) call(c *st.CallExpr, depth int) {
 		return
 	}
 	typ := strings.ToUpper(strings.TrimSpace(v.Type))
+	if typ == localTimeType {
+		if len(c.Args) > 0 || len(c.NamedArgs) > 0 {
+			w.diag(ruleFBPin, w.line, "%s: LOCAL_TIME takes no inputs", c.Name)
+			return
+		}
+		w.lw.clockUsed[strings.ToLower(c.Name)] = true
+		w.emitf(depth, "%s;", gsvLocalTime(c.Name+"[0]"))
+		return
+	}
 	structType := stBlockTypes[typ]
 	if structType == "" {
 		if w.lw.blockSourceExists(v.Type) {
@@ -434,6 +444,12 @@ func (w *stWriter) member(m *st.MemberExpr) string {
 	base, ok := m.Object.(*st.IdentExpr)
 	if ok {
 		if v, declared := w.lw.vars[strings.ToLower(base.Name)]; declared {
+			if isLocalTime(v.Type) {
+				if s, ok := w.lw.localTimeMember(base.Name, m.Member, w.line, ""); ok {
+					return s
+				}
+				return "0"
+			}
 			if structType := stBlockTypes[strings.ToUpper(strings.TrimSpace(v.Type))]; structType != "" {
 				if to, ok := stMemberRewrite[structType][strings.ToUpper(m.Member)]; ok {
 					return w.ref(base.Name) + "." + to
@@ -453,6 +469,8 @@ func (w *stWriter) callExpr(c *st.CallExpr) string {
 		args = append(args, w.expr(a))
 	}
 	switch {
+	case isFirstScan(name, strings.Join(args, "")):
+		return firstScanFlag
 	case stFuncs[name]:
 		return name + "(" + strings.Join(args, ", ") + ")"
 	case name == "EXPT" && len(args) == 2:

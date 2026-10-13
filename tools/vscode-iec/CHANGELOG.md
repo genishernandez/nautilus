@@ -15,6 +15,14 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   diagnostics `naut check` already printed for such a project; they show
   once the file compiles. Needs a `naut` newer than 0.16.1.
 
+- **`FIRST_SCAN()` and `LOCAL_TIME`** in completion, signature help and
+  the diagram editors' palettes. `FIRST_SCAN()` is TRUE for a program's
+  first scan after a start or download (a ladder function contact, or
+  `IF FIRST_SCAN() THEN` in ST); `LOCAL_TIME` is a block whose outputs are
+  the calendar now (`YEAR` … `MILLISECOND`), sitting on the rail in a rung.
+  On a Logix target they are `S:FS` and `GSV(WallClockTime,,
+  LocalDateTime,…)`. Needs a `naut` newer than 0.16.1.
+
 ## [0.15.0] - 2026-10-12
 
 The pre-release line after the stable release 0.14.0. Same contents as
