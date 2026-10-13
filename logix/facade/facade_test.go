@@ -182,6 +182,56 @@ func TestWritesReachTheController(t *testing.T) {
 	waitFor(t, "write read back by the poll", func() bool { return state(t, base)["Speed"] == 55.5 })
 }
 
+// The write connection carries nothing between writes, so the controller
+// times it out (32 s for the Forward Open serve sends; 30 s on the
+// emulator). The first write after that must still land, not answer EOF.
+func TestAWriteSurvivesADroppedConnection(t *testing.T) {
+	base, store, f := startFacade(t)
+	waitFor(t, "first poll", func() bool { return state(t, base)["Speed"] == 10.0 })
+	if code, body := post(t, base, `{"name": "Speed", "value": 1}`); code != http.StatusNoContent {
+		t.Fatalf("first write = %d %s", code, body)
+	}
+
+	// The connection goes away under the writer, which has not noticed.
+	f.w.mu.Lock()
+	_ = f.w.ctrl.Close()
+	f.w.mu.Unlock()
+	if code, body := post(t, base, `{"name": "Speed", "value": 2}`); code != http.StatusNoContent {
+		t.Fatalf("write after the drop = %d %s", code, body)
+	}
+	if _, got, _ := store.Resolve("Speed"); fmt.Sprint(got) != "2" {
+		t.Errorf("controller holds Speed = %v, want 2", got)
+	}
+}
+
+func TestAnIdleWriteConnectionIsReplaced(t *testing.T) {
+	base, store, f := startFacade(t)
+	waitFor(t, "first poll", func() bool { return state(t, base)["Speed"] == 10.0 })
+	f.w.mu.Lock()
+	f.w.idle = 50 * time.Millisecond
+	f.w.mu.Unlock()
+	if code, body := post(t, base, `{"name": "Speed", "value": 3}`); code != http.StatusNoContent {
+		t.Fatalf("first write = %d %s", code, body)
+	}
+	f.w.mu.Lock()
+	first := f.w.ctrl
+	f.w.mu.Unlock()
+
+	time.Sleep(100 * time.Millisecond)
+	if code, body := post(t, base, `{"name": "Speed", "value": 4}`); code != http.StatusNoContent {
+		t.Fatalf("write after idle = %d %s", code, body)
+	}
+	f.w.mu.Lock()
+	again := f.w.ctrl
+	f.w.mu.Unlock()
+	if again == first {
+		t.Error("the idle connection was reused, not replaced")
+	}
+	if _, got, _ := store.Resolve("Speed"); fmt.Sprint(got) != "4" {
+		t.Errorf("controller holds Speed = %v, want 4", got)
+	}
+}
+
 func TestWritesThatCannotWork(t *testing.T) {
 	base, _, _ := startFacade(t)
 	for body, want := range map[string]string{
