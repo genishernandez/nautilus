@@ -7,7 +7,7 @@ publish workflows make registries catch up.
 
 | Artifact | Version lives in | Ships when | Where |
 |---|---|---|---|
-| CLI + Go libraries | git tag `v*` | you push the tag | GitHub Release: GoReleaser binaries + a pre-release VSIX |
+| CLI + Go libraries | git tag `v*` | you push the tag | GitHub Release: GoReleaser binaries |
 | VS Code extension — **pre-release** (odd minor, `0.11.x`) | `tools/vscode-iec/package.json` on main | a version bump lands on main (`publish.yml`) | Marketplace + Open VSX, pre-release channel |
 | VS Code extension — **stable** (even minor, `0.10.x`) | git tag `vscode-v<X.Y.Z>` | you push the tag (`vscode-stable.yml`) | Marketplace + Open VSX, stable channel; GitHub Release with the VSIX |
 | `@joyautomation/nautilus-hmi` | `hmi/package.json` | a version bump lands on main | npm |
@@ -98,12 +98,16 @@ git push origin v0.3.2
 ```
 
 That triggers `release.yml`: GoReleaser builds cross-platform CLI binaries
-onto a GitHub Release (the tag versions the CLI via ldflags), and a VSIX —
-built at the extension's own package.json version, i.e. main's pre-release
-line, and packaged as a pre-release — is attached for offline installs. The
-tag versions the **Go module and CLI only**; it does not touch the extension
-or HMI versions. (`release.yml` ignores `vscode-v*` tags, which GitHub's
-`v*` filter would otherwise match.)
+onto a GitHub Release (the tag versions the CLI via ldflags). The tag
+versions the **Go module and CLI only**; it does not touch the extension or
+HMI versions. (`release.yml` ignores `vscode-v*` tags, which GitHub's `v*`
+filter would otherwise match.)
+
+Each GitHub Release carries only its own artifact. A CLI release has no
+VSIX: one built at a `v*` tag is main's package.json at that moment, which
+can predate the extension's release PR and so name the wrong version. For an
+offline install, take the VSIX from the latest `vscode-v*` release (stable).
+In the CLI release notes, name the extension versions that go with it.
 
 ## Guard rails
 

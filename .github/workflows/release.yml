@@ -8,6 +8,12 @@ on:
 permissions:
   contents: write # create the GitHub Release and upload assets
 
+# A CLI release carries the CLI only. The extension has its own releases:
+# stable VSIXes are on the vscode-v* GitHub Releases (vscode-stable.yml) and
+# pre-releases ship from main (publish.yml). A VSIX built here would be main's
+# package.json at tag time, which can predate the release PR's bump and then
+# names the wrong version (v0.16.0 carried a "0.13.2" that was 0.13.3 code).
+
 jobs:
   # CLI binaries → GitHub Release. Needs no secrets beyond the automatic
   # GITHUB_TOKEN, so this works the moment you push a tag.
@@ -34,25 +40,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # A convenience VSIX attached to the Release, built at the extension's own
-  # package.json version. That is main's version, which is always the
-  # pre-release line (odd minor), so it is always packaged as a pre-release.
-  # Registry publishing is NOT driven by v* tags: pre-releases ship from main
-  # (publish.yml), stable from vscode-v* tags (vscode-stable.yml). See
-  # RELEASING.md.
-  extension:
-    name: VS Code extension (VSIX on the Release)
-    runs-on: ubuntu-latest
-    needs: cli # the Release must exist before we upload the VSIX to it
-    steps:
-      - uses: actions/checkout@v4
-      - name: Package VSIX (pre-release)
-        id: pkg
-        uses: ./.github/actions/vscode-package
-        with: {pre-release: 'true'}
-      - name: Attach VSIX to the Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VSIX: ${{ steps.pkg.outputs.vsix }}
-        run: gh release upload "$GITHUB_REF_NAME" "$VSIX" --clobber
