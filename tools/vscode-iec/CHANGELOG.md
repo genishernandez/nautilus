@@ -5,6 +5,12 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-12
+
+The pre-release line after the stable release 0.14.0. Same contents as
+[0.14.0]; pre-release builds from `main` carry new work under
+`[Unreleased]` from here on. Requires naut 0.16.0 or later.
+
 ## [0.14.0] - 2026-10-12
 
 The second stable release, for everyone on the stable channel since
