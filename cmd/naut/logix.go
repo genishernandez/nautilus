@@ -288,7 +288,8 @@ func runLogixImportProject(f *l5x.File, dir string, opts importer.Options) int {
 		}
 		fmt.Println("wrote", filepath.Join(dir, filepath.FromSlash(name)))
 	}
-	fmt.Printf("%d ladder routines, %d complete; %d rungs, %d carried\n", p.Routines, p.Complete, p.Rungs, p.Imported)
+	fmt.Printf("%s, %d complete; %s, %d carried\n",
+		plural(p.Routines, "ladder routine"), p.Complete, plural(p.Rungs, "rung"), p.Imported)
 	if rs := p.Reasons(); len(rs) > 0 {
 		fmt.Println("rungs not carried, by reason:", strings.Join(rs, ", "))
 	}
@@ -297,8 +298,11 @@ func runLogixImportProject(f *l5x.File, dir string, opts importer.Options) int {
 			fmt.Println("  note:", n)
 		}
 	}
-	if p.Complete < p.Routines {
-		fmt.Printf("%d routine(s) are incomplete: their files say so in the header, and `naut logix deploy` of one would leave logic out.\n", p.Routines-p.Complete)
+	switch n := p.Routines - p.Complete; {
+	case n == 1:
+		fmt.Println("1 routine is incomplete: its file says so in the header, and `naut logix deploy` of it would leave logic out.")
+	case n > 1:
+		fmt.Printf("%d routines are incomplete: their files say so in the header, and `naut logix deploy` of one would leave logic out.\n", n)
 	}
 	return 0
 }

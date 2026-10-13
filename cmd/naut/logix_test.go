@@ -180,8 +180,17 @@ func captureStdout(t *testing.T, fn func() int) string {
 // the Logix target, which is the point of a brownfield import.
 func TestLogixImportProject(t *testing.T) {
 	dir := t.TempDir()
-	if code := runLogixImport([]string{"--project", dir, filepath.Join("..", "..", "lang", "l5x", "testdata", "demoline.L5X")}); code != 0 {
+	var code int
+	out := captureStdout(t, func() int {
+		code = runLogixImport([]string{"--project", dir, filepath.Join("..", "..", "lang", "l5x", "testdata", "demoline.L5X")})
+		return code
+	})
+	if code != 0 {
 		t.Fatalf("exit %d", code)
+	}
+	// The summary counts in words: one routine is not "1 ladder routines".
+	if want := "1 ladder routine, 1 complete; 2 rungs, 2 carried\n"; !strings.Contains(out, want) {
+		t.Errorf("summary: want %q in\n%s", want, out)
 	}
 	for _, name := range []string{"nautilus.yaml", "tags/logix.yaml", "MainProgram.ld"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {

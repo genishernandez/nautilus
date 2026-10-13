@@ -13,7 +13,99 @@ program of record; nautilus supplies the software engineering around it.
 Logix project from it, is [Authoring for Logix](/guides/logix-authoring/),
 which is experimental.)
 
-There are two halves, and the first needs nothing from Rockwell at all.
+## From an `.ACD` to live rungs, in three steps
+
+The whole path, start to finish. Each step names the release it needs;
+[install the latest `naut`](/getting-started/#1-install-the-cli) and every
+step works.
+
+### 1. Convert the project to text: `naut logix convert`
+
+**Needs:** `naut` v0.11.0 or later, and a [`logixd`
+agent](#half-two-driving-a-project--the-logixd-agent) on a Windows machine
+with a licensed Studio 5000 and the Logix Designer SDK.
+
+An `.ACD` is a binary database only Logix Designer can open. `logixd` asks
+the SDK to save it as L5X: the file goes up, the L5X comes back, and
+`naut` runs on any OS.
+
+```bash
+export NAUTILUS_LOGIXD_URL=http://plc-box:8188    # where logixd listens
+export NAUTILUS_LOGIXD_TOKEN=...                  # %ProgramData%\logixd\logixd.token on that machine
+
+naut logix convert DemoLine.ACD DemoLine.L5X
+
+# A whole folder of projects:
+for f in projects/*.ACD; do naut logix convert "$f" "${f%.*}.L5X"; done
+```
+
+`--agent` and `--token` set the same two things per command. With neither,
+`naut` tries `http://127.0.0.1:8188`, so if `logixd` stays on loopback
+(the installer's default) reach it through an SSH tunnel instead of opening
+a port:
+
+```bash
+ssh -N -L 8188:127.0.0.1:8188 you@plc-box &       # Windows OpenSSH Server
+naut logix convert DemoLine.ACD DemoLine.L5X      # token still required
+```
+
+`logixd` is not a download: it links Rockwell's SDK client, which comes
+only with the SDK. It is built from source on the licensed machine by
+`tools\logixd\install.ps1`, from a clone of the repository or from the
+**Source code (zip)** on the [release
+page](https://github.com/joyautomation/nautilus/releases/latest). See
+[Install it](#install-it).
+
+### 2. Import it as a nautilus project: `naut logix import --project`
+
+**Needs:** `naut` v0.16.0 or later. No Rockwell software.
+
+```bash
+naut logix import --project demoline DemoLine.L5X
+```
+
+```
+wrote demoline/MainProgram.ld
+wrote demoline/nautilus.yaml
+wrote demoline/tags/logix.yaml
+1 ladder routine, 1 complete; 2 rungs, 2 carried
+```
+
+Every ladder routine becomes a nautilus PROGRAM in ladder source, with its
+rung comments, its tags' descriptions and their initial values
+(`HiLevelSP : REAL := 85.0`). The manifest gets `target: logix`, so
+`naut check --target logix demoline` passes on what came across. A rung
+with no nautilus form is kept as a comment and counted under *not
+carried*, never guessed at. What the import covers, and what you do with
+the project afterwards, is in [Authoring for Logix → Bringing an existing
+program in](/guides/logix-authoring/#bringing-an-existing-program-in).
+
+### 3. Watch it run: `naut logix serve` and the editor
+
+**Needs:** `naut` v0.14.0 or later, and the VS Code extension 0.14.0 or
+later (stable channel; on the pre-release channel, 0.13.1 or later). An
+older extension draws the rungs but shows no values on program-scope tags.
+
+```bash
+naut logix serve --host 10.0.0.20 --l5x DemoLine.L5X
+```
+
+Set `nautilus.runtimeUrl` to `http://localhost:8080` and open
+`DemoLine.L5X`. The rungs light up with the controller's values. Program
+tags are served as `<Program>_<Tag>` (`MainProgram_StartPB`), and the
+ladder view finds them from the rung's own `StartPB`. To write a setpoint,
+click the pencil on a tag in the **Live Values** panel (or right-click it,
+*Set Live Value…*); the write goes to the controller. [Live values from a running
+controller](#live-values-from-a-running-controller) has the details.
+
+No controller to hand? `naut logix emulate --l5x DemoLine.L5X` serves the
+export's tags as a ControlLogix on `127.0.0.1:44818`; point `serve` at it
+with `--host 127.0.0.1`.
+
+---
+
+The rest of this page is the reference behind those steps. There are two
+halves, and the first needs nothing from Rockwell at all.
 
 ## Half one: reading L5X — no Rockwell software
 
@@ -153,6 +245,13 @@ your laptop / CI  ──HTTPS+token──▶  logixd (Windows)  ──gRPC──
 | OS | 64-bit only. |
 
 ### Install it
+
+No `logixd` binary is published: it links the SDK's .NET client, which is
+Rockwell's and comes with the SDK install, so it is built on the machine
+that has it. Get the source there, either `git clone
+https://github.com/joyautomation/nautilus` or the **Source code (zip)** of
+the [release](https://github.com/joyautomation/nautilus/releases/latest)
+that matches your `naut`, then:
 
 ```powershell
 cd tools\logixd
