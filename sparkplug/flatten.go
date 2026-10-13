@@ -19,13 +19,14 @@ import (
 //	                                          P101/Speed     Double
 //	                                          P101/Valve/Pos Double  (nested UDT)
 //
-// No Template definitions are published. Report by exception still decides per tag, so a
+// No Template definitions are published. Arrays stay array metrics, at
+// whatever depth they sit. Report by exception still decides per tag, so a
 // class or deadband assigned to P101 governs all of its members; what changes
 // is the message: a data message carries only the members that moved since
 // the last publish (every member when the heartbeat forces one).
 //
 // Commands address members the same way: an NCMD for "P101/Speed" writes
-// P101.Speed.
+// P101.Speed, through the same write gate a Template command goes through.
 
 // WithFlattenUDTs publishes UDT (struct) tags as one metric per member rather
 // than as Sparkplug Templates. See flatten.go.
@@ -80,8 +81,8 @@ func changedLeaves(cur, prev []Metric) []Metric {
 }
 
 // memberPath turns a flattened command metric name back into the dotted path
-// the tag store uses: "P101/Speed" → "P101.Speed". Tag and member names are
-// identifiers, so a "/" can only be a level separator.
+// the tag store and the write gate use: "P101/Speed" → "P101.Speed". Tag and
+// member names are identifiers, so a "/" can only be a level separator.
 func memberPath(name string) string {
 	return strings.ReplaceAll(name, "/", ".")
 }

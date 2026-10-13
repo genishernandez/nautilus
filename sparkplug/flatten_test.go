@@ -153,6 +153,26 @@ func TestFlattenCommandWritesMember(t *testing.T) {
 	}
 }
 
+// TestFlattenCommandThroughWriteGate — the gate's member patterns apply to
+// flattened names exactly as to Template members.
+func TestFlattenCommandThroughWriteGate(t *testing.T) {
+	n, _ := newFlatNode(t, WithWritable("Motor1.START"))
+	n.applyCommand("", Payload{Metrics: []Metric{
+		{Name: "Motor1/START", Datatype: spb.DataType_Boolean, Value: true},
+		{Name: "Motor1/Speed", Datatype: spb.DataType_Double, Value: 0.0},
+	}})
+	m := motor1(t, n)
+	if !fld(t, m, "START").B {
+		t.Error("Motor1/START refused, want written")
+	}
+	if got := fld(t, m, "Speed"); got.F != 1450 {
+		t.Errorf("Motor1/Speed written to %v, want refused", got.F)
+	}
+	if got := n.Status().CommandsRefused; got != 1 {
+		t.Errorf("CommandsRefused = %d, want 1", got)
+	}
+}
+
 // TestFlattenCommandGateAndDevice — a flattened write passes the device check
 // and the write gate under its member path: a DCMD to the device that
 // publishes Motor1 writes a member `writable` opens, and is refused for one
