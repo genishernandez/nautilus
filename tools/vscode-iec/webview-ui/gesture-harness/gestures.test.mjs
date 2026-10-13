@@ -587,9 +587,15 @@ test('a doc that never parsed shows the error and "Reopen as Text Editor", which
 	await withEditor(twoTankDoc(), async (ed) => {
 		// Fresh editor state: simulate a first load that failed by clearing the
 		// doc the harness delivered, then sending only the error.
-		await ed.b.eval('location.reload(), true');
+		// Mark the old page, so the wait below cannot be satisfied by it: right
+		// after reload() the old document can still answer, with an .editor and
+		// no reload yet, and delivering then raced the new page's __deliver.
+		await ed.b.eval('window.__beforeReload = true, location.reload(), true');
 		for (let i = 0; i < 100; i++) {
-			if (await ed.b.eval("!!document.querySelector('.editor')")) break;
+			const ready = await ed.b
+				.eval("!window.__beforeReload && typeof window.__deliver === 'function' && !!document.querySelector('.editor')")
+				.catch(() => false); // mid-navigation
+			if (ready) break;
 			await new Promise((r) => setTimeout(r, 50));
 		}
 		await ed.deliver({ type: 'mimicError', message: 'not valid JSON: Unexpected end of input' });
