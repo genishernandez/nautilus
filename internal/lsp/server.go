@@ -167,7 +167,8 @@ func (s *Server) setDocument(uri, text string) {
 		return
 	}
 	var e env
-	if path, ok := uriToPath(uri); ok {
+	path, isFile := uriToPath(uri)
+	if isFile {
 		e = s.envFor(uri, path)
 	}
 	doc := &document{text: text, an: analyzerFor(uri)(text, e)}
@@ -177,8 +178,14 @@ func (s *Server) setDocument(uri, text string) {
 		doc.an.carryDeclarations(&prev.an)
 	}
 	s.docs[uri] = doc
+	diags := doc.an.Diags
+	// A project deployed to a Logix controller also gets the target's
+	// rules, on a buffer that compiles (logix.go).
+	if isFile && !hasErrors(diags) && logixTarget(path) {
+		diags = append(diags[:len(diags):len(diags)], logixDiagnostics(path, text, e.libs)...)
+	}
 	s.w.notify("textDocument/publishDiagnostics", PublishDiagnosticsParams{
-		URI: uri, Diagnostics: nonNil(doc.an.Diags),
+		URI: uri, Diagnostics: nonNil(diags),
 	})
 	s.publishLibDiags(uri, doc.an.libDiags)
 }
@@ -186,8 +193,9 @@ func (s *Server) setDocument(uri, text string) {
 // envFor is the project a document at path compiles in: its libraries
 // (unsaved buffers win over disk) and the manifest's tags.
 func (s *Server) envFor(uri, path string) env {
-	prelude, _, segs := stproject.PreludeParts(path, s.otherBuffers(uri))
+	prelude, libs, segs := stproject.PreludeParts(path, s.otherBuffers(uri))
 	return env{
+		libs:         libs,
 		prelude:      prelude,
 		preludeLines: strings.Count(prelude, "\n"),
 		segs:         segs,
