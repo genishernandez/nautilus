@@ -82,9 +82,11 @@ program in](/guides/logix-authoring/#bringing-an-existing-program-in).
 
 ### 3. Watch it run: `naut logix serve` and the editor
 
-**Needs:** `naut` v0.14.0 or later, and the VS Code extension 0.14.0 or
+**Needs:** `naut` v0.16.1 or later, and the VS Code extension 0.14.0 or
 later (stable channel; on the pre-release channel, 0.13.1 or later). An
 older extension draws the rungs but shows no values on program-scope tags.
+An older `naut` (from v0.14.0) serves values, but the first write after
+half a minute without one is refused with `EOF`.
 
 ```bash
 naut logix serve --host 10.0.0.20 --l5x DemoLine.L5X
