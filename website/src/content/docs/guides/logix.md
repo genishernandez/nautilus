@@ -49,12 +49,8 @@ ssh -N -L 8188:127.0.0.1:8188 you@plc-box &       # Windows OpenSSH Server
 naut logix convert DemoLine.ACD DemoLine.L5X      # token still required
 ```
 
-`logixd` is not a download: it links Rockwell's SDK client, which comes
-only with the SDK. It is built from source on the licensed machine by
-`tools\logixd\install.ps1`, from a clone of the repository or from the
-**Source code (zip)** on the [release
-page](https://github.com/joyautomation/nautilus/releases/latest). See
-[Install it](#install-it).
+`logixd` installs with one command on that machine; see [Install
+it](#install-it).
 
 ### 2. Import it as a nautilus project: `naut logix import --project`
 
@@ -242,18 +238,32 @@ your laptop / CI  ──HTTPS+token──▶  logixd (Windows)  ──gRPC──
 |---|---|
 | Studio 5000 Logix Designer | **v31+**; **v37+** for `build`. Projects older than v31 are not supported. |
 | Logix Designer SDK | 2.02.00 or later (installs `LdSdkService`). |
-| .NET SDK | 10.x, to build `logixd`. |
+| .NET SDK | 10.x, to build `logixd`. The one-line install adds a private one if there is none. |
 | FactoryTalk Linx | The SDK supports **only** FactoryTalk Linx — RSLinx is not supported. Your controller must be visible in the FT Linx Network Browser. |
 | OS | 64-bit only. |
 
 ### Install it
 
-No `logixd` binary is published: it links the SDK's .NET client, which is
-Rockwell's and comes with the SDK install, so it is built on the machine
-that has it. Get the source there, either `git clone
-https://github.com/joyautomation/nautilus` or the **Source code (zip)** of
-the [release](https://github.com/joyautomation/nautilus/releases/latest)
-that matches your `naut`, then:
+In an **elevated** PowerShell on the licensed machine:
+
+```powershell
+irm https://github.com/joyautomation/nautilus/releases/latest/download/install-logixd.ps1 | iex
+```
+
+To pass options (any of `install.ps1`'s; `-Version 0.16.2` pins a release):
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/joyautomation/nautilus/releases/latest/download/install-logixd.ps1))) -Listen 0.0.0.0 -Port 8188
+```
+
+`logixd` is published as source, not as a binary. It links the SDK's .NET
+client, which is Rockwell's and comes only with the SDK install, so it is
+built on the machine that has it and nothing of Rockwell's is ever
+redistributed. The script downloads `logixd.zip` from the release (v0.16.2
+and later carry it), installs a private .NET 10 SDK under
+`C:\Program Files\logixd-dotnet` if the machine has none (not on `PATH`,
+used only by `logixd`), and runs `install.ps1` from the zip. From a clone,
+run that directly:
 
 ```powershell
 cd tools\logixd

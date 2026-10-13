@@ -7,7 +7,7 @@ publish workflows make registries catch up.
 
 | Artifact | Version lives in | Ships when | Where |
 |---|---|---|---|
-| CLI + Go libraries | git tag `v*` | you push the tag | GitHub Release: GoReleaser binaries |
+| CLI + Go libraries | git tag `v*` | you push the tag | GitHub Release: GoReleaser binaries, `logixd.zip` + `install-logixd.ps1` |
 | VS Code extension — **pre-release** (odd minor, `0.11.x`) | `tools/vscode-iec/package.json` on main | a version bump lands on main (`publish.yml`) | Marketplace + Open VSX, pre-release channel |
 | VS Code extension — **stable** (even minor, `0.10.x`) | git tag `vscode-v<X.Y.Z>` | you push the tag (`vscode-stable.yml`) | Marketplace + Open VSX, stable channel; GitHub Release with the VSIX |
 | `@joyautomation/nautilus-hmi` | `hmi/package.json` | a version bump lands on main | npm |
@@ -98,7 +98,11 @@ git push origin v0.3.2
 ```
 
 That triggers `release.yml`: GoReleaser builds cross-platform CLI binaries
-onto a GitHub Release (the tag versions the CLI via ldflags). The tag
+onto a GitHub Release (the tag versions the CLI via ldflags), and attaches
+`logixd.zip` (`tools/logixd` with a `VERSION` file) and
+`install-logixd.ps1`, the one-command installer the Logix guide points at.
+logixd is source on purpose: it links the Logix Designer SDK's client, which
+only the SDK install provides. The tag
 versions the **Go module and CLI only**; it does not touch the extension or
 HMI versions. (`release.yml` ignores `vscode-v*` tags, which GitHub's `v*`
 filter would otherwise match.)
