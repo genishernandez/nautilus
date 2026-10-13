@@ -5,6 +5,414 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-12
+
+The second stable release, for everyone on the stable channel since
+[0.10.0]. Everything below shipped first in the pre-releases `0.13.1`,
+`0.13.2` and `0.13.3` (kept in full further down this file) and is
+consolidated here, newest first. **Requires naut 0.16.0 or later.**
+
+Highlights: **live values on a Logix routine find program-scope tags**, so
+an `.L5X` opened against `naut logix serve` shows the controller's values
+on every rung; the whole IEC conversion matrix, enumerations, and
+case-insensitive names; signature help, the Outline and Find All
+References, including from the diagrams; a Force table and online SFC
+step and transition commands; SFC timed qualifiers and step supervision;
+ladder, FBD and SFC editor parity work; the Testing view's value-first
+failure messages; and a JSON Schema for `*.scene.json`.
+
+### Added
+
+- **The whole IEC conversion matrix.** Every `<A>_TO_<B>` between `BOOL`,
+  the integers, the bit strings, `REAL`/`LREAL`, `TIME`/`LTIME` and
+  `STRING` (`DINT_TO_REAL`, `WORD_TO_INT`, `STRING_TO_TIME`, …), the
+  overloaded `TO_<type>(x)` and `TRUNC_<int>` — offered by completion and
+  signature help. Narrowing wraps to the target width as on Codesys
+  (`DINT_TO_INT(70000)` is 4464); a REAL or a STRING with no value in the
+  target faults the scan. `REAL_TO_WORD` and its kin, which the standard
+  does not define, are a compile error that says what to write. Needs a
+  `naut` 0.16.0 or later. (#244)
+
+- **A write into an enumerated member of a struct lands named.** Set Value
+  or Force of `Recipe.Mode` (or an array element, `Recipe.Steps[2].Mode`)
+  with the member's integer now stores the member — the pill shows `Run`,
+  not an unnamed `10` — as a write of a whole enumerated tag already did.
+  The controller also takes the member name over the API (a name that is
+  no member is refused with the list). Needs `naut` 0.16.0 or later.
+  (#247)
+
+- **Manifest tags are in scope in every program without `VAR_EXTERNAL`**,
+  the way a TIA tag table, a Codesys GVL or Logix controller scope is.
+  Hover, completion (with the tag's unit and description), go-to-definition
+  (the tag's entry in `nautilus.yaml`), Find All References and rename all
+  reach a tag a program names without declaring it. A tag's type is its
+  `type:`, else what its `init:` implies; `VAR_EXTERNAL` stays legal and
+  must agree with a stated `type:`. A program's own local of a tag's name
+  shadows it, with a warning. Function blocks still name the tags they use
+  in their own `VAR_EXTERNAL`. In the diagrams: the ladder's **declare …**
+  offer no longer lists a typed tag, an SFC association naming a tag is no
+  longer taken for a new action, and the FBD palette and retags offer the
+  manifest's tags. `naut new`'s minimal programs drop their `VAR_EXTERNAL`
+  blocks. Needs `naut` 0.16.0 or later. (#177, #210)
+
+- **A tag's `type:` takes any IEC elementary type** (`INT`, `BOOL`, `REAL`,
+  `TIME`, `STRING`, …) or an `ARRAY`, as well as a UDT, and `init:` must
+  agree with it. A `TIME` member of a struct tag seeds from `T#2s`, `2s` or
+  milliseconds; an array member from a list. (#200, #201)
+
+- **A Codesys-style GVL file** — a library `.st` holding only a
+  `VAR_GLOBAL` block — declares its globals for every program instead of
+  breaking each one with "undeclared identifier <ProgramName>". (#175)
+
+- **Enumerated types show their member names live.** A variable or tag of
+  an enumeration (`TYPE Mode : (Idle, Run, Fault); END_TYPE`) shows `Run`,
+  not `1`, in the inline live values, the Live Values panel and the
+  acceptance test results; completion after `Mode#` lists the members, and
+  the project's constants and members join the completion list. Needs a
+  `naut` 0.16.0 or later. (#238)
+
+- **An enumerated value reads as a member, not as text.** Live values used
+  to quote an enumeration's member like a `STRING` (`"Run"`), so the two
+  could not be told apart. The inline pills, the Live Values panel and the
+  ladder, FBD and SFC live values now show it bare (`Run`) in its own style
+  (blue italic; the enum icon in the panel), with the type on hover
+  (`Mode · enum`); a `STRING` keeps its quotes. **Set Live Value…** and
+  **Force…** on an enumerated tag offer its members as a pick list, and
+  still take a typed member, `Mode#Run` or an integer; on a `STRING` tag
+  their input takes a quoted string (`'text'`, the pill's own form), which
+  it used to refuse as not a number. The types come from
+  the controller's `/api/meta`, so this needs `naut` 0.16.0 or later;
+  against an older one values show as before. (#246)
+
+- **`REGION … END_REGION` folds and shows in the Outline.** TIA SCL's
+  regions group statements: each region is a fold range and an Outline
+  entry (nested regions under theirs, under their POU), and `REGION` /
+  `END_REGION` are highlighted. The Outline needs `naut` 0.16.0 or
+  later. (#202)
+
+- **FBD networks.** A `.fbd` body can be divided into numbered networks
+  with titles, the way TIA Portal and CODESYS lay out an FBD block: a
+  `NETWORK 'title'` line starts one, and networks execute in order. The
+  diagram draws each as a numbered band with its title, its notes and its
+  logic, and every statement carries a badge with its execution order. Click
+  a band's header and **+ add** inserts into that network; ▲ ▼ move it, +
+  adds one after it, ✕ removes its `NETWORK` line, double-click renames;
+  the palette has a *network* entry. A file without `NETWORK` lines is one
+  network, as before. Needs `naut` 0.16.0 or later. (#207)
+
+- **EN/ENO on every FBD block** (IEC execution control): wire `EN` and the
+  block runs only while it is TRUE — a function's result is not written, a
+  function block's outputs hold — and `ENO` reports that it ran without an
+  error (`DIV`/`MOD`: a zero divisor). The pins draw when bound; the small
+  **EN** toggle on a block shows them as open pins to wire. ST takes the
+  same `EN := …` / `ENO => …` formal arguments. Needs `naut` 0.16.0 or
+  later. (#206)
+
+- **The FBD palette's function field offers the project's own FUNCTIONs**
+  by their declared names, with their inputs and return type, beside the
+  standard functions; a user FUNCTION block draws its declared pin names.
+  (#204)
+
+- **Find All References from a diagram element.** Select a ladder contact,
+  coil or block, an FBD variable chip, FB instance or FB pin, or an SFC
+  step or action association and press **Shift+F12**, or right-click it →
+  *Find All References*. The References view opens on that name: every
+  program that reads or writes it, on the diagram files' own lines, plus
+  its declaration in `nautilus.yaml` or a tag file. Studio 5000's
+  Ctrl+E cross-reference, in all three diagram editors. (#218)
+
+- **Tag descriptions on diagram elements.** A tag's `desc` (from
+  `nautilus.yaml` or a tag file), or the trailing comment on a variable's
+  VAR line (`Run : BOOL; (* motor running *)`), now shows in the element's
+  tooltip in the ladder, FBD and SFC editors, and as a second line under
+  each ladder contact and coil, the way Studio 5000 draws it. The new
+  setting `nautilus.diagram.showDescriptions` (default on) controls the
+  ladder's second line; tooltips always carry the description. Editing a
+  tag file now refreshes hover and these descriptions without a restart.
+  Comes from `naut lsp` (the new `nautilus/descriptions` request), so it
+  needs `naut` 0.16.0 or later. (#216)
+
+- **Ladder: edge contacts, from the palette, a key or a retag.** The
+  palette has rising- and falling-edge contacts (`⊣P⊢`, `⊣N⊢`, the Logix
+  ONS habit); `P` cycles a selected contact NO → P → N → NC; and
+  double-clicking a contact and typing `+Tag`, `-Tag` or `/Tag` sets its
+  form with the tag (a bare tag keeps it). Needs `naut` 0.16.0 or
+  later. (#213)
+
+- **Ladder: copy and paste a whole rung.** With a rung's name selected,
+  Ctrl+C (or ⧉) copies the rung and Ctrl+V (or ⎘) pastes it below the
+  selected rung, named on from the original (`m1` → `m2`), its block
+  instances renamed the same way and its comment kept. ⧉ and ✂ are
+  disabled while nothing copyable is selected. Needs `naut` 0.16.0 or
+  later. (#217)
+
+- **Ladder: a FUNCTION_BLOCK's pins from the diagram.** Inside a
+  `FUNCTION_BLOCK`, the amber declare offer makes a name a pin
+  (`VAR_INPUT` for one the rungs read, `VAR_OUTPUT` for one a coil writes)
+  or a local, and the variables panel groups declarations by POU, declares
+  pins (`in` → `out` → `in/out` → `local`) and renames a declaration on a
+  double-click, together with its references and, for a pin, the calls'
+  named bindings in that file. Needs `naut` 0.16.0 or later. (#214)
+
+- **Forcing.** *Force…* holds a tag — or one member of a struct tag — at a
+  value against the field and the logic until it is removed: a forced input
+  beats the driver every scan, a forced output beats the logic. From the
+  editor's context menu, a live pill's hover, or the lock on a Live Values
+  row; *Remove Force* and *Remove All Forces* undo it. Forced values are
+  marked with an amber **F** on the inline pills, in the Live Values panel
+  (a *Forces* group first), and on the FBD, ladder and SFC diagrams, and a
+  status-bar item reads **N forces active** until the last is removed (click
+  it to list and remove). Force and Remove All ask first while
+  `nautilus.confirmControllerWrites` is on. Needs `naut` 0.16.0 or later
+  (the controller's force table). (#211)
+
+- **SFC online commands.** Right-click a step in a live SFC diagram for
+  *Set Active Step* (jump the chart there once, Codesys's *set step*), or a
+  transition for *Fire Transition* (take it once, if its source steps are
+  active); both are in the Command Palette too, picking from the running
+  charts. Needs `naut` 0.16.0 or later. (#192)
+
+- **SFC: timed qualifiers, IEC associations, step supervision** (naut).
+  `L`, `D`, `SD`, `DS`, `SL` now compile with the standard's semantics
+  (`D Detergent(T#3S);` was an error), the IEC textual form
+  `Detergent(D, T#3S);` is read as the same association, and a step can
+  carry a maximum time, `STEP Fill (MAXTIME := T#60S, ERROR := FillOverrun):`,
+  setting `Fill.ERR` and a tag an alarm binds to. The `.sfc` grammar
+  highlights the IEC-form qualifier, `MAXTIME`/`ERROR` and `Step.ERR`.
+
+- **Create Project… asks for the program language.** After a Minimal or
+  SDK template the command offers Structured Text, Ladder, Function Block
+  Diagram or Sequential Function Chart and passes `naut new --language`, so
+  a ladder programmer's first project opens as `program.ld` without a
+  terminal. The Get Started walkthrough's step is the same command (#221).
+
+- **SFC: the keyboard walks the chart.** The arrow keys move the selection
+  along the flow: ↓ from a step to its first transition (highest priority)
+  and on to its target, ↑ back, ← → to the neighbouring step or alternative
+  branch, → from a step into its actions. Enter edits the selection in place
+  (a step's name, a transition's condition, an action's body, a note), F2
+  renames, Del deletes. (#76)
+
+- **SFC: transition names on the chart.** A named transition shows its name
+  above its condition; the add forms (+ step chained, + transition, + alt
+  branch) take one, and F2 or a double-click on the name renames it
+  (`naut sfc edit` op `renameTransition`). (#76)
+
+- **SFC: reorder alternative branches.** Branches out of one step carry
+  their priority number (file order); ◀ priority / priority ▶ in the
+  palette, or Alt+← / Alt+→, move the selected one earlier or later
+  (op `moveTransition`), so an abort drawn last can be given priority. (#181)
+
+- **SFC: a new action's body from the chart.** Double-clicking an
+  association whose target is not an ACTION or a declared variable yet opens
+  the ST-body editor; saving it writes `ACTION <name>`. Rows for such a
+  target are marked, and a double-click on the qualifier column edits the
+  association line. (#182)
+
+- **SFC vars panel: constants and initial values.** The section toggle
+  cycles ext / local / const (`VAR CONSTANT`), an init field takes the value
+  (`TIME` `:= T#60S`), and a declare the CLI refuses keeps the typed name.
+  Constants list with a `const` badge. Needs `naut` 0.16.0 or later.
+  (#180)
+
+- **Signature help: a call's parameters while you type it.** Typing `(`
+  after a function or a function block instance opens the parameter-hints
+  widget with the callee's signature, and `,` moves the highlight on —
+  `LIMIT(MN : ANY_NUM, IN : ANY_NUM, MX : ANY_NUM) : ANY_NUM` for a builtin
+  or a conversion, `Scale(Raw : INT, Span : REAL) : REAL` for your own
+  FUNCTION, and for a block (`settle(IN := …`) its inputs with their types
+  and its outputs after `=>`, the highlight on the pin being bound (`PT :=`).
+  Works while the line is still unfinished, in nested calls, for blocks
+  declared in a project library, and on a netlist line of a `.fbd` (the
+  operator blocks `ADD`, `GT`, `AND`, … included). Comes from `naut lsp`,
+  so it needs `naut` 0.16.0 or later.
+
+- **Find all references** (Shift+F12 / *Go to References* / *Find All
+  References*) on any name in `.st`, `.fbd`, `.ld` and `.sfc`. A tag lists
+  every program that binds it in `VAR_EXTERNAL` — diagram programs on the
+  diagram file's own lines — plus where `nautilus.yaml` or a tag file names
+  it (its declaration, `dt-tag`, `tag-meta`, `tag-classes`); a local lists
+  only its own POU; a member (`t1.Q`) lists that instance's `Q`, including
+  `t1(Q => …)`, never another timer's. Works mid-edit, while the buffer does
+  not parse. Comes from `naut lsp`, so it needs `naut` 0.16.0 or later.
+
+- **Outline view, breadcrumbs and Go to Symbol in Editor for `.st`, `.fbd`,
+  `.ld` and `.sfc`.** They were empty. Each POU (PROGRAM, FUNCTION_BLOCK,
+  FUNCTION) and TYPE now lists its VAR sections and their declarations as
+  `name : type`, and a STRUCT lists its fields. A diagram file then lists its
+  body: one entry per FBD netlist statement, named by what it assigns or
+  calls (`t1 : TON(...)` is t1, `Run := latch` is Run), one per ladder RUNG
+  with its name and comment, and the SFC steps (the initial step marked),
+  transitions (`Fill → Hold`) and actions. A half-typed line does not empty
+  the outline. Comes from `naut lsp` (`textDocument/documentSymbol`). An
+  older `naut` leaves the outline empty, as before.
+
+- **Ladder: the assignment element `{ y := expr }`.** A rung can make an
+  assignment where it has power — `Run { Hours := Hours + ScanH }` — and
+  pass the power on unchanged; several go in one element with `;`. The
+  ladder editor draws it as a box with its text, the palette has a
+  `{ := }` button, and double-clicking edits it with tag completion.
+  Needs `naut` 0.16.0 or later to compile.
+
+- **Live values on bits of a word.** A contact or coil on `Status.3` (bit
+  access, new in the language) shows that bit's live state, read out of
+  the word the runtime streams.
+
+- **`nautilus.yaml`: `dialect:`, a tag's `alias:`, and `target: logix`**
+  in the schema, with completion and hover. `dialect: logix` adds blocks
+  with Allen-Bradley semantics (`TONR`); `alias:` is a tag's vendor-side
+  binding (`Local:1:I.Data.3`); `target: logix` names the Logix controller
+  a project is deployed to (experimental — the *Authoring for Logix*
+  guide).
+
+- **A JSON Schema for `*.scene.json`**, the 3D HMI scene documents
+  `@joyautomation/nautilus-hmi-3d` renders — completion and validation in
+  the editor, matching `naut check`'s scene pass. Covers kinds as data
+  (`model`, `drive`, `status`, `bounds`), the `environment` block and
+  textured `plane` fixtures (`docs/design/spatial-hmi.md` §3c).
+
+- **Manifest schema: `late-threshold`, `cpu` and `priority` per task.**
+  How late a scan may start before the runtime counts it late; pin the
+  task's thread to a core; run it under SCHED_FIFO. Hover text says what
+  each needs from the kernel.
+
+- **Test hooks for the VS Code rig.** With `NAUTILUS_TEST_STATE=<file>` set,
+  the extension writes a JSON snapshot (CLI path and version, runtime URL,
+  connection and sync state, open editors, status-bar items, last
+  notification and error) on activation and on every change. Status-bar
+  items carry stable names (`nautilus.live`, `nautilus.sync`) and a
+  `[name]` tooltip prefix; the SFC delete-step confirm has `data-testid`s.
+  Inert unless the variable is set.
+- **Clips of the webview gesture harness.** With `GESTURE_CLIPS=<dir>` set,
+  `npm run test:gestures` records every test's run (CDP screencast, then
+  ffmpeg) as `<dir>/<suite>/NN-<test>.mp4`, with `index.html`/`index.md`
+  listing each clip and its PASS/FAIL. CI uploads them as the
+  `gesture-clips` artifact. Unset, nothing changes.
+
+### Changed
+
+- **Mimic and component editors carry testability attributes.** Equipment,
+  pipes (and their vertex and segment handles), labels, ports, palette
+  items and the ports panel rows now render `data-id` (equipment id, pipe
+  id, label index, port name) and `data-kind`, so a test finds P101 by name
+  instead of by its position in the file. No visible change.
+
+- **The webview gesture harness runs in CI** (`vscode-iec-gestures`), and its Ladder palette test now drives the `FB…` block picker it went stale against. Chrome's `--no-sandbox` is opt-in via `GESTURE_NO_SANDBOX=1`.
+
+- **Testability ids in the FBD, ladder and SFC editors.** Every clickable,
+  draggable or selectable element (nodes, pins, edges, rungs, contacts,
+  coils, FBs, steps, transitions, action rows, comments, palette and vars
+  chips) now carries `data-id` (the model's identity) and `data-kind`, and
+  pins carry `data-pin`, so UI tests no longer depend on CSS or DOM order.
+  No behaviour change.
+
+### Fixed
+
+- **An error in a library file is reported once, on its own line** —
+  in `naut check` and in the Problems panel — instead of again at 1:1 on
+  every file that composes the library. (#199)
+
+- **Identifiers are case-insensitive** (IEC 61131-3, as in TIA Portal,
+  Codesys and Studio 5000). `Level`, `LEVEL` and `level` are one name — a
+  variable, tag, POU, type, FB instance or pin, struct member, SFC step or
+  action. A project FUNCTION is reached from FBD however it is spelled (the
+  block keeps the spelling it was given, instead of being upper-cased), and
+  `startedge(CLK := Start)` reaches `startEdge`. Everything shows the name as
+  declared. Two declarations differing only in case in one scope are now a
+  duplicate-declaration error naming both. Needs `naut` 0.16.0 or
+  later. (#197)
+
+- **The FB picker leaves an input with a declared default unbound.** It
+  wrote every input as `_`, and `_` is an error, so `doseA : Dosing(...)`
+  was red until even `NoFlowTime` (declared `:= T#5S`) was wired or
+  deleted. An input with an initial value now arrives unbound — it keeps
+  that value, like an unconnected FB input in TIA — and only inputs without
+  one (and in-outs) arrive as open `_` pins. (#205)
+
+- **The `(* @layout *)` block stays out of the logic.** It was written where
+  the body ended at the first drag, so statements added later landed after
+  it and it read as part of a network. It now lives right after `END_FBD`,
+  and a file with one mid-body moves it there on the next layout write.
+  (#208)
+
+- **A blank `.fbd`/`.ld`/`.sfc` seeds the POU name `naut new` would**:
+  `main.fbd` becomes `PROGRAM Main`, not `PROGRAM main`. (#209)
+
+- **Find All References from another file now finds a program that defines
+  a FUNCTION_BLOCK ahead of its PROGRAM.** Such a file was not recognized
+  as a program at all, so its reads and writes of a tag were missing from
+  the list whenever the search started anywhere else. (Found by the X44
+  smoke row.)
+
+- **Ladder: an edge contact (`+Tag`, `-Tag`) is drawn.** The diagram
+  dropped it and wired the block behind it straight to the rail, as if the
+  call were unconditional. It now draws as a P or N contact, and with live
+  values on it lights for the scan its one-shot fires. (#212)
+
+- **Ladder: the declare offer types a name from its use.** A counter's
+  `CV => M1_Starts` was offered as `VAR_EXTERNAL : REAL` because the
+  manifest seed `init: 0` types the tag REAL; the offer now takes the pin's
+  type (`INT`), a comparison's other operand, or BOOL for a contact, and
+  its `VAR` choice uses the same type. (#219)
+
+- **Ladder: the variables panel lists block instances and closes on
+  Escape.** The instances rungs declare by their calls (`m1:MotorStarter(…)`,
+  the AOI's backing tag) are listed read-only as `m1 : MotorStarter` with
+  their rung. (#220)
+
+- **SFC: "+ action" adds at the end.** Associations landed first, so a
+  step's list read upside down against the order it was typed. (#186)
+
+- **SFC: the action field no longer drops text it cannot read.**
+  `D Detergent T#3S` (qualifier, name, time in columns) is now accepted;
+  anything else stays in the field with the form it expects. (#183)
+
+- **SFC: a join whose legs differ in length draws as a convergence** under
+  both legs instead of a `↩` jump under one of them. (#187)
+
+- **SFC: a new, empty `.sfc` is one warning, not an error.** The Problems
+  view and `naut check` say to initialize it (`naut` 0.16.0 or later);
+  `naut check` stays clean until a task names it. (#179)
+
+- **The FB monitor CodeLens shows the real position.** It said "1 of 2"
+  whichever instance was monitored; monitoring the second one now reads
+  "2 of 2" (#146).
+
+- **Restart Language Server no longer leaves another "nautilus Structured Text" output channel.** The extension owns one channel and every language client reuses it. (#137)
+- **Live Values: the Connect button is an icon** (plug) instead of 185 px of text that squeezed the view title. (#138)
+- **Ladder: dragging an element no longer text-selects the rung labels it passes over**, and nothing stays highlighted after the drop. (#131)
+
+- **Pull Program from Controller no longer writes under unsaved edits.** With the program file open and dirty, the pull went to disk beneath the editor: the pulled change was nowhere on screen, and the next Ctrl+S wrote the stale buffer back over it without a prompt. The confirmation now names the file and says its unsaved edits will be lost (Overwrite / Show Diff / Cancel), and an open program file is replaced through its editor buffer and saved, so the editor, any diagram view and the file all show the pulled program. Show Diff puts the controller's program beside the live buffer and pulls nothing. (#140)
+
+- **A diagnostic about a name squiggles that name.** An undeclared
+  identifier, an unknown FB member or input (`settle.Qx`), an unknown
+  function, or a mistyped operand used to be reported at the statement's
+  first token, so `IF Heatr THEN` underlined `IF` and hovering `Heatr`
+  showed nothing. The squiggle now covers the name itself, and `naut check`
+  prints its column (`plant.st:28:4`, not `plant.st:28:1`). Diagrams still
+  land on the rung or netlist line. Comes from `naut lsp`, so it needs
+  `naut` 0.15.0 or later. (#141)
+
+- **Testing view: a failing acceptance test shows the tag value that broke, inline on the assertion.** The inline message used to read only `step 3, t=0.300s of virtual time` and sat on the step's `- given:` line; it now leads with `PumpRun = false, want true`, puts the step, its line and the virtual time on the line below, and sits on the failing tag inside `expect:` (or the `always:` term, or the `alarms:` key). Needs `naut` 0.15.0 or later, which reports the assertion's line in `naut test -json` (`failure.line`, with the step's line now in `failure.stepLine`); an older CLI still gets the value-first message, anchored on the step. (#145)
+
+- **Component editor: dragging a port dot keeps the port's explicit exit direction.** The drag rebuilt the port from name and position only, so a `dir` set in the sidecar vanished on the first move. Found by the rig self-test's `component_move_port-dir` row. (#130)
+
+- **Closing the Show Source text tab no longer loses the diagram's unsaved edits.** The diagram editor and the text view share one document, so VS Code asks Save / Don't Save when the text tab closes dirty — and *Don't Save* used to revert the file under a diagram that was still open. The extension now puts the diagram's edits back (status bar: "the diagram keeps its unsaved edits"); only the text view goes away. (#117)
+
+- **`nautilus.fb.monitor` is now declared.** The CodeLens command was
+  registered but missing from `contributes.commands`; it is declared and
+  hidden from the command palette.
+
+- **Live values on a Logix routine find program-scope tags.** A rung in
+  `MainProgram` names its tag `Counts`, but `naut logix serve` serves it
+  as `MainProgram_Counts`, so the ladder overlay showed nothing for any
+  program tag. It now looks up the program's tag first and falls back to
+  the controller tag, the order Logix itself uses. An indexed operand
+  (`Recipe[2]`) resolves too, because Logix arrays always start at 0. A
+  routine inside an Add-On Instruction shows no values: its operands are
+  the parameters of whichever instance runs, and a controller tag that
+  shares a name is not one of them. (Needs the matching `naut` CLI.)
+
 ## [0.13.3] - 2026-10-12
 
 Requires naut 0.16.0 or later for the items marked so; everything else
