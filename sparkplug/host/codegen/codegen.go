@@ -232,6 +232,9 @@ type site struct {
 type metric struct {
 	name string
 	typ  string
+	// arrayLen > 0 is an array metric of typ elements (a birth's Int32Array
+	// of 7 is typ Int32, arrayLen 7).
+	arrayLen int
 	// writable/members/init come from a --sites file, which can state them; a
 	// birth cannot, so the broker path leaves them to the --writable globs.
 	writable bool
@@ -359,14 +362,24 @@ func bindings(prefix, edge, device string, mt metric, used map[string]bool,
 			path, mt.typ, mt.name+"."+firstLeaf(types, mt.typ))
 	}
 
+	if whole && mt.arrayLen > 0 {
+		// Array writes are not supported (host.Manifest.Validate refuses a
+		// writable array binding): bind it read-only and say so, rather than
+		// failing an import whose --writable glob happened to match it.
+		opts.skip(fmt.Sprintf("%s: %s array bound read-only — array writes are not supported",
+			path, mt.typ))
+		whole = false
+	}
+
 	b := host.Binding{
-		Name:   claim(host.TagName(prefix, device, mt.name), used),
-		Node:   edge,
-		Device: device,
-		Metric: mt.name,
-		Type:   mt.typ,
-		Desc:   mt.desc,
-		Unit:   mt.unit,
+		Name:     claim(host.TagName(prefix, device, mt.name), used),
+		Node:     edge,
+		Device:   device,
+		Metric:   mt.name,
+		Type:     mt.typ,
+		ArrayLen: mt.arrayLen,
+		Desc:     mt.desc,
+		Unit:     mt.unit,
 	}
 	b.Writable = whole
 	if whole {
@@ -509,8 +522,13 @@ func collectMetrics(b host.Birth, tb *typeBuilder, opts Options) []metric {
 		if !selects(qualify(b.Device, mm.Name), opts.Metrics) && !selects(mm.Name, opts.Metrics) {
 			continue
 		}
-		typ, ok := tb.bindingType(mm)
+		typ, arrayLen, ok := tb.bindingType(mm)
 		if !ok {
+			if sparkplug.IsArrayDatatype(mm.Datatype) {
+				opts.skip(fmt.Sprintf("%s: %v with no value in the birth to give its length",
+					where(b, mm.Name), mm.Datatype))
+				continue
+			}
 			opts.skip(fmt.Sprintf("%s: datatype %v is not representable as a nautilus value",
 				where(b, mm.Name), mm.Datatype))
 			continue
@@ -518,6 +536,7 @@ func collectMetrics(b host.Birth, tb *typeBuilder, opts Options) []metric {
 		out = append(out, metric{
 			name:        mm.Name,
 			typ:         typ,
+			arrayLen:    arrayLen,
 			desc:        mm.PropertyString(sparkplug.PropDocumentation),
 			unit:        mm.PropertyString(sparkplug.PropEngUnit),
 			memberUnits: memberUnits(mm),
@@ -652,6 +671,10 @@ type typeBuilder struct {
 	used map[string]bool
 	// built memoizes the rendered TypeDefs by manifest type name.
 	built map[string]host.TypeDef
+	// lens are array member lengths by Sparkplug template name, then member
+	// name. A definition says a member is an Int32Array but not how long:
+	// the length is read off the instances the same births carry.
+	lens map[string]map[string]int
 }
 
 func newTypeBuilder(opts Options) *typeBuilder {
@@ -665,6 +688,7 @@ func newTypeBuilder(opts Options) *typeBuilder {
 		names: map[string]string{},
 		used:  used,
 		built: map[string]host.TypeDef{},
+		lens:  map[string]map[string]int{},
 	}
 }
 
@@ -689,7 +713,66 @@ func (tb *typeBuilder) harvest(b host.Birth) error {
 				mm.Name, b.EdgeNode)
 		}
 	}
+	for _, mm := range b.Payload.Metrics {
+		if t, ok := mm.Value.(*sparkplug.Template); ok && t != nil && !t.IsDefinition {
+			if err := tb.harvestLens(b, mm.Name, t); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+// harvestLens records the length of every array member of one template
+// instance (and of the instances nested in it) against its template name.
+// Two instances that disagree are an error for the same reason two
+// definitions are: one manifest type has one ARRAY [0..n-1] per member.
+func (tb *typeBuilder) harvestLens(b host.Birth, path string, t *sparkplug.Template) error {
+	if t.TemplateRef == "" {
+		return nil
+	}
+	for _, mm := range t.Metrics {
+		if nested, ok := mm.Value.(*sparkplug.Template); ok && nested != nil {
+			if err := tb.harvestLens(b, path+host.MemberSep+mm.Name, nested); err != nil {
+				return err
+			}
+			continue
+		}
+		if !sparkplug.IsArrayDatatype(mm.Datatype) || mm.IsNull {
+			continue
+		}
+		n, ok := sliceLen(mm.Value)
+		if !ok {
+			continue
+		}
+		byMember := tb.lens[t.TemplateRef]
+		if byMember == nil {
+			byMember = map[string]int{}
+			tb.lens[t.TemplateRef] = byMember
+		}
+		if prev, seen := byMember[mm.Name]; seen && prev != n {
+			return fmt.Errorf("codegen: template %q member %q is an array of %d in one instance "+
+				"and of %d in %s (%s) — the manifest holds one length per member",
+				t.TemplateRef, mm.Name, prev, n, where(b, path), b.EdgeNode)
+		}
+		byMember[mm.Name] = n
+	}
+	return nil
+}
+
+// sliceLen is the element count of a decoded array metric's value.
+func sliceLen(v any) (int, bool) {
+	switch xs := v.(type) {
+	case []bool:
+		return len(xs), true
+	case []int64:
+		return len(xs), true
+	case []float64:
+		return len(xs), true
+	case []string:
+		return len(xs), true
+	}
+	return 0, false
 }
 
 // sameShape compares two definitions by member name and datatype, which is
@@ -726,27 +809,38 @@ func (tb *typeBuilder) typeName(tmplName string) string {
 }
 
 // bindingType is the manifest type for one instance metric: a datatype name
-// for a scalar, the referenced type's name for a Template.
-func (tb *typeBuilder) bindingType(m sparkplug.Metric) (string, bool) {
+// for a scalar, the referenced type's name for a Template, and for an array
+// its ELEMENT datatype name with the birth value's length (Int32Array of 7 →
+// Int32, 7 — the manifest's arraylen: form).
+func (tb *typeBuilder) bindingType(m sparkplug.Metric) (string, int, bool) {
 	if m.Datatype == spb.DataType_Template {
 		t, ok := m.Value.(*sparkplug.Template)
 		if !ok || t == nil || t.TemplateRef == "" {
-			return "", false
+			return "", 0, false
 		}
 		if _, known := tb.defs[t.TemplateRef]; !known {
-			return "", false
+			return "", 0, false
 		}
-		return tb.typeName(t.TemplateRef), true
+		return tb.typeName(t.TemplateRef), 0, true
+	}
+	if elem, isArray := sparkplug.ArrayElem(m.Datatype); isArray {
+		n, ok := sliceLen(m.Value)
+		if !ok || m.IsNull || n == 0 || !representable(elem.String()) {
+			// No length to declare: ARRAY [0..-1] is not a type.
+			return "", 0, false
+		}
+		return elem.String(), n, true
 	}
 	name := m.Datatype.String()
 	if !representable(name) {
-		return "", false
+		return "", 0, false
 	}
-	return name, true
+	return name, 0, true
 }
 
 // representable mirrors host's scalarType: the Sparkplug datatypes that have
-// an ir.Type. Arrays, DataSet, Bytes, File and PropertySet do not.
+// an ir.Type. DataSet, Bytes, File and PropertySet do not; an array is
+// representable when its element is (bindingType, memberType).
 func representable(name string) bool {
 	switch name {
 	case "Boolean",
@@ -787,14 +881,14 @@ func (tb *typeBuilder) typeDefs() ([]host.TypeDef, error) {
 				tb.opts.skip(fmt.Sprintf("template %s: unnamed member skipped", name))
 				continue
 			}
-			ft, err := tb.memberType(name, mm, inner, emit)
+			ft, n, err := tb.memberType(tmplName, name, mm, inner, emit)
 			if err != nil {
 				return err
 			}
 			if ft == "" {
 				continue // skipped, already reported
 			}
-			td.Fields = append(td.Fields, host.FieldDef{Name: mm.Name, Type: ft})
+			td.Fields = append(td.Fields, host.FieldDef{Name: mm.Name, Type: ft, ArrayLen: n})
 		}
 		emitted[name] = true
 		out = append(out, td)
@@ -808,20 +902,35 @@ func (tb *typeBuilder) typeDefs() ([]host.TypeDef, error) {
 	return out, nil
 }
 
-// memberType resolves one definition member to a manifest type name, emitting
+// memberType resolves one definition member of Sparkplug template tmplName
+// (manifest type owner) to a manifest type name and array length, emitting
 // the nested type first when the member is itself a template. "" means the
 // member was skipped (and reported).
-func (tb *typeBuilder) memberType(owner string, mm sparkplug.Metric, stack []string,
-	emit func(string, []string) error) (string, error) {
+func (tb *typeBuilder) memberType(tmplName, owner string, mm sparkplug.Metric, stack []string,
+	emit func(string, []string) error) (string, int, error) {
 
+	if elem, isArray := sparkplug.ArrayElem(mm.Datatype); isArray {
+		if !representable(elem.String()) {
+			tb.opts.skip(fmt.Sprintf("template %s member %s: datatype %v is not representable "+
+				"as a nautilus value", owner, mm.Name, mm.Datatype))
+			return "", 0, nil
+		}
+		n := tb.lens[tmplName][mm.Name]
+		if n == 0 {
+			tb.opts.skip(fmt.Sprintf("template %s member %s: %v, but no instance in the births "+
+				"gives its length", owner, mm.Name, mm.Datatype))
+			return "", 0, nil
+		}
+		return elem.String(), n, nil
+	}
 	if mm.Datatype != spb.DataType_Template {
 		name := mm.Datatype.String()
 		if !representable(name) {
 			tb.opts.skip(fmt.Sprintf("template %s member %s: datatype %v is not representable "+
 				"as a nautilus value", owner, mm.Name, mm.Datatype))
-			return "", nil
+			return "", 0, nil
 		}
-		return name, nil
+		return name, 0, nil
 	}
 	nested, _ := mm.Value.(*sparkplug.Template)
 	switch {
@@ -831,12 +940,12 @@ func (tb *typeBuilder) memberType(owner string, mm sparkplug.Metric, stack []str
 		if _, known := tb.defs[nested.TemplateRef]; !known {
 			tb.opts.skip(fmt.Sprintf("template %s member %s: references unknown template %q",
 				owner, mm.Name, nested.TemplateRef))
-			return "", nil
+			return "", 0, nil
 		}
 		if err := emit(nested.TemplateRef, stack); err != nil {
-			return "", err
+			return "", 0, err
 		}
-		return tb.typeName(nested.TemplateRef), nil
+		return tb.typeName(nested.TemplateRef), 0, nil
 	case nested != nil && nested.IsDefinition:
 		// An inline nested definition: admitted under a synthetic name, the
 		// same way sparkplug.StructDefsFromTemplates admits "<parent>.<member>".
@@ -845,13 +954,13 @@ func (tb *typeBuilder) memberType(owner string, mm sparkplug.Metric, stack []str
 			tb.defs[synthetic] = nested
 		}
 		if err := emit(synthetic, stack); err != nil {
-			return "", err
+			return "", 0, err
 		}
-		return tb.typeName(synthetic), nil
+		return tb.typeName(synthetic), 0, nil
 	}
 	tb.opts.skip(fmt.Sprintf("template %s member %s: Template member with no templateRef",
 		owner, mm.Name))
-	return "", nil
+	return "", 0, nil
 }
 
 // ── renderers ────────────────────────────────────────────────────────────

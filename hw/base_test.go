@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -896,5 +897,55 @@ func TestBaseFailingClassGoesBad(t *testing.T) {
 	}
 	if q := b.Quality(); q["SW1_Port02"] != nio.Good {
 		t.Fatalf("recovered class: %v", q)
+	}
+}
+
+// Each source is one connection: its bound tags and both companions, and an
+// up/down verdict that is its __Online — so one dead switch does not take
+// its neighbour down with it.
+func TestBaseConnections(t *testing.T) {
+	w := newFakeWire()
+	cfg := switchConfig(w)
+	sw2 := cfg.Sources[0]
+	sw2.ID, sw2.Addr = "SW2", "sw2:161"
+	cfg.Sources = append(cfg.Sources, sw2)
+	cfg.Tags = append(cfg.Tags, portDecl("SW2_Port01", "SW2"))
+	b, err := NewBase(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var _ nio.ConnectionReporter = b
+
+	want := []nio.Connection{
+		{ID: "SW1", Inputs: []string{"SW1_Port01", "SW1_Port02", "SW1__LastPollMs", "SW1__Online"}},
+		{ID: "SW2", Inputs: []string{"SW2_Port01", "SW2__LastPollMs", "SW2__Online"}},
+	}
+	if got := b.Connections(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Connections = %+v, want %+v", got, want)
+	}
+	if b.ConnectionUp("SW1") || b.ConnectionUp("nope") {
+		t.Fatal("nothing is up before Start, and an unknown id is never up")
+	}
+
+	for _, src := range []string{"SW1", "SW2"} {
+		w.set(src, DefaultClass, Result{})
+		w.set(src, "slow", Result{})
+	}
+	w.setErr("SW2", DefaultClass, errors.New("timeout"))
+	w.setErr("SW2", "slow", errors.New("timeout"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b.Start(ctx)
+	defer b.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !b.ConnectionUp("SW1") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !b.ConnectionUp("SW1") {
+		t.Fatal("SW1 answers and never came up")
+	}
+	if b.ConnectionUp("SW2") {
+		t.Fatal("SW2 never answered and reads up")
 	}
 }

@@ -216,6 +216,11 @@ func hostStatus(st sphost.Status) server.DriverStatus {
 	if st.WriteDrops > 0 {
 		s.Metrics = append(s.Metrics, server.DriverMetric{Label: "write drops", Value: float64(st.WriteDrops)})
 	}
+	if st.WritesRefused > 0 {
+		// Array members stripped from struct writes: Sparkplug array writes
+		// are not supported, and an operator should see that they asked.
+		s.Metrics = append(s.Metrics, server.DriverMetric{Label: "writes refused", Value: float64(st.WritesRefused)})
+	}
 	if st.QueuedWrites > 0 {
 		// Commands waiting for a dark site to come back — a gauge, so it
 		// clears itself the moment the site births and they go out.

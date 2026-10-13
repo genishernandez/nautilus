@@ -326,9 +326,10 @@ both** — `naut check` reports it offline, the same no-last-wins rule
 tag files keep. Setting `driver:` and `drivers:` together is an error too;
 move the single driver into the list. On `/api/drivers` each driver keeps
 its own row (the Modbus one still has a device row per source), quality
-merges per tag, and a Sparkplug `device:` on the same controller is healthy
-only when every child bus is — an operator reading the device online should
-be able to trust all of its tags, not the subset whose bus is up. The
+merges per tag, and on a `sparkplug:` edge node each Modbus source and each
+other driver is its own Sparkplug device, born and killed by its own
+connection — one dead bus takes only its own tags offline (see
+[Sparkplug B](/guides/sparkplug/#devices-and-connection-health)). The
 `memory` loopback cannot join a list: it owns whatever is written to it,
 which is exactly what makes it unroutable next to another driver.
 

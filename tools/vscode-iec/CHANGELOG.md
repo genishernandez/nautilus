@@ -23,6 +23,20 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   On a Logix target they are `S:FS` and `GSV(WallClockTime,,
   LocalDateTime,…)`. Needs a `naut` newer than 0.16.1.
 
+- **Manifest schema: `sparkplug.writable`.** Globs over tag names or UDT
+  member paths (`Pump*.SpeedSP`) that an NCMD/DCMD may write. A Sparkplug
+  edge node is now read-only by default: every other write is refused and
+  only `Node Control/Rebirth` is honoured. Needs a `naut` newer than 0.16.1.
+
+### Changed
+
+- **Manifest schema: `sparkplug.device` is removed** and squiggles with
+  the reason. Each field connection is now its own Sparkplug device —
+  named after its driver (`eip`, `sparkplug-host`) or its source id
+  (`modbus`, `snmp`, `redfish`, `prometheus`) — with its own DBIRTH and
+  DDEATH, so one dead meter no longer takes every device offline. Needs a
+  `naut` newer than 0.16.1.
+
 ### Fixed
 
 - **A rung's coils see one evaluation of its condition.** In a rung where

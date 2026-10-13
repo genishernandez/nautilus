@@ -91,7 +91,7 @@ func TestRebirthCommandStopsDataUntilTheNBIRTH(t *testing.T) {
 		rt.Tags().Set("LevelSP", ir.RealVal(float64(100+i)))
 		births := len(fc.published("NBIRTH"))
 		mark := fc.count()
-		n.applyCommand(rebirthCommand())
+		n.applyCommand("", rebirthCommand())
 		n.scanAndPublish()
 		waitPublished(t, fc, "NBIRTH", births+1)
 		// One more tick so a sample the gate held back goes out after the
@@ -158,7 +158,7 @@ func TestRebirthCommandMidTickStopsTheNextRecord(t *testing.T) {
 	fc.mu.Lock()
 	fc.onPublish = func(topic string) {
 		if strings.Contains(topic, "/NDATA/") {
-			once.Do(func() { n.applyCommand(rebirthCommand()) })
+			once.Do(func() { n.applyCommand("", rebirthCommand()) })
 		}
 	}
 	fc.mu.Unlock()

@@ -28,19 +28,20 @@ func (d *Driver) Status() Status {
 	defer d.mu.Unlock()
 
 	st := Status{
-		Broker:       d.cfg.BrokerURL,
-		HostID:       d.cfg.HostID,
-		Groups:       append([]string(nil), d.groups...),
-		Connected:    d.connected,
-		Msgs:         d.stats.Msgs,
-		Rebirths:     d.stats.Rebirths,
-		SeqGaps:      d.stats.SeqGaps,
-		WriteDrops:   d.stats.WriteDrops,
-		WriteQueued:  d.stats.WriteQueued,
-		QueuedWrites: queued,
-		Unknown:      len(d.unknown),
-		Degraded:     d.degraded,
-		Nodes:        nodes,
+		Broker:        d.cfg.BrokerURL,
+		HostID:        d.cfg.HostID,
+		Groups:        append([]string(nil), d.groups...),
+		Connected:     d.connected,
+		Msgs:          d.stats.Msgs,
+		Rebirths:      d.stats.Rebirths,
+		SeqGaps:       d.stats.SeqGaps,
+		WriteDrops:    d.stats.WriteDrops,
+		WriteQueued:   d.stats.WriteQueued,
+		WritesRefused: d.stats.WritesRefused,
+		QueuedWrites:  queued,
+		Unknown:       len(d.unknown),
+		Degraded:      d.degraded,
+		Nodes:         nodes,
 	}
 	if d.connected {
 		// The STATE birth timestamp — the same value the will carries, so a

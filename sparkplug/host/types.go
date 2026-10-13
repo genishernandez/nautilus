@@ -374,6 +374,9 @@ type stats struct {
 	// WriteQueued counts commands parked for a dark node, cumulatively. The
 	// gauge — how many are waiting right now — is Status.QueuedWrites.
 	WriteQueued uint64
+	// WritesRefused counts array members stripped from outgoing struct
+	// commands (Status.WritesRefused).
+	WritesRefused uint64
 }
 
 // ── Internal seam ────────────────────────────────────────────────────────
@@ -506,6 +509,9 @@ type queued struct {
 type discovery struct {
 	key      metricKey
 	datatype string
+	// arrayLen is an array metric's element count as last seen — the
+	// arraylen: its manifest line needs, which the datatype cannot say.
+	arrayLen int
 	count    int
 	logged   bool
 }
@@ -524,8 +530,13 @@ type Status struct {
 	// a full queue); WriteQueued counts commands parked for a dark node,
 	// cumulatively, and QueuedWrites is how many are waiting RIGHT NOW.
 	WriteDrops, WriteQueued uint64
-	QueuedWrites            int
-	Unknown                 int
+	// WritesRefused counts writes the driver will not send because Sparkplug
+	// array writes are not supported: the array members it strips from a
+	// struct output's command (the template's other members still go out).
+	// An array binding itself cannot be writable — Validate refuses it.
+	WritesRefused uint64
+	QueuedWrites  int
+	Unknown       int
 	// Degraded is set when the discovery policy is DiscoveryStrict and an
 	// unmanifested metric has been seen — /api/drivers reports the driver
 	// "degraded" for it (docs/design/sparkplug-host.md §5).

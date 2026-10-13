@@ -42,6 +42,8 @@ type Config struct {
 
 // Device is a Sparkplug device behind this edge node — one io.Driver's worth
 // of tags, with a lifecycle (DBIRTH/DDEATH) that tracks its connection health.
+// It is born once healthy and its first read has reached the tag store
+// (deviceReady), so a DBIRTH never goes out empty ahead of the data.
 type Device struct {
 	ID     string      // Sparkplug device_id
 	Tags   []string    // tag-store names this device contributes
@@ -57,6 +59,7 @@ type Node struct {
 
 	devices  []Device
 	tagOwner map[string]string // tag -> device id ("" = node level)
+	writable []string          // WithWritable patterns; empty = every write refused
 
 	// publish classes
 	classRBE    map[string]RBE
@@ -91,6 +94,15 @@ type Node struct {
 	// template command for an unknown tag, an unknown member), keyed by an
 	// opaque reason string.
 	cmdWarned map[string]bool
+	// cmdRefused counts command writes the write gate refused (writegate.go).
+	cmdRefused uint64
+	// unpublishable names the tags a birth found no Sparkplug shape for (an
+	// array of structs, a multi-dimensional array — see publishable). They
+	// are left out of the birth and its data rather than failing it, so one
+	// such tag does not take every other metric down with it; each is
+	// logged once, and counted as born so it does not request a rebirth
+	// every tick. Kept across births.
+	unpublishable map[string]bool
 	// rebirthPending is set the moment a rebirth is requested — synchronously
 	// in the NCMD handler, before the rebirth itself is scheduled — and
 	// cleared by the birth that answers it. While it is set the node is not
@@ -203,12 +215,41 @@ func New(rt *runtime.Runtime, cfg Config, opts ...Option) (*Node, error) {
 			return nil, fmt.Errorf("sparkplug: WithMetricClass(%q, ...) names an undefined class — add WithPublishClass(%q, ...)", a.class, a.class)
 		}
 	}
+	if err := validateWritable(n.writable); err != nil {
+		return nil, err
+	}
+	// Devices: each id births on its own topic, so it must be a legal topic
+	// level and unique; each tag rides exactly one device, or a command
+	// addressed to one could write a tag the other publishes.
+	seen := map[string]bool{}
 	for _, d := range n.devices {
+		if err := validDeviceID(d.ID); err != nil {
+			return nil, err
+		}
+		if seen[d.ID] {
+			return nil, fmt.Errorf("sparkplug: device %q is registered twice", d.ID)
+		}
+		seen[d.ID] = true
 		for _, t := range d.Tags {
+			if other, dup := n.tagOwner[t]; dup {
+				return nil, fmt.Errorf("sparkplug: tag %q is on both device %q and device %q — a tag publishes on exactly one", t, other, d.ID)
+			}
 			n.tagOwner[t] = d.ID
 		}
 	}
 	return n, nil
+}
+
+// validDeviceID refuses a device id that cannot be one MQTT topic level:
+// empty, or carrying a level separator or wildcard (Sparkplug B §4.1.1.4).
+func validDeviceID(id string) error {
+	if id == "" {
+		return fmt.Errorf("sparkplug: a device needs an id")
+	}
+	if strings.ContainsAny(id, "/+#") {
+		return fmt.Errorf("sparkplug: device id %q may not contain '/', '+' or '#'", id)
+	}
+	return nil
 }
 
 // ── topics ────────────────────────────────────────────────────────────────
@@ -512,6 +553,10 @@ type Status struct {
 	BornMs    int64  `json:"bornMs"`    // epoch ms of the last NBIRTH
 	LastPubMs int64  `json:"lastPubMs"` // epoch ms of the last DATA publish
 
+	// CommandsRefused counts NCMD/DCMD writes the write gate refused this
+	// run: not writable, or addressed to a device the tag is not on.
+	CommandsRefused uint64 `json:"commandsRefused"`
+
 	StoreForward *StoreForwardStatus `json:"storeForward,omitempty"`
 	Devices      []DeviceStatus      `json:"devices,omitempty"`
 }
@@ -548,6 +593,7 @@ func (n *Node) Status() Status {
 		Msgs:            n.msgs,
 		BornMs:          n.bornMs,
 		LastPubMs:       n.lastPubMs,
+		CommandsRefused: n.cmdRefused,
 	}
 	if n.sf != nil {
 		s.StoreForward = &StoreForwardStatus{Buffered: n.sf.len(), Max: n.sf.max}

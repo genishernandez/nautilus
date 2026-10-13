@@ -325,6 +325,10 @@ func (d *Driver) StructDefs() map[string]*ir.StructDef { return d.base.StructDef
 // Health is one row per source plus totals.
 func (d *Driver) Health() hw.Health { return d.base.Health() }
 
+// Connections and ConnectionUp are io.ConnectionReporter: one per source.
+func (d *Driver) Connections() []nio.Connection { return d.base.Connections() }
+func (d *Driver) ConnectionUp(id string) bool   { return d.base.ConnectionUp(id) }
+
 // Warnings are `naut check`'s non-fatal findings: unset credential
 // variables, missing credential files, MD5/DES.
 func (d *Driver) Warnings() []string { return d.manifest.Warnings() }

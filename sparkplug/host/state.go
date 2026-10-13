@@ -577,12 +577,6 @@ func (d *Driver) applyBindingLocked(ns *nodeState, b Binding, m sparkplug.Metric
 	if m.IsNull {
 		return // "no value" — keep whatever we had
 	}
-	if b.ArrayLen > 0 {
-		d.warnOnceLocked("array:"+b.Name,
-			"sparkplug host: array bindings are not supported yet, metric ignored",
-			"tag", b.Name, "metric", b.Metric)
-		return
-	}
 	if d.values == nil {
 		d.values = nio.Values{}
 	}
@@ -595,6 +589,10 @@ func (d *Driver) applyBindingLocked(ns *nodeState, b Binding, m sparkplug.Metric
 			prev = cur
 		}
 	}
+	// An array binding's prev is ir.Zero of ARRAY [0..arraylen-1], so a
+	// metric of any other length is refused here as not fitting — the
+	// manifest's arraylen: is the contract, and neither a truncation nor a
+	// resize honours it. The same holds for an array member of a template.
 	v, unknown, err := sparkplug.ValueFromMetricInto(m, prev)
 	if err != nil {
 		d.warnOnceLocked("conv:"+b.Name,
@@ -724,6 +722,9 @@ func (d *Driver) recordUnknownLocked(group string, key metricKey, m sparkplug.Me
 	if e.datatype == "" || e.datatype == spb.DataType_Unknown.String() {
 		e.datatype = m.Datatype.String()
 	}
+	if n, ok := sliceLen(m.Value); ok {
+		e.arrayLen = n
+	}
 	switch d.discovery {
 	case DiscoveryIgnore:
 		return
@@ -752,8 +753,29 @@ func (d *Driver) discoveryYAML(e *discovery) string {
 	if typ == "" {
 		typ = spb.DataType_Unknown.String()
 	}
-	return fmt.Sprintf("- { name: %s, node: %s, device: %q, metric: %s, type: %s, arraylen: 0, writable: false }",
-		d.discoveryTagName(e.key), e.key.EdgeNode, e.key.Device, e.key.Metric, typ)
+	arrayLen := 0
+	// An array metric binds as its element type plus a length (checkArray).
+	if dt, ok := datatypeOf(typ); ok && sparkplug.IsArrayDatatype(dt) {
+		elem, _ := sparkplug.ArrayElem(dt)
+		typ, arrayLen = elem.String(), e.arrayLen
+	}
+	return fmt.Sprintf("- { name: %s, node: %s, device: %q, metric: %s, type: %s, arraylen: %d, writable: false }",
+		d.discoveryTagName(e.key), e.key.EdgeNode, e.key.Device, e.key.Metric, typ, arrayLen)
+}
+
+// sliceLen is the element count of a decoded array metric's value.
+func sliceLen(v any) (int, bool) {
+	switch xs := v.(type) {
+	case []bool:
+		return len(xs), true
+	case []int64:
+		return len(xs), true
+	case []float64:
+		return len(xs), true
+	case []string:
+		return len(xs), true
+	}
+	return 0, false
 }
 
 // discoveryTagName composes the nautilus tag name this metric would get:

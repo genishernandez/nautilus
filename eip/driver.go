@@ -50,8 +50,13 @@ type Driver struct {
 	mu        sync.Mutex
 	snapshot  nio.Values // latest polled values (nautilus tag name -> value)
 	connected bool
-	lastErr   error
-	stats     driverStats
+	// primed is set once every scan class has completed a poll on the
+	// current connection, and cleared when the connection changes. The
+	// snapshot fills tag by tag during a poll, so before this a reader can
+	// see some of the first poll's tags and not the rest.
+	primed  bool
+	lastErr error
+	stats   driverStats
 
 	wmu     sync.Mutex
 	pending map[string]any // queued writes (nautilus tag name -> desired value)
@@ -314,6 +319,10 @@ type Health struct {
 	Reconnects uint64 `json:"reconnects"` // transport reconnects
 	SinceMs    int64  `json:"sinceMs"`    // last connect/disconnect (epoch ms)
 	LastPollMs int64  `json:"lastPollMs"` // last successful poll (epoch ms)
+	// Primed: every scan class has completed a poll since this connection
+	// came up — the snapshot holds a whole read, not the first part of one.
+	// A tag that failed its read does not hold this back.
+	Primed bool `json:"primed"`
 }
 
 // Health returns the current connection health and poll counters.
@@ -322,6 +331,7 @@ func (d *Driver) Health() Health {
 	defer d.mu.Unlock()
 	h := Health{
 		Connected:  d.connected,
+		Primed:     d.primed,
 		Host:       d.host,
 		Slot:       d.slot,
 		Tags:       len(d.inputs),
@@ -419,6 +429,7 @@ func (d *Driver) run(ctx context.Context) {
 		backoff = time.Second
 		d.mu.Lock()
 		d.connected, d.lastErr = true, nil
+		d.primed = false
 		d.stats.sinceMs = time.Now().UnixMilli()
 		if everConnected {
 			d.stats.reconnects++
@@ -432,6 +443,7 @@ func (d *Driver) run(ctx context.Context) {
 		_ = sess.ctrl.Close()
 		d.mu.Lock()
 		d.connected = false
+		d.primed = false
 		d.stats.sinceMs = time.Now().UnixMilli()
 		d.mu.Unlock()
 	}
@@ -543,6 +555,9 @@ func (d *Driver) serve(ctx context.Context, sess *session) {
 		}
 		c.next = time.Now().Add(c.rate)
 	}
+	d.mu.Lock()
+	d.primed = true
+	d.mu.Unlock()
 	for {
 		wake := time.Duration(time.Hour)
 		now := time.Now()

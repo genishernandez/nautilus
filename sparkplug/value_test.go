@@ -136,8 +136,8 @@ func TestValueFromMetricUInt32SignExtends(t *testing.T) {
 }
 
 func TestValueFromMetricUnrepresentableDatatype(t *testing.T) {
-	if _, err := ValueFromMetric(Metric{Name: "arr", Datatype: spb.DataType_DoubleArray}, nil); err == nil {
-		t.Fatal("expected an error for an array datatype")
+	if _, err := ValueFromMetric(Metric{Name: "ds", Datatype: spb.DataType_DataSet}, nil); err == nil {
+		t.Fatal("expected an error for a DataSet datatype")
 	}
 	if _, err := ValueFromMetric(Metric{Name: "b", Datatype: spb.DataType_Boolean, Value: "no"}, nil); err == nil {
 		t.Fatal("expected a type error")
@@ -428,7 +428,7 @@ func TestStructDefsFromTemplatesErrors(t *testing.T) {
 			defMetric("A", member("b", spb.DataType_Template)),
 		}},
 		{"unrepresentable member", []Metric{
-			defMetric("A", member("b", spb.DataType_DoubleArray)),
+			defMetric("A", member("b", spb.DataType_DataSet)),
 		}},
 		{"unnamed member", []Metric{defMetric("A", member("", spb.DataType_Boolean))}},
 		{"duplicate member", []Metric{

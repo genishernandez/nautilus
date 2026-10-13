@@ -3,7 +3,6 @@ package sparkplug
 import (
 	"time"
 
-	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/runtime"
 )
 
@@ -279,7 +278,7 @@ func (n *Node) refreshShapeLocked(tags *runtime.Tags) {
 func (n *Node) collectChanged(snap map[string]runtime.Sample, now time.Time, owner string) []Metric {
 	var out []Metric
 	for _, name := range n.ownerName[owner] {
-		if !n.known[name] {
+		if !n.known[name] || n.unpublishable[name] {
 			continue
 		}
 		s, ok := snap[name]
@@ -295,11 +294,7 @@ func (n *Node) collectChanged(snap map[string]runtime.Sample, now time.Time, own
 			continue
 		}
 		v := s.Value
-		tmplRef := ""
-		if v.Kind == ir.TypeStruct && v.Struct != nil {
-			tmplRef = v.Struct.Name
-		}
-		m, err := MetricFromValue(name, v, tmplRef)
+		m, err := n.metricFor(name, v)
 		if err != nil {
 			continue
 		}
@@ -314,11 +309,12 @@ func (n *Node) collectChanged(snap map[string]runtime.Sample, now time.Time, own
 
 // deviceHealthLocked detects device health transitions and returns closures
 // that publish the corresponding DBIRTH/DDEATH after the lock is released.
+// "Healthy" is deviceReady: connected, and its first read delivered.
 // Caller holds n.mu.
 func (n *Node) deviceHealthLocked(snap map[string]runtime.Sample) []func(*Node) {
 	var events []func(*Node)
 	for _, d := range n.devices {
-		healthy := d.Health == nil || d.Health()
+		healthy := deviceReady(d, func(name string) bool { _, ok := snap[name]; return ok })
 		was := n.devHealth[d.ID]
 		if healthy == was {
 			continue
@@ -351,11 +347,9 @@ func (n *Node) publishDeviceBirth(d Device) {
 		if !ok {
 			continue
 		}
-		m, err := n.birthMetric(name, v, ts)
-		if err != nil {
-			continue
+		if m, ok := n.birthMetric(name, v, ts); ok {
+			ms = append(ms, m)
 		}
-		ms = append(ms, m)
 	}
 	p, err := Payload{Timestamp: ts, Seq: n.nextSeq(), Metrics: ms}.Encode()
 	n.mu.Unlock()

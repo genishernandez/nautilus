@@ -21,9 +21,13 @@ import (
 //	String, Text, UUID             → ir.TypeString
 //	Template                       → ir.TypeStruct, members matched by name
 //	                                 against the target StructDef
+//	Int8Array..DateTimeArray,
+//	FloatArray, DoubleArray,
+//	BooleanArray, StringArray      → ir.TypeArray of the element's mapping
+//	                                 above (arrays.go has the wire format)
 //
-// Arrays, DataSet, Bytes, File and PropertySet are not represented in the IR
-// and are rejected.
+// DataSet, Bytes, File and PropertySet are not represented in the IR and are
+// rejected.
 
 // ValueFromMetric converts one decoded metric into an ir.Value shaped by t.
 //
@@ -59,6 +63,13 @@ func ValueFromMetric(m Metric, t *ir.Type) (ir.Value, error) {
 //
 // A null metric (IsNull) is "no value" and leaves prev unchanged.
 //
+// An array metric arriving into a prev array must match its length: prev is
+// the declared shape (ir.Zero of an ARRAY [0..6] OF DINT has seven elements),
+// and an array of another length is an error rather than a truncation or a
+// silent resize. A zero-length prev — an array type whose length nothing
+// declared, as StructDefsFromTemplates builds from a definition alone —
+// accepts any length. Elements are coerced to prev's element kind.
+//
 // Unknown members are reported, not fatal: the caller decides the policy
 // (log once and continue, count, or fail in strict mode).
 func ValueFromMetricInto(m Metric, prev ir.Value) (ir.Value, []string, error) {
@@ -67,6 +78,13 @@ func ValueFromMetricInto(m Metric, prev ir.Value) (ir.Value, []string, error) {
 	}
 	if m.Datatype == spb.DataType_Template {
 		return structFromTemplate(m, prev)
+	}
+	if isArrayType(m.Datatype) {
+		v, err := arrayFromMetric(m, prev)
+		if err != nil {
+			return prev, nil, err
+		}
+		return v, nil, nil
 	}
 	v, err := scalarFromMetric(m)
 	if err != nil {
@@ -109,6 +127,58 @@ func scalarFromMetric(m Metric) (ir.Value, error) {
 		return ir.StringVal(s), nil
 	}
 	return ir.Value{}, fmt.Errorf("sparkplug: metric %q has unrepresentable datatype %v", m.Name, m.Datatype)
+}
+
+// arrayFromMetric maps an array metric to an ir array, shaped by prev (see
+// ValueFromMetricInto).
+func arrayFromMetric(m Metric, prev ir.Value) (ir.Value, error) {
+	if m.decodeErr != nil {
+		return ir.Value{}, fmt.Errorf("sparkplug: metric %q: %w", m.Name, m.decodeErr)
+	}
+	var arr []ir.Value
+	switch xs := m.Value.(type) {
+	case []bool:
+		arr = make([]ir.Value, len(xs))
+		for i, x := range xs {
+			arr[i] = ir.BoolVal(x)
+		}
+	case []int64:
+		arr = make([]ir.Value, len(xs))
+		for i, x := range xs {
+			arr[i] = ir.IntVal(x)
+		}
+	case []float64:
+		arr = make([]ir.Value, len(xs))
+		for i, x := range xs {
+			arr[i] = ir.RealVal(x)
+		}
+	case []string:
+		arr = make([]ir.Value, len(xs))
+		for i, x := range xs {
+			arr[i] = ir.StringVal(x)
+		}
+	default:
+		return ir.Value{}, fmt.Errorf("sparkplug: metric %q: %w", m.Name, typeErr(m.Datatype.String()+" slice", m.Value))
+	}
+	switch prev.Kind {
+	case ir.TypeVoid:
+		return ir.Value{Kind: ir.TypeArray, Arr: arr}, nil
+	case ir.TypeArray:
+	default:
+		return ir.Value{}, fmt.Errorf("sparkplug: metric %q is an %v but the target is a %v, not an array",
+			m.Name, m.Datatype, prev.Kind)
+	}
+	if n := len(prev.Arr); n > 0 {
+		if len(arr) != n {
+			return ir.Value{}, fmt.Errorf("sparkplug: metric %q: %v of %d elements, the target array has %d",
+				m.Name, m.Datatype, len(arr), n)
+		}
+		et := &ir.Type{Kind: prev.Arr[0].Kind}
+		for i := range arr {
+			arr[i] = ir.CoerceValue(arr[i], et)
+		}
+	}
+	return ir.Value{Kind: ir.TypeArray, Arr: arr}, nil
 }
 
 // structFromTemplate merges a Template metric into prev, which must be a
@@ -190,6 +260,18 @@ func StructDefsFromTemplates(defs []Metric) (map[string]*ir.StructDef, error) {
 			return ir.RealT, nil
 		case spb.DataType_String, spb.DataType_Text, spb.DataType_UUID:
 			return ir.StringT, nil
+		case spb.DataType_Int8Array, spb.DataType_Int16Array, spb.DataType_Int32Array, spb.DataType_Int64Array,
+			spb.DataType_UInt8Array, spb.DataType_UInt16Array, spb.DataType_UInt32Array, spb.DataType_UInt64Array,
+			spb.DataType_DateTimeArray:
+			// A definition member carries no value, so no length: ArrLen 0,
+			// which ValueFromMetricInto reads as "any length".
+			return &ir.Type{Kind: ir.TypeArray, Elem: ir.IntT}, nil
+		case spb.DataType_FloatArray, spb.DataType_DoubleArray:
+			return &ir.Type{Kind: ir.TypeArray, Elem: ir.RealT}, nil
+		case spb.DataType_BooleanArray:
+			return &ir.Type{Kind: ir.TypeArray, Elem: ir.BoolT}, nil
+		case spb.DataType_StringArray:
+			return &ir.Type{Kind: ir.TypeArray, Elem: ir.StringT}, nil
 		case spb.DataType_Template:
 			nested, _ := mm.Value.(*Template)
 			switch {

@@ -301,6 +301,10 @@ func (d *Driver) SetWriteGate(gate func() bool)        { d.base.SetWriteGate(gat
 func (d *Driver) StructDefs() map[string]*ir.StructDef { return d.base.StructDefs() }
 func (d *Driver) Health() hw.Health                    { return d.base.Health() }
 
+// Connections and ConnectionUp are io.ConnectionReporter: one per source.
+func (d *Driver) Connections() []nio.Connection { return d.base.Connections() }
+func (d *Driver) ConnectionUp(id string) bool   { return d.base.ConnectionUp(id) }
+
 // ── the transport ────────────────────────────────────────────────────────
 
 // insecureTransport is shared by every insecure: source, so its keep-alive

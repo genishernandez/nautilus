@@ -5,6 +5,8 @@
 package modbus
 
 import (
+	"sort"
+
 	nio "github.com/joyautomation/nautilus/io"
 )
 
@@ -121,5 +123,42 @@ func (d *Driver) Quality() map[string]nio.Quality {
 		}
 		s.mu.Unlock()
 	}
+	return out
+}
+
+// Connections lists each source and the tags it delivers — its polled
+// bindings and its __Online companion (io.ConnectionReporter).
+func (d *Driver) Connections() []nio.Connection {
+	out := make([]nio.Connection, 0, len(d.sources))
+	for _, s := range d.sources {
+		seen := map[string]bool{s.cfg.OnlineTagName(): true}
+		for _, br := range s.blocks {
+			for _, t := range br.Bindings {
+				seen[t.Name] = true
+			}
+		}
+		out = append(out, nio.Connection{ID: s.cfg.ID, Inputs: sortedKeys(seen)})
+	}
+	return out
+}
+
+// ConnectionUp reports whether the source is online — the same verdict its
+// __Online companion delivers.
+func (d *Driver) ConnectionUp(id string) bool {
+	s, ok := d.bySource[id]
+	if !ok {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.online
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }

@@ -1113,6 +1113,34 @@ type SourceHealth struct {
 	QueuedWrites   int    `json:"queuedWrites"`
 }
 
+// Connections lists each source and the tags it delivers — its bound tags
+// and its __Online and __LastPollMs companions (io.ConnectionReporter).
+func (b *Base) Connections() []nio.Connection {
+	bySrc := map[*Source][]string{}
+	for name, t := range b.tags {
+		bySrc[t.src] = append(bySrc[t.src], name)
+	}
+	out := make([]nio.Connection, 0, len(b.sources))
+	for _, s := range b.sources {
+		inputs := append(bySrc[s], OnlineTagName(s.cfg.ID), LastPollTagName(s.cfg.ID))
+		sort.Strings(inputs)
+		out = append(out, nio.Connection{ID: s.cfg.ID, Inputs: inputs})
+	}
+	return out
+}
+
+// ConnectionUp is the source's __Online verdict: connected and heard from
+// within StaleAfter.
+func (b *Base) ConnectionUp(id string) bool {
+	s, ok := b.bySource[id]
+	if !ok {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.freshLocked(b.now())
+}
+
 // Health returns the current per-source states and counters.
 func (b *Base) Health() Health {
 	h := Health{Kind: b.kind, Polls: b.polls.Load(), Writes: b.writesN.Load(), Errors: b.errs.Load()}

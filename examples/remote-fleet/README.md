@@ -176,7 +176,7 @@ expected and not part of this proof):
 
 ```sh
 naut sparkplug import --broker tcp://127.0.0.1:1883 --group Water \
-  --metrics 'WellLevel,Pump1,Pump2,DischargePress,SuctionPress,TankLevel,plc1/FM1_FlowLps' \
+  --metrics 'WellLevel,Pump1,Pump2,DischargePress,SuctionPress,TankLevel,FM1/FM1_FlowLps' \
   --writable '*.SpeedSP' \
   --out /tmp/water-live
 diff scada/sparkplug_types.st     /tmp/water-live/sparkplug_types.st
@@ -192,8 +192,8 @@ site's own local tags for exactly this reason (so the two paths have the
 same string to agree on, not because the wire can't supply one) — see
 `scada/sites.yaml`'s comment on the `Booster1` entry. Requires
 `booster-1`'s own flow meter live too (`naut modbus serve`, above) — the
-Sparkplug DEVICE `plc1` births with zero metrics without it, which alone
-would make `plc1/FM1_FlowLps` differ.
+Sparkplug DEVICE `FM1` stays dead without it, which alone would make
+`FM1/FM1_FlowLps` differ.
 
 ## Live walkthrough
 

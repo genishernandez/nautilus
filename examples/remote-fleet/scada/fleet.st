@@ -9,7 +9,7 @@ VAR_EXTERNAL
     Well1__Online     : BOOL;
     Well2__Online     : BOOL;
     Booster1__Online  : BOOL;
-    Booster1_plc1__Online : BOOL;
+    Booster1_FM1__Online : BOOL;
     SitesOnline       : INT;
 
     Well1_Pump1       : Pump;
@@ -18,7 +18,7 @@ VAR_EXTERNAL
     Booster1_Pump2    : Pump;
     AnyPumpRunning    : BOOL;
 
-    Booster1_plc1_FM1_FlowLps : LREAL;
+    Booster1_FM1_FM1_FlowLps : LREAL;
     SystemDemandLps   : LREAL;
 
     Booster1_TankLevel : LREAL;
@@ -50,8 +50,8 @@ AnyPumpRunning := (Well1__Online AND Well1_Pump1.Run)
    guarded on ITS device's own online companion — a Modbus device
    attached to a Sparkplug node has its own __Online distinct from the
    node's. *)
-IF Booster1_plc1__Online THEN
-    SystemDemandLps := Booster1_plc1_FM1_FlowLps;
+IF Booster1_FM1__Online THEN
+    SystemDemandLps := Booster1_FM1_FM1_FlowLps;
 ELSE
     SystemDemandLps := 0.0;
 END_IF;

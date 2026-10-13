@@ -18,7 +18,7 @@ sparkplug:
   edge-node: line1                   # default: the project name
   username: line1                    # password is NEVER here: NAUTILUS_MQTT_PASSWORD
   bdseq-file: /var/lib/nautilus/line1.bdseq
-  device: plc1                       # the field driver's tags as a Sparkplug DEVICE
+  writable: ["*_SP", "Pump*.Speed"]  # what a host may write; omit = read-only
   store-forward: 5000
   default-class: { deadband: 0.5, max-interval: 30s }
   classes:
@@ -30,11 +30,46 @@ sparkplug:
 ```
 
 `naut run` (and a built binary) starts the node alongside the scan
-loop; only `broker` and `group-id` are required. Types map faithfully —
-BOOL→Boolean, integers→Int64, REAL→Double, UDT→Template — and a host can
-write tags back via NCMD (a setpoint written in the SCADA host lands in
-the tag store for the program to act on). `Node Control/Rebirth` is
-honored.
+loop; only `broker` and `group-id` are required. Types map faithfully
+(below), and a host can write the tags `writable:` names back via
+NCMD/DCMD (a setpoint written in the SCADA host lands in the tag store for
+the program to act on). `Node Control/Rebirth` is honored.
+
+## Types
+
+| Tag type | Sparkplug datatype |
+|---|---|
+| `BOOL` | Boolean |
+| any integer (`SINT` … `LINT`, `TIME`, an enumeration) | Int64 |
+| `REAL`, `LREAL` | Double |
+| `STRING` | String |
+| a UDT | Template — its definition in the NBIRTH, each tag an instance |
+| `ARRAY [..] OF BOOL` | BooleanArray |
+| `ARRAY [..] OF` an integer | Int64Array |
+| `ARRAY [..] OF REAL` / `LREAL` | DoubleArray |
+| `ARRAY [..] OF STRING` | StringArray |
+
+The runtime holds every integer as 64 bits and every real as a double, so
+Int64 and Double are the honest datatypes, for an array's elements as for
+a scalar: a Logix `gettime : ARRAY [0..6] OF DINT` publishes as an
+Int64Array of seven.
+
+An array can be a tag of its own or a member of a UDT. In a template
+definition its member's datatype is the array datatype, with no value,
+like every definition member; each instance carries the elements. Arrays
+travel in the metric's `bytes_value` as the Sparkplug 3.0 spec lays them
+out: packed little-endian numbers, a BooleanArray as a 4-byte
+little-endian count followed by its bits packed most-significant first,
+and a StringArray as UTF-8 strings each ended by a NUL. Eclipse Tahu's
+reference encoder agrees on all three. Report by exception treats an
+array like a UDT: when any element moves past its deadband, the whole
+array publishes.
+
+Sparkplug has no datatype for an array of UDTs or a multi-dimensional
+array. A tag of either kind is left out of the birth, and a UDT member of
+either kind is left out of the definition and every instance. Each is
+logged once, and the tag's other members and every other tag still
+publish.
 
 ## Publish classes
 
@@ -53,14 +88,49 @@ is worth publishing:
   ignoring deadband and rate limits — for tags where each edge matters
   (alarms, counters). Unchanged samples still stay quiet.
 
-## Devices and driver health
+## Devices and connection health
 
-`device: plc1` publishes the field driver's input tags as a Sparkplug
-**device** under the edge node, and its DBIRTH/DDEATH follow the driver's
-own connection health: when the EtherNet/IP link drops, the host sees the
-device die — not stale values pretending to be fresh. Everything else
-(computed tags, program outputs) publishes at node level. Omit `device`
-and the whole tag store publishes at node level.
+Every field connection is its own Sparkplug **device** under the edge
+node, and its DBIRTH/DDEATH follow that connection's health: when one
+meter's link drops, the host sees that device die — not stale values
+pretending to be fresh — while every other device stays born.
+
+| Driver | One device per | Device id |
+|---|---|---|
+| `modbus`, `snmp`, `redfish`, `prometheus` | source | the source's `id` |
+| `eip`, `sparkplug-host`, `replay` | driver | the driver's `name:` (default: its type) |
+
+A device carries the input tags its connection delivers, its `__Online`
+companion included. Everything else — computed tags, program state,
+outputs, and every tag of the `memory` loopback, which is no connection —
+publishes at node level. Two connections with one id would share a topic,
+so that is a load error naming both; give a driver a `name:` to choose
+its id.
+
+## Writes
+
+The node is **read-only by default**: an NCMD/DCMD that writes a tag is
+refused unless `writable:` names it. Anyone who can publish to the broker
+can send a command, so this is what stands between the broker and a
+controller. `Node Control/Rebirth` is always honored.
+
+```yaml
+sparkplug:
+  writable:
+    - LevelSP               # one tag
+    - "Pump*.SpeedSP"       # one member of every Pump* UDT tag
+    - Mixer                 # a UDT tag: every member
+```
+
+Patterns are globs over the tag name or a UDT member's dotted path; one
+that matches a tag opens all of its members. A template command carrying
+a writable member and a read-only one writes the first and refuses the
+second. A command must also arrive where the tag is published: a DCMD
+writes only its own device's tags, an NCMD only node-level ones. Array
+writes are not supported yet: a command carrying an array metric, or a
+template command with an array member, has the array refused. The
+template's other members still apply. Every refusal is logged once per
+tag and counted as `commandsRefused` in the node's status.
 
 ## Primary host and store-and-forward
 
@@ -93,6 +163,7 @@ node, _ := sparkplug.New(rt, sparkplug.Config{
     sparkplug.WithPublishClass("fast", sparkplug.RBE{Deadband: 0.1, MaxInterval: 5 * time.Second}),
     sparkplug.WithMetricClass("fast", "PIT_*"),
     sparkplug.WithStoreForward(5000),
+    sparkplug.WithWritable("LevelSP", "Pump*.SpeedSP"), // omit: read-only
     // Any io.Driver's tags can be a device; DBIRTH/DDEATH track its health.
     sparkplug.WithDevice(sparkplug.Device{
         ID: "plc1", Tags: driver.InputNames(),
