@@ -156,6 +156,50 @@ func TestClientBasicFallback(t *testing.T) {
 	}
 }
 
+// A BMC still booting answers the session POST with a 503. That says
+// nothing about sessions: auto mode must not settle on basic auth, and the
+// next poll logs in properly.
+func TestClientTransientLoginFailureKeepsSessions(t *testing.T) {
+	t.Setenv("RF_TEST_PASSWORD", testPassword)
+	var mu sync.Mutex
+	booting := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		b := booting
+		mu.Unlock()
+		switch {
+		case r.Method == http.MethodPost && b:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case r.Method == http.MethodPost:
+			w.Header().Set("X-Auth-Token", "tok123")
+			w.WriteHeader(http.StatusCreated)
+		case r.Header.Get("X-Auth-Token") != "tok123":
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.Write([]byte(`{"ok":true}`))
+		}
+	}))
+	defer srv.Close()
+	c, _ := NewClient(testSource(srv.URL))
+	_, err := c.Get(context.Background(), "/redfish/v1/Systems/1")
+	if err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("login during boot: err = %v, want the 503", err)
+	}
+	noSecret(t, err)
+	if c.AuthMode() == AuthBasic {
+		t.Fatal("a 503 at login pinned auto mode to basic auth")
+	}
+	mu.Lock()
+	booting = false
+	mu.Unlock()
+	if r, err := c.Get(context.Background(), "/redfish/v1/Systems/1"); err != nil || r.Status != 200 {
+		t.Fatalf("after boot: %v %+v", err, r)
+	}
+	if c.AuthMode() != AuthSession || c.Sessions() != 1 {
+		t.Fatalf("mode %s, sessions %d", c.AuthMode(), c.Sessions())
+	}
+}
+
 // The wire shape of a login and a GET, byte for byte: what a BMC sees.
 func TestClientWireShape(t *testing.T) {
 	t.Setenv("RF_TEST_PASSWORD", testPassword)

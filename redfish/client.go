@@ -329,6 +329,9 @@ func (c *Client) ensureAuthLocked(ctx context.Context) error {
 // real BMC 201; either way the token is the header, so any 2xx with an
 // X-Auth-Token is a session. A service that answers the POST without one,
 // or with 404/405/501, does not do sessions: auto mode falls back to basic.
+// Any other refusal (a 503 while the BMC boots, a 500) says nothing about
+// sessions, so it is an error for this poll and the next one tries again —
+// falling back on it would pin a session-only BMC to basic auth for good.
 func (c *Client) loginLocked(ctx context.Context) error {
 	raw, _ := json.Marshal(map[string]string{"UserName": c.user, "Password": c.password})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(SessionsPath), bytes.NewReader(raw))
@@ -354,11 +357,23 @@ func (c *Client) loginLocked(ctx context.Context) error {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		c.havePass = false
 		return &AuthError{Status: resp.StatusCode, Detail: redfishMessage(body)}
+	case !noSessions(resp.StatusCode):
+		return fmt.Errorf("session login: HTTP %d: %s", resp.StatusCode, redfishMessage(body))
 	case c.mode == AuthSession:
 		return fmt.Errorf("session login refused (HTTP %d, no X-Auth-Token) and auth: session forbids basic auth", resp.StatusCode)
 	}
 	c.basic = true
 	return nil
+}
+
+// noSessions reports a session-login answer that means "this service does
+// not do sessions": a 2xx without a token, or no such collection or method.
+func noSessions(status int) bool {
+	switch status {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return true
+	}
+	return status >= 200 && status < 300
 }
 
 // sessionLocation: the Location header, else the body's @odata.id.
