@@ -289,8 +289,10 @@ claims:
       - go ./server TestMetaAdvertisesMemberWrites
   - id: TAG-030
     claim: >-
-      Dotted and indexed paths also address tags in a test's given:/expect:
-      and in a force.
+      Dotted and indexed paths also address tags in a test's given:/expect:,
+      in a force, in the built-in dashboard's tag table (each leaf of a
+      writable struct tag is editable), and through the HMI kit's
+      rt.writeTag.
     source: "#writing-a-member-post-apitags-with-tagmember"
     tests:
       - go ./acceptance TestGivenAndExpectAddressFields

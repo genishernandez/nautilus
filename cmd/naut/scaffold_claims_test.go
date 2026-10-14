@@ -132,10 +132,47 @@ func TestScaffoldedManifestCIGatesOnCheckTestBuild(t *testing.T) {
 	}
 }
 
-// Getting started: a freshly scaffolded project can be checked and built with
-// the CLI alone — naut check and naut build succeed on every manifest
-// template, and the emitted controller is a real file.
-func TestScaffoldedManifestProjectsCheckAndBuild(t *testing.T) {
+// quietly runs a CLI subcommand with its stdout and stderr discarded and
+// returns its exit code.
+func quietly(run func() int) int {
+	oldOut, oldErr := os.Stdout, os.Stderr
+	devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	os.Stdout, os.Stderr = devnull, devnull
+	defer func() {
+		os.Stdout, os.Stderr = oldOut, oldErr
+		devnull.Close()
+	}()
+	return run()
+}
+
+// Getting started: "the fixture comes from nautilus.yaml, so a retuned gain
+// can't drift away from what the tests verify" — through `naut test` itself.
+// The same *_test.yaml passes under the manifest's gain and fails once the
+// gain in nautilus.yaml is retuned.
+func TestNautTestFixtureFollowsTheManifestGain(t *testing.T) {
+	withKp := func(kp string) string {
+		dir := t.TempDir()
+		writeProjectFiles(t, dir, map[string]string{
+			"nautilus.yaml": "tasks:\n  - program: main.st\ntags:\n" +
+				"  - { name: Kp, role: setpoint, init: " + kp + " }\n" +
+				"  - { name: Out, role: state, init: 0.0 }\n",
+			"main.st":        "PROGRAM Main\nOut := Kp * 2.0;\nEND_PROGRAM\n",
+			"gain_test.yaml": "tests:\n  - name: gain doubles the setpoint\n    steps:\n      - scans: 1\n        expect: { Out: 10.0 }\n",
+		})
+		return dir
+	}
+	if code := quietly(func() int { return runTest([]string{withKp("5.0")}) }); code != 0 {
+		t.Fatalf("naut test with the manifest's Kp = 5 exited %d, want 0", code)
+	}
+	if code := quietly(func() int { return runTest([]string{withKp("6.0")}) }); code == 0 {
+		t.Fatal("naut test still passes after Kp was retuned to 6 in nautilus.yaml: the fixture is not the manifest")
+	}
+}
+
+// Getting started: a freshly scaffolded project can be checked, tested and
+// built with the CLI alone — naut check, naut test and naut build succeed on
+// every manifest template, and the emitted controller is a real file.
+func TestScaffoldedManifestProjectsCheckTestAndBuild(t *testing.T) {
 	for _, tc := range []struct{ name, template, language string }{
 		{"minimal-st", tmplMinimal, "st"},
 		{"minimal-fbd", tmplMinimal, "fbd"},
@@ -144,14 +181,11 @@ func TestScaffoldedManifestProjectsCheckAndBuild(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := scaffoldInto(t, scaffold{Name: tc.name, Program: pascalCase(tc.name), Template: tc.template, Language: tc.language})
-			oldOut := os.Stdout
-			devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-			os.Stdout = devnull
-			code := runCheck([]string{dir})
-			os.Stdout = oldOut
-			devnull.Close()
-			if code != 0 {
+			if code := quietly(func() int { return runCheck([]string{dir}) }); code != 0 {
 				t.Fatalf("naut check on the scaffold exited %d", code)
+			}
+			if code := quietly(func() int { return runTest([]string{dir}) }); code != 0 {
+				t.Fatalf("naut test on the scaffold exited %d", code)
 			}
 			out := filepath.Join(t.TempDir(), "controller")
 			if output, code := buildIn(t, dir, "-o", out); code != 0 {

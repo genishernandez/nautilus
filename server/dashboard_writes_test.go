@@ -27,14 +27,36 @@ const absorb = new Proxy(function () {}, {
   set: () => true,
 });
 const never = new Promise(() => {});
+// Elements fetched by id record their event listeners, so a click can be
+// dispatched to the page's real tag-table handler.
+const absorbing = (get) => new Proxy(function () {}, {
+  get: (_t, p) => get(p) ?? (p === Symbol.toPrimitive ? () => "" : p === "then" ? undefined : absorb),
+  apply: () => absorb,
+  construct: () => absorb,
+  set: () => true,
+});
+const listeners = {};
+const elems = {};
+const element = (id) => elems[id] || (elems[id] = absorbing((p) => p === "addEventListener"
+  ? (type, fn) => (listeners[id + ":" + type] = listeners[id + ":" + type] || []).push(fn)
+  : undefined));
+const posts = [];
 const ctx = {
-  document: absorb, window: absorb, localStorage: absorb, navigator: absorb,
+  document: absorbing((p) => (p === "getElementById" ? element : undefined)),
+  window: absorb, localStorage: absorb, navigator: absorb,
   EventSource: function () { return absorb; },
   setTimeout: () => 0, setInterval: () => 0, clearTimeout: () => {}, requestAnimationFrame: () => 0,
   matchMedia: () => absorb, console, Math, JSON, Object, Array, Number, String, Set, Map, Promise, Date,
-  fetch: (url) => url.startsWith("/api/meta")
-    ? Promise.resolve({ ok: true, json: () => Promise.resolve(input.meta), text: () => Promise.resolve("") })
-    : never,
+  fetch: (url, opts) => {
+    if (url.startsWith("/api/meta")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(input.meta), text: () => Promise.resolve("") });
+    }
+    if (opts && opts.method === "POST") {
+      posts.push({ url, body: JSON.parse(opts.body) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}), text: () => Promise.resolve("") });
+    }
+    return never;
+  },
 };
 vm.createContext(ctx);
 vm.runInContext(input.script, ctx);
@@ -44,9 +66,44 @@ setImmediate(() => setImmediate(() => {
     JSON.stringify(input.expand || []) + ".forEach((p) => expanded.add(p)); " +
     "tableModel().map((m) => ({ key: m.key, kind: m.kind, write: m.write, cell: valueCell(m) }))",
     ctx);
-  process.stdout.write(JSON.stringify(out));
+  // Click each requested row's value cell: the event target's closest()
+  // answers from the cell's real rendered HTML, and the event goes to the
+  // handlers the page registered on the tag table.
+  const clicks = [];
+  for (const key of input.clicks || []) {
+    const row = out.find((r) => r.key === key);
+    const html = row ? row.cell : "";
+    const write = (html.match(/data-write="([^"]*)"/) || [])[1];
+    const target = {
+      closest: (sel) => {
+        if (write === undefined) return null;
+        if (sel === ".toggle[data-write]" && /class="toggle/.test(html)) {
+          const on = /class="toggle on"/.test(html);
+          return { dataset: { write }, classList: { contains: (c) => c === "on" && on } };
+        }
+        if (sel === "td.val.writable[data-write]" && /class="val writable/.test(html)) {
+          return absorbing((p) => (p === "dataset" ? { write } : undefined));
+        }
+        return null;
+      },
+    };
+    posts.length = 0;
+    vm.runInContext("editing = null", ctx);
+    for (const fn of listeners["tags:click"] || []) fn({ target });
+    clicks.push({ key, posts: posts.slice(), editing: vm.runInContext("editing", ctx) });
+  }
+  process.stdout.write(JSON.stringify({ rows: out, clicks }));
 }));
 `
+
+type dashClick struct {
+	Key   string `json:"key"`
+	Posts []struct {
+		URL  string         `json:"url"`
+		Body map[string]any `json:"body"`
+	} `json:"posts"`
+	Editing *string `json:"editing"`
+}
 
 type dashRow struct {
 	Key   string  `json:"key"`
@@ -59,6 +116,15 @@ type dashRow struct {
 // runtime's real /api/meta, with the given struct paths expanded, and
 // returns the table rows keyed by their path.
 func dashboardRows(t *testing.T, rt *runtime.Runtime, tags map[string]any, expand ...string) map[string]dashRow {
+	t.Helper()
+	rows, _ := dashboardRun(t, rt, tags, expand, nil)
+	return rows
+}
+
+// dashboardRun is dashboardRows plus a click on the value cell of each row
+// in clicks, reporting what each click POSTed and whether it opened the
+// inline editor.
+func dashboardRun(t *testing.T, rt *runtime.Runtime, tags map[string]any, expand, clicks []string) (map[string]dashRow, map[string]dashClick) {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -75,22 +141,29 @@ func dashboardRows(t *testing.T, rt *runtime.Runtime, tags map[string]any, expan
 		js.Write(m[1])
 		js.WriteByte('\n')
 	}
-	in, _ := json.Marshal(map[string]any{"script": js.String(), "meta": meta, "tags": tags, "expand": expand})
+	in, _ := json.Marshal(map[string]any{"script": js.String(), "meta": meta, "tags": tags, "expand": expand, "clicks": clicks})
 	cmd := exec.Command(node, "-e", dashboardHarness)
 	cmd.Stdin = strings.NewReader(string(in))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("dashboard harness: %v\n%s", err, out)
 	}
-	var rows []dashRow
-	if err := json.Unmarshal(out, &rows); err != nil {
+	var res struct {
+		Rows   []dashRow   `json:"rows"`
+		Clicks []dashClick `json:"clicks"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil {
 		t.Fatalf("harness output: %v\n%s", err, out)
 	}
 	byKey := map[string]dashRow{}
-	for _, r := range rows {
+	for _, r := range res.Rows {
 		byKey[r.Key] = r
 	}
-	return byKey
+	clicked := map[string]dashClick{}
+	for _, c := range res.Clicks {
+		clicked[c.Key] = c
+	}
+	return byKey, clicked
 }
 
 // Getting started: in the dashboard setpoints are click-to-set (BOOLs by
@@ -115,10 +188,10 @@ END_PROGRAM`,
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := dashboardRows(t, rt, map[string]any{
+	rows, clicks := dashboardRun(t, rt, map[string]any{
 		"Level": 12.5, "Pump1Run": true, "Out": 12.5,
 		"TankSP": 50.0, "AutoMode": true, "Latch": false,
-	})
+	}, nil, []string{"TankSP", "AutoMode", "Level", "Pump1Run", "Out"})
 
 	// Setpoints and state: a number is click-to-set, a BOOL is a toggle.
 	if r := rows["TankSP"]; r.Kind != "num" || !strings.Contains(r.Cell, `title="click to set"`) || !strings.Contains(r.Cell, `data-write="TankSP"`) {
@@ -141,6 +214,22 @@ END_PROGRAM`,
 		}
 		if !strings.Contains(r.Cell, owner) {
 			t.Errorf("%s cell does not say who owns it (%q): %s", name, owner, r.Cell)
+		}
+	}
+
+	// Clicking, through the tag table's real click handler: a number opens
+	// the inline editor on its tag, a BOOL toggle POSTs the flipped value,
+	// and a click on an input or output does neither.
+	if c := clicks["TankSP"]; c.Editing == nil || *c.Editing != "TankSP" || len(c.Posts) != 0 {
+		t.Errorf("click on setpoint TankSP = %+v, want the inline editor opened on TankSP", c)
+	}
+	if c := clicks["AutoMode"]; len(c.Posts) != 1 || c.Posts[0].URL != "/api/tags" ||
+		c.Posts[0].Body["name"] != "AutoMode" || c.Posts[0].Body["value"] != false {
+		t.Errorf("click on BOOL setpoint AutoMode posted %+v, want one POST /api/tags {AutoMode: false}", c.Posts)
+	}
+	for _, name := range []string{"Level", "Pump1Run", "Out"} {
+		if c := clicks[name]; c.Editing != nil || len(c.Posts) != 0 {
+			t.Errorf("click on read-only %s = %+v, want no editor and no write", name, c)
 		}
 	}
 }

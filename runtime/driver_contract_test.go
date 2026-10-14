@@ -161,6 +161,20 @@ func (l *leaderFlag) IsLeader() bool { return l.lead }
 // WriteOutputs fires on the first scan, when an output moves, after a failed
 // write and after a redundancy takeover — and is skipped otherwise.
 func TestWriteOutputsTriggersFirstScanFailureAndTakeover(t *testing.T) {
+	// First scan, on its own: no coordinator (so no takeover) and In = 0, so
+	// Out stays at its seed (0) and no output moves. The only reason left to
+	// call WriteOutputs is that this is the first scan.
+	first := &scriptDriver{in: nio.Values{"In": 0.0}}
+	rt0 := newDoubler(t, first, nil)
+	rt0.Scan()
+	if got := first.writeCount(); got != 1 {
+		t.Fatalf("first scan with no output moved: WriteOutputs called %d times, want 1", got)
+	}
+	rt0.Scan()
+	if got := first.writeCount(); got != 1 {
+		t.Fatalf("second quiet scan: WriteOutputs total %d, want still 1", got)
+	}
+
 	drv := &scriptDriver{in: nio.Values{"In": 1.0}}
 	lead := &leaderFlag{lead: true}
 	rt := newDoubler(t, drv, lead)

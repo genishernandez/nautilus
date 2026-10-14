@@ -27,8 +27,12 @@ claims:
     source: "#2-scaffold-a-project"
     tests:
       - go ./cmd/naut TestScaffoldedManifestProjectsPass
-      - go ./cmd/naut TestScaffoldedManifestProjectsCheckAndBuild
-      - go ./cmd/naut TestScaffoldedSDKProjectsGoTest
+      - go ./cmd/naut TestScaffoldedManifestProjectsCheckTestAndBuild
+      - go ./cmd/naut TestNautRunServesDashboardAndState
+    note: >-
+      naut check, naut test and naut build, through the CLI's own entry
+      points, succeed on every manifest template; naut run is the built CLI
+      serving the scaffolded tour.
   - id: GS-003
     claim: >-
       naut check is the CI gate: it compiles every program and cross-checks
@@ -62,7 +66,7 @@ claims:
       - go ./server TestStateSnapshot
       - go ./server TestLandingPage
       - go ./cmd/naut TestProjectDefaultsToLocalhost8080
-      - go ./cmd/naut TestNautRunServesDashboardAndStateOnLocalhost8080
+      - go ./cmd/naut TestNautRunServesDashboardAndState
   - id: GS-006
     claim: >-
       Acceptance tests run against a virtual clock, so a ten-second on-delay
@@ -82,6 +86,7 @@ claims:
     source: "#4-make-it-yours"
     tests:
       - go ./acceptance TestAcceptanceFixtureComesFromTheManifest
+      - go ./cmd/naut TestNautTestFixtureFollowsTheManifestGain
   - id: GS-008
     claim: >-
       In the dashboard setpoints are click-to-set (BOOLs by toggle) while
@@ -136,6 +141,13 @@ claims:
     source: "#getting-started"
     tests:
       - go ./cmd/naut TestReleaseTargetsBuildWithoutCgo
+    partial: true
+    note: >-
+      Asserted: the release config builds ./cmd/naut for darwin, linux and
+      windows on amd64 and arm64 with CGO_ENABLED=0 and names checksums.txt,
+      and the CLI cross-compiles for all six targets. Not asserted: the
+      binary running on macOS, Windows or arm64; CI runs naut on linux/amd64
+      only.
   - id: GS-013
     claim: >-
       naut version answers once the CLI is on PATH.

@@ -59,7 +59,9 @@ claims:
       configured: online-edited program sources are persisted in the retain
       store and reloaded on start (runtime/retain.go,
       TestRetainedProgramApplies), so the edit survives a restart there. The
-      page states no such exception.
+      page states no such exception. The restart is a fresh runtime from the
+      same project in the same process, and 'only committing to git makes an
+      edit permanent' is not asserted.
   - id: OE-007
     claim: >-
       An online edit can be rolled back, restoring the program that ran

@@ -24,12 +24,14 @@ const libHelperST = "(* lib/ helper *)\nFUNCTION_BLOCK Doubler\nVAR_INPUT IN : R
 
 const libScaleFBD = "FUNCTION_BLOCK Scale\nVAR_INPUT IN : REAL; END_VAR\nVAR_OUTPUT OUT : REAL; END_VAR\nFBD\n  OUT := MUL(IN, 3.0)\nEND_FBD\nEND_FUNCTION_BLOCK\n"
 
+const rootTrimFBD = "FUNCTION_BLOCK Trim\nVAR_INPUT IN : REAL; END_VAR\nVAR_OUTPUT OUT : REAL; END_VAR\nFBD\n  OUT := SUB(IN, 1.0)\nEND_FBD\nEND_FUNCTION_BLOCK\n"
+
 const libRungsLD = "FUNCTION_BLOCK Seal\nVAR_INPUT Start : BOOL; Stop : BOOL; END_VAR\nVAR_OUTPUT Run : BOOL; END_VAR\nLD\n  RUNG seal [ Start | Run ] /Stop ( Run )\nEND_LD\nEND_FUNCTION_BLOCK\n"
 
 // Online edits: what a download sends is the library prelude — every
 // PROGRAM-less .st file in the project root AND under lib/, verbatim, then
-// the PROGRAM-less .ld/.fbd libraries transpiled to ST — followed by the
-// program file as written.
+// the PROGRAM-less .ld/.fbd libraries (root and lib/) transpiled to ST —
+// followed by the program file as written.
 func TestComposeCoversRootLevelLibrariesAndBothGraphicalLibraries(t *testing.T) {
 	prog := "PROGRAM Main\nVAR_EXTERNAL x : REAL; y : REAL; END_VAR\nVAR d : Doubler; END_VAR\nd(IN := x);\ny := d.OUT;\nEND_PROGRAM\n"
 	dir := writeTree(t, map[string]string{
@@ -38,6 +40,7 @@ func TestComposeCoversRootLevelLibrariesAndBothGraphicalLibraries(t *testing.T) 
 		"lib/helpers.st": libHelperST,
 		"lib/scale.fbd":  libScaleFBD,
 		"lib/seal.ld":    libRungsLD,
+		"trim.fbd":       rootTrimFBD,
 		"main.st":        prog,
 	})
 	out, stderr, code := compose(t, "", "--json", filepath.Join(dir, "main.st"))
@@ -55,10 +58,11 @@ func TestComposeCoversRootLevelLibrariesAndBothGraphicalLibraries(t *testing.T) 
 	}
 	iScale := strings.Index(res.Prelude, "FUNCTION_BLOCK Scale")
 	iSeal := strings.Index(res.Prelude, "FUNCTION_BLOCK Seal")
-	if iScale < 0 || iSeal < 0 {
-		t.Fatalf("the .fbd and .ld libraries are missing from the prelude:\n%s", res.Prelude)
+	iTrim := strings.Index(res.Prelude, "FUNCTION_BLOCK Trim")
+	if iScale < 0 || iSeal < 0 || iTrim < 0 {
+		t.Fatalf("the .fbd and .ld libraries (lib/scale.fbd, lib/seal.ld, root trim.fbd) are missing from the prelude:\n%s", res.Prelude)
 	}
-	if iScale < iRoot || iScale < iLib || iSeal < iRoot || iSeal < iLib {
+	if min(iScale, iSeal, iTrim) < max(iRoot, iLib) {
 		t.Errorf("transpiled graphical libraries must follow every .st library:\n%s", res.Prelude)
 	}
 	if strings.Contains(res.Prelude, "RUNG") || strings.Contains(res.Prelude, "END_FBD") || strings.Contains(res.Prelude, "END_LD") {
