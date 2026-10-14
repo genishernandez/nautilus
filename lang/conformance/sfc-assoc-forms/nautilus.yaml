@@ -1,0 +1,34 @@
+# sfc-assoc-forms — the two spellings of an action association, and the two
+# kinds of duration. docs/functions.md#sfc-action-qualifiers-and-step-
+# supervision: "Q Target;" / "Q Target(T#3S);" and the standard's textual
+# "Target(Q);" / "Target(Q, T#3S);" compile and mean the same, and a timed
+# qualifier's duration is a TIME literal or a TIME variable. Step A drives
+# twin targets, one per spelling (and per duration kind), so every step of
+# the suite asserts the twins together. Single sfc task (SFC-only feature).
+#
+#   go test ./lang/conformance/ -run 'TestConformance/sfc-assoc-forms'
+name: sfc-assoc-forms
+
+tasks:
+  - program: sfc-assoc-forms.sfc
+    scan: 1ms
+
+tags:
+  - { name: Go,   role: state, init: false, desc: "Idle -> A" }
+  - { name: Next, role: state, init: false, desc: "A -> Idle" }
+  - { name: Dur,  role: state, init: 100, unit: ms, desc: "the TIME variable a duration may name" }
+
+  # N, untimed: nautilus form (1) and IEC textual form (2).
+  - { name: sfc_N1, role: state, init: false }
+  - { name: sfc_N2, role: state, init: false }
+  # L, timed: literal in both forms (1, 2), variable in both forms (3, 4).
+  - { name: sfc_L1, role: state, init: false }
+  - { name: sfc_L2, role: state, init: false }
+  - { name: sfc_L3, role: state, init: false }
+  - { name: sfc_L4, role: state, init: false }
+  # D, timed: literal in the nautilus form (1), variable in the IEC form (2).
+  - { name: sfc_D1, role: state, init: false }
+  - { name: sfc_D2, role: state, init: false }
+
+driver:
+  type: memory

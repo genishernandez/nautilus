@@ -1,0 +1,33 @@
+# tag-alias — a manifest tag's alias: is the vendor-side binding of the tag
+# (on Logix, the alias tag's target). docs/functions.md#dialects: "The
+# nautilus runtime ignores the binding — the tag is a tag — so a simulation
+# runs the same source." Every tag a program touches here carries an
+# alias: naming a rack point, and the programs name the tags, never the
+# points: a start/stop seal-in that must run exactly as it would on plain
+# tags.
+#
+#   go test ./lang/conformance/ -run 'TestConformance/tag-alias'
+name: tag-alias
+
+tasks:
+  - program: tag-alias.st
+    scan: 10ms
+  - name: ld
+    program: tag-alias.ld
+    scan: 10ms
+  - name: fbd
+    program: tag-alias.fbd
+    scan: 10ms
+
+tags:
+  # Shared inputs, each bound to a (synthetic) input point.
+  - { name: StartPB, role: state, init: false, alias: "Local:1:I.Data.3" }
+  - { name: StopPB,  role: state, init: false, alias: "Local:1:I.Data.4" }
+
+  # Outputs, one per language, each bound to an output point.
+  - { name: st_Run,  role: state, init: false, alias: "Local:2:O.Data.0" }
+  - { name: ld_Run,  role: state, init: false, alias: "Local:2:O.Data.1" }
+  - { name: fbd_Run, role: state, init: false, alias: "Local:2:O.Data.2" }
+
+driver:
+  type: memory

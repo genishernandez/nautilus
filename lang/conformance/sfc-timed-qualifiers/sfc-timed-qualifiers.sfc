@@ -3,6 +3,7 @@ VAR_EXTERNAL
     Go : BOOL;  Fork : BOOL;  Next : BOOL;  Back : BOOL;  Rst : BOOL;
     sfc_L : BOOL;  sfc_D : BOOL;  sfc_SD : BOOL;  sfc_DS : BOOL;  sfc_SL : BOOL;
     sfc_CntL : INT;
+    sfc_S : BOOL;  sfc_CntS : INT;
 END_VAR
 SFC
 
@@ -19,6 +20,8 @@ SFC
     sfc_DS(DS, T#100ms);
     sfc_SL(SL, T#100ms);
     L  CountL(T#100ms);
+    S  sfc_S;
+    S  CountS;
   END_STEP
 
   STEP B:
@@ -33,6 +36,8 @@ SFC
     R sfc_SD;
     R sfc_DS;
     R sfc_SL;
+    R sfc_S;
+    R CountS;
   END_STEP
 
   TRANSITION t_go    FROM Idle  TO A     := Go;
@@ -51,6 +56,7 @@ SFC
   END_TRANSITION
 
   ACTION CountL: sfc_CntL := sfc_CntL + 1; END_ACTION
+  ACTION CountS: sfc_CntS := sfc_CntS + 1; END_ACTION
 
 END_SFC
 END_PROGRAM

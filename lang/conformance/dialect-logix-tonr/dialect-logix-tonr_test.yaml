@@ -1,0 +1,69 @@
+# TONR (the logix dialect, composed by `dialect: logix`) on the nautilus
+# runtime. Every step asserts st_, ld_ and fbd_ together. Tasks scan at
+# 1ms; TIME values are compared in ms. The first scan is at t=1ms.
+#
+# What the page promises (docs/functions.md#dialects): TONR is a TON whose
+# Reset clears the accumulated time and Q while TRUE, and
+# t:TONR(PT := T#1S, Reset := t.Q) is a free-running pulse.
+tests:
+  - name: Reset clears ET and Q while TRUE, then the timer times from scratch
+    given: { IN: true }
+    steps:
+      - advance: 6s
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true, st_ET: 5000, ld_ET: 5000, fbd_ET: 5000 }
+      - given: { Reset: true } # IN still TRUE: only Reset clears it
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 0, ld_ET: 0, fbd_ET: 0 }
+      - advance: 7s # held cleared for as long as Reset stays TRUE
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 0, ld_ET: 0, fbd_ET: 0 }
+      - given: { Reset: false }
+        scans: 1 # the scan Reset drops: the TON starts again
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 0, ld_ET: 0, fbd_ET: 0 }
+      - advance: 4.999s
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 4999, ld_ET: 4999, fbd_ET: 4999 }
+      - advance: 1ms
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true, st_ET: 5000, ld_ET: 5000, fbd_ET: 5000 }
+
+  - name: Reset mid-delay clears the accumulated time before Q rose
+    given: { IN: true }
+    steps:
+      - advance: 2s
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 1999, ld_ET: 1999, fbd_ET: 1999 }
+      - given: { Reset: true }
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 0, ld_ET: 0, fbd_ET: 0 }
+      - given: { Reset: false }
+        advance: 3s # 3s since the clear, not 5s since IN rose: still timing
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 2999, ld_ET: 2999, fbd_ET: 2999 }
+
+  - name: without Reset it is a TON - IN dropping clears Q and ET
+    given: { IN: true }
+    steps:
+      - scans: 1 # the scan IN is first seen TRUE: the timer starts
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 0, ld_ET: 0, fbd_ET: 0 }
+      - advance: 4.999s
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 4999, ld_ET: 4999, fbd_ET: 4999 }
+      - advance: 1ms
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true, st_ET: 5000, ld_ET: 5000, fbd_ET: 5000 }
+      - given: { IN: false }
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_ET: 0, ld_ET: 0, fbd_ET: 0 }
+
+  - name: the free-running pulse - Reset := t.Q gives one TRUE scan every period
+    steps:
+      - scans: 1 # t=1ms: the pulse timer starts on the first scan
+        expect: { st_P: false, ld_P: false, fbd_P: false, st_PET: 0, ld_PET: 0, fbd_PET: 0 }
+      - advance: 999ms
+        expect: { st_P: false, ld_P: false, fbd_P: false, st_PET: 999, ld_PET: 999, fbd_PET: 999 }
+      - advance: 1ms # PT reached: Q for this scan
+        expect: { st_P: true, ld_P: true, fbd_P: true, st_PET: 1000, ld_PET: 1000, fbd_PET: 1000 }
+      - scans: 1 # Q fed back as Reset clears it the next scan
+        expect: { st_P: false, ld_P: false, fbd_P: false, st_PET: 0, ld_PET: 0, fbd_PET: 0 }
+      - scans: 1 # Reset FALSE again: the timer restarts
+        expect: { st_P: false, ld_P: false, fbd_P: false, st_PET: 0, ld_PET: 0, fbd_PET: 0 }
+      - advance: 999ms
+        expect: { st_P: false, ld_P: false, fbd_P: false, st_PET: 999, ld_PET: 999, fbd_PET: 999 }
+      - advance: 1ms # and pulses again, one period later
+        expect: { st_P: true, ld_P: true, fbd_P: true, st_PET: 1000, ld_PET: 1000, fbd_PET: 1000 }
+      - scans: 1
+        expect: { st_P: false, ld_P: false, fbd_P: false }

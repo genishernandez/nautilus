@@ -313,12 +313,12 @@ claims:
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/re-entry restarts L and D; a timed-out SL stays off until an R
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/after an R, SL arms again on the next activation
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/R acts once on its step's activation, not on every scan the step is active
-    partial: true
+      - go ./lang/conformance TestConformance/sfc-timed-qualifiers/R clears an S latch - the stored body runs on after the step is left until the R
     note: >-
-      R acting once on its activation scan (not on every scan its step is
-      active), R clearing SD, DS and SL, and a timed-out SL staying off until
-      an R are asserted. R clearing an S-qualified latch is not:
-      sfc-qualifiers has no R on an S target.
+      R acting once on its activation scan, R clearing SD, DS and SL, a
+      timed-out SL staying off until an R, and R clearing an S latch (an
+      S-stored BOOL and an S-stored ACTION body that keeps running in the next
+      step until the R) are asserted.
 
   - id: FN-025
     claim: >-
@@ -330,8 +330,12 @@ claims:
     tests:
       - go ./lang/sfc TestIECAssociationForm
       - go ./lang/sfc TestTimedQualifiersParseAndCheckClean
-    partial: true
-    note: Parsing and checking are asserted; a TIME-variable duration is not run in the corpus.
+      - go ./lang/conformance TestConformance/sfc-assoc-forms
+    note: >-
+      sfc-assoc-forms runs twin targets side by side: N in both spellings, L
+      with a literal and with a TIME variable in both spellings, D in each,
+      asserted equal at every edge; a second test changes the variable (40ms)
+      and the variable-duration twins move while the literal ones do not.
 
   - id: FN-026
     claim: >-
@@ -404,11 +408,11 @@ claims:
     tests:
       - go ./lang/st TestLowerCaseOnlyDuplicates
       - go ./lang/st TestLowerCaseDifferentScopesCoexist
-    partial: true
+      - go ./internal/project TestTagFilesRejectDuplicates/differing only in case
     note: >-
       Variables, FUNCTIONs, FUNCTION_BLOCKs, TYPEs and FB pins are tested,
-      each error naming both spellings. Two manifest tags that differ only
-      in case are not tested.
+      each error naming both spellings; two manifest tags Level / LEVEL are
+      refused with an error naming both and their sources.
 
   - id: FN-032
     claim: >-
@@ -417,14 +421,15 @@ claims:
     source: "#identifiers-are-case-insensitive"
     tests:
       - go ./server TestWriteTagAnyCasing
+      - go ./server TestForceAPIAnyCasing
       - go ./runtime TestTagNamesAreCaseInsensitive
       - go ./lang/conformance TestConformance/st-case-insensitive
-    partial: true
     note: >-
-      Covered: HTTP writes by any casing; Force/Unforce by any casing at the
-      tag store; given:/expect: keys in other casings (the st-case-insensitive
-      corpus runs through the acceptance runner). A force sent over the HTTP
-      API with another casing is not tested.
+      HTTP writes of tags and member paths by any casing; a force sent over
+      HTTP as "level" lands on Level (reported under the declared spelling, no
+      new tag) and an unforce as "LEVEL" removes it; given:/expect: keys in
+      other casings (the st-case-insensitive corpus runs through the
+      acceptance runner).
 
   # ── Project tags in scope ───────────────────────────────────────────
   - id: FN-033
@@ -436,8 +441,11 @@ claims:
       - go ./internal/project TestManifestTagsAreImplicit
       - go ./internal/project TestImplicitTagsBindOnlyWhereUsed
       - go ./lang/st TestImplicitGlobalsBindOnUse
-    partial: true
-    note: Not asserted per language; ST is the main path.
+      - go ./lang/conformance TestConformance/tag-implicit-scope
+    note: >-
+      tag-implicit-scope has an ST, a ladder, an FBD and an SFC program, none
+      with a VAR_EXTERNAL, each reading the shared tags (in a rung, an FBD
+      wire, an SFC transition and action body) and writing its own.
 
   - id: FN-034
     claim: >-
@@ -448,16 +456,15 @@ claims:
     tests:
       - go ./internal/project TestElementaryTagTypes
       - go ./internal/project TestImplicitStructTagBindsInOut
-      - go ./internal/project TestUntypedTagSaysGiveItAType
+      - go ./internal/project TestTagTypeFromInit
+      - go ./internal/project TestTagTypeArrayOfProjectType
+      - go ./internal/project TestUntypedTagErrorWording
       - go ./lang/st TestTagTypesAndUntypedTags
-    partial: true
     note: >-
-      Asserted: elementary type:, a project TYPE, an ARRAY OF REAL, and the
-      untyped-tag error. Not asserted: the type an init: implies (TRUE BOOL,
-      a number REAL, T#5s TIME, other text STRING), or an ARRAY of a project
-      TYPE; both error assertions match only "is a project tag with no type",
-      not the "give it a type:" wording. TestTagTypeAndInitMustAgree was
-      removed: type:/init: disagreement is not promised here.
+      Asserted: every elementary type:, a project TYPE, an ARRAY OF REAL and
+      an ARRAY of a project TYPE; the type init: implies (TRUE BOOL, 5 REAL,
+      T#5s TIME, other text STRING), each used in a way only that type
+      compiles; and the untyped-tag error saying "give Valve a type:".
 
   - id: FN-035
     claim: >-
@@ -468,12 +475,11 @@ claims:
     tests:
       - go ./internal/project TestExplicitDeclarationMustAgreeWithTypedTag
       - go ./internal/project TestProgramsDisagreeingOnAnUntypedTag
-    partial: true
+      - go ./internal/project TestTagTypeDisagreementsNameTheirSources
     note: >-
-      Asserted: the VAR_EXTERNAL disagreement error, and that two programs
-      disagreeing on an untyped tag is an error. Not asserted: that this
-      error names both programs (the test only matches "give it a type: in
-      the manifest"), or the error's position at the declaration.
+      The VAR_EXTERNAL disagreement is reported at the declaration's line; two
+      programs binding an untyped tag as DINT and REAL is an error naming both
+      tasks (main, b) and both types.
 
   - id: FN-036
     claim: >-
@@ -482,8 +488,12 @@ claims:
     source: "#project-tags-are-in-scope"
     tests:
       - go ./internal/project TestLocalShadowsTag
-    partial: true
-    note: Shadowing is asserted; the naut check / editor warning text is not.
+      - go ./cmd/naut TestCheckGoldenShadowWarning
+      - go ./internal/lsp TestShadowWarning
+    note: >-
+      Shadowing at run time; the naut check warning (golden text on the
+      declaration's line) and the language server's warning diagnostic on the
+      declaration.
 
   - id: FN-037
     claim: >-
@@ -492,8 +502,10 @@ claims:
     source: "#project-tags-are-in-scope"
     tests:
       - go ./internal/project TestFunctionBlocksDoNotSeeTagsImplicitly
-    partial: true
-    note: A FUNCTION_BLOCK body is asserted (error without, works with VAR_EXTERNAL); a FUNCTION body is not tested.
+      - go ./internal/project TestFunctionsDoNotSeeTagsImplicitly
+    note: >-
+      A FUNCTION_BLOCK body and a FUNCTION body: each an undeclared-name error
+      without VAR_EXTERNAL, and each reads the tag with one.
 
   - id: FN-038
     claim: >-
@@ -505,8 +517,12 @@ claims:
       - go ./internal/project TestGVLComposesIntoEveryProgram
       - go ./internal/project TestGVLRedeclarationMustAgree
       - go ./lang/st TestFileScopeVarGlobalAheadOfProgram
-    partial: true
-    note: Composition is tested; "starts at zero" is not asserted directly.
+      - go ./internal/project TestGVLGlobalIsAStateTagAtZero
+    note: >-
+      Composition into every program; a GVL global the manifest does not
+      declare is a state-role tag holding the zero of its declared type (BOOL,
+      DINT, TIME) before any scan, while one the manifest declares keeps the
+      manifest's role and init.
 
   # ── Types ───────────────────────────────────────────────────────────
   - id: FN-039
@@ -593,8 +609,11 @@ claims:
     tests:
       - go ./lang/st TestExternalStructFieldAssignment
       - go ./lang/st TestVarInOutExternalStructField
-    partial: true
-    note: Struct fields are tested; array-element assignment on a tag is not.
+      - go ./internal/project TestArrayTagElementAssignsDirectly
+    note: >-
+      Struct-field assignment on a tag; Levels[2] := 41.0 on an ARRAY tag
+      lands in the stored array with the other elements intact, and a second
+      task reads the whole array back from the store.
 
   # ── Enumerations ────────────────────────────────────────────────────
   - id: FN-046
@@ -658,10 +677,10 @@ claims:
     tests:
       - go ./internal/project TestEnumTypedTag
       - go ./lang/conformance TestConformance/st-enum/a tag of an enumerated type starts at the type's initial member
-    partial: true
+      - go ./internal/project TestEnumTagSeededByNumber
     note: >-
-      Seeding by name (init: Run) is asserted. Seeding by number (init: 10)
-      is not: the test only writes 10.0 at run time with SetPath.
+      Seeding by name (init: Run) and by number (init: 10, init: 11 give Run
+      and Fault, compared against the members in the program).
 
   - id: FN-051
     claim: >-
@@ -898,8 +917,13 @@ claims:
     source: "#operators"
     tests:
       - go ./runtime TestDivideByZeroCountsAndKeepsScanning
+      - go ./server TestStateCarriesDivZeroCount
     partial: true
-    note: The runtime counter is tested; its appearance at /api/state under stats.divZero is not.
+    note: >-
+      Page and code disagree on the path. The counter is controller-wide and
+      counted since start, and /api/state carries it, but under scan.divZero
+      (the frame's "scan" stats block), not the stats.divZero the page names;
+      TestStateCarriesDivZeroCount asserts scan.divZero.
 
   - id: FN-070
     claim: MOVE passes its single input through as an assignment (FBD wiring aid).
@@ -1737,8 +1761,19 @@ claims:
       called with a computed index takes a MOVE to its .PRE ahead of the
       rung.
     source: "#arrays-of-instances"
-    tests: []
-    note: Gap. No Logix writer test covers FB instance arrays.
+    tests:
+      - go ./logix/writer TestTimerInstanceArrayOnLogix
+      - go ./logix/writer TestArraysOfBlocks
+    partial: true
+    note: >-
+      Asserted: ARRAY[0..3] OF TON is one TIMER tag with Dimensions 4; with
+      only literal indices each element's preset is in the tag's data and no
+      MOVE is emitted; a computed index takes MOVE(1000,Timers[i].PRE) ahead
+      of its rung. Page and code disagree in one case: when an array is also
+      called with a computed index anywhere, its literal-index calls take a
+      MOVE too (TestArraysOfBlocks: MOVE(2000,Timers[0].PRE)), so "an element
+      called with a literal index carries its preset in the tag's data" does
+      not hold for such an array.
 
   # ── Dialects ────────────────────────────────────────────────────────
   - id: FN-138
@@ -1748,13 +1783,12 @@ claims:
     source: "#dialects"
     tests:
       - go ./internal/dialect TestLogixLibraryParsesAndIsDeclarationsOnly
-    partial: true
+      - go ./internal/project TestDialectNamesAndDefault
     note: >-
       nautilus adding nothing, logix having a library, and siemens reserved
-      and empty are asserted. codesys is not, nor that a project without
-      dialect: gets nautilus. The claim no longer says the logix library is
-      declarations only or that an unknown dialect is an error: the test
-      asserts both, but the page does not promise them.
+      and empty (Sources); a project with no dialect: or dialect: nautilus has
+      no TONR while dialect: logix does, and dialect: siemens and dialect:
+      codesys are accepted by the manifest.
 
   - id: FN-139
     claim: >-
@@ -1762,8 +1796,14 @@ claims:
       time and Q while TRUE; the free-running pulse is t:TONR(PT := T#1S,
       Reset := t.Q).
     source: "#dialects"
-    tests: []
-    note: Gap. No test runs TONR on the nautilus runtime (the writer test only checks the Logix emission).
+    tests:
+      - go ./lang/conformance TestConformance/dialect-logix-tonr
+    note: >-
+      dialect-logix-tonr composes the logix dialect through dialect: logix and
+      runs TONR in ST, ladder and FBD: Reset clears ET and Q and holds them
+      cleared while TRUE, then the timer times from scratch; without Reset it
+      is a TON; and the free-running pulse (Reset := Q, PT 1s) gives one TRUE
+      scan per period, twice in a row.
 
   - id: FN-140
     claim: >-
@@ -1782,19 +1822,28 @@ claims:
     tests:
       - go ./logix/writer TestAliasTags
       - go ./logix/importer TestDialectAndAliasImport
+      - go ./logix/importer TestAliasTagImportsWithAlias
     partial: true
     note: >-
-      The writer's alias tags and the importer's handling of rack points
-      named directly in the logic are asserted. No importer test feeds an
-      export that contains alias tags.
+      The writer's alias tags, the importer turning an export's alias tag
+      (TagType="Alias" AliasFor=...) into a tag with alias:, and rack points
+      named directly in the logic, are asserted. Bug found: the import refuses
+      every rung that names an imported alias tag ("type: StartPB: type has no
+      nautilus declaration") because an L5X alias tag carries no DataType, so
+      an export using alias tags does not come back as a program that names
+      them.
 
   - id: FN-142
     claim: >-
       The nautilus runtime ignores a tag's alias: binding: the tag is a tag,
       so a simulation runs the same source.
     source: "#dialects"
-    tests: []
-    note: Gap. No runtime test shows an aliased tag behaving as a plain tag.
+    tests:
+      - go ./lang/conformance TestConformance/tag-alias
+    note: >-
+      tag-alias gives every tag an alias: naming a rack point and runs a
+      start/stop seal-in on them in ST, ladder and FBD: inputs reach the
+      programs and outputs hold their writes exactly as plain tags.
 
   # ── User function blocks ────────────────────────────────────────────
   - id: FN-143
@@ -2009,8 +2058,12 @@ claims:
     tests:
       - go ./internal/project TestLibDirComposes
       - go ./internal/project TestLibDirDuplicateAcrossRootAndLib
-    partial: true
-    note: Ordering is asserted; mutual forward references across files are not.
+      - go ./internal/project TestLibraryReferencesResolveInEitherDirection
+    note: >-
+      Ordering and duplicate reporting are asserted; a.st (composed first)
+      instantiates a block from b.st and one from a .ld library (composed
+      after every .st), and b.st calls a FUNCTION from a.st, and the project
+      runs.
 
   - id: FN-160
     claim: >-
