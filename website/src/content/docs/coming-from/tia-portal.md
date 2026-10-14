@@ -58,9 +58,9 @@ Standard timers and counters have the IEC pins, so SCL calls such as
 
 | TIA FBD or LAD | nautilus | Status |
 | --- | --- | --- |
-| Network | a `RUNG` in ladder, with a name and a comment. In FBD the netlist is one flat list of wires | Rungs today; FBD networks planned, [#207](https://github.com/joyautomation/nautilus/issues/207) |
-| Network title and comment | the `(* … *)` slot on a rung | Rungs today; FBD planned, [#207](https://github.com/joyautomation/nautilus/issues/207) |
-| `EN` / `ENO` on standard blocks | none: blocks always evaluate. A user block in a ladder rung takes power on its `EN` pin if it declares one | Planned for FBD, [#206](https://github.com/joyautomation/nautilus/issues/206) |
+| Network | a `RUNG` in ladder, with a name and a comment. In FBD the netlist is one flat list of wires | Today. A `NETWORK 'title'` line starts a numbered network in FBD; see [networks](/languages/function-block/#networks) |
+| Network title and comment | the `(* … *)` slot on a rung | Today. The optional title after `NETWORK` |
+| `EN` / `ENO` on standard blocks | any block takes `EN` (TRUE when unbound) and gives `ENO`; see [EN/ENO](/languages/function-block/#eneno-execution-control) | Today |
 | Execution order by network | source order, with a block evaluated before its readers | Today |
 | Block call from the palette | **FB…** in the ladder palette; the FBD palette suggests blocks | Today. Suggesting the project's own `FUNCTION`s in FBD is [#204](https://github.com/joyautomation/nautilus/issues/204) |
 | Open inputs left unconnected | an unconnected input must be bound or dropped from the call | [#205](https://github.com/joyautomation/nautilus/issues/205) |
