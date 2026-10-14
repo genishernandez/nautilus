@@ -1,0 +1,28 @@
+PROGRAM SelectNumericFbd
+(* The same calls as FBD blocks, positional and by pin name. *)
+VAR_EXTERNAL
+    G : BOOL;
+    K, X, Y, Z : INT;
+    D : DINT;
+    R, BIG : REAL;
+    fbd_SELP, fbd_SELF, fbd_MUXF, fbd_MIN3, fbd_MAX3, fbd_MINF, fbd_ABSI : INT;
+    fbd_MAX4 : DINT;
+    fbd_ABSD : DINT;
+    fbd_ABSR, fbd_ABSF : REAL;
+    fbd_TRUNC : LINT;
+END_VAR
+FBD
+  fbd_SELP := SEL(G, X, Y)
+  fbd_SELF := SEL(G := G, IN0 := X, IN1 := Y)
+  fbd_MUXF := MUX(K := K, IN0 := X, IN1 := Y, IN2 := Z)
+  fbd_MIN3 := MIN(X, Y, Z)
+  fbd_MAX3 := MAX(X, Y, Z)
+  fbd_MINF := MIN(IN1 := X, IN2 := Y, IN3 := Z)
+  fbd_MAX4 := MAX(X, Y, Z, D)
+  fbd_ABSI := ABS(X)
+  fbd_ABSD := ABS(D)
+  fbd_ABSR := ABS(R)
+  fbd_ABSF := ABS(IN := R)
+  fbd_TRUNC := TRUNC(BIG)
+END_FBD
+END_PROGRAM

@@ -1,0 +1,33 @@
+PROGRAM SfcAssocForms
+VAR_EXTERNAL
+    Go : BOOL;  Next : BOOL;  Dur : TIME;
+    sfc_N1 : BOOL;  sfc_N2 : BOOL;
+    sfc_L1 : BOOL;  sfc_L2 : BOOL;  sfc_L3 : BOOL;  sfc_L4 : BOOL;
+    sfc_D1 : BOOL;  sfc_D2 : BOOL;
+END_VAR
+SFC
+
+  INITIAL_STEP Idle:
+  END_STEP
+
+  (* Twin targets: nautilus's `Q Target;` / `Q Target(time);` beside the
+     standard's textual `Target(Q);` / `Target(Q, time);`, and a TIME
+     literal beside the TIME variable Dur. *)
+  STEP A:
+    N  sfc_N1;
+    sfc_N2(N);
+    L  sfc_L1(T#100ms);
+    sfc_L2(L, T#100ms);
+    L  sfc_L3(Dur);
+    sfc_L4(L, Dur);
+    D  sfc_D1(T#100ms);
+    sfc_D2(D, Dur);
+  END_STEP
+
+  TRANSITION t_go   FROM Idle TO A    := Go;
+  END_TRANSITION
+  TRANSITION t_next FROM A    TO Idle := Next;
+  END_TRANSITION
+
+END_SFC
+END_PROGRAM

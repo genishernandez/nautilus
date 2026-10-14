@@ -1,0 +1,20 @@
+# Aliased tags on the nautilus runtime: every tag here has alias: naming a
+# rack point, and every step asserts st_, ld_ and fbd_ together. The binding
+# is ignored, so the seal-in reads and writes the tags exactly as plain tags.
+tests:
+  - name: an aliased input reaches the program and an aliased output holds what it writes
+    steps:
+      - scans: 1
+        expect: { st_Run: false, ld_Run: false, fbd_Run: false }
+      - given: { StartPB: true }
+        scans: 1
+        expect: { st_Run: true, ld_Run: true, fbd_Run: true }
+      - given: { StartPB: false } # the output tag carries its own value into the next scan
+        scans: 3
+        expect: { st_Run: true, ld_Run: true, fbd_Run: true }
+      - given: { StopPB: true }
+        scans: 1
+        expect: { st_Run: false, ld_Run: false, fbd_Run: false }
+      - given: { StopPB: false }
+        scans: 3
+        expect: { st_Run: false, ld_Run: false, fbd_Run: false }

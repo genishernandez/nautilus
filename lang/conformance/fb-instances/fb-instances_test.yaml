@@ -1,0 +1,52 @@
+# Two instances of one standard block. Each keeps its own count between
+# scans (edges on CU1 never move c2, and c1's count survives while c2
+# counts), and both its Q and its CV read as inst.Pin in ST, LD, FBD and
+# SFC. Every step asserts all four prefixes.
+tests:
+  - name: edges on one instance leave the other alone, and its count carries across scans
+    steps:
+      - given: { CU1: true }
+        scans: 1
+        expect:
+          { st_CV1: 1, ld_CV1: 1, fbd_CV1: 1, sfc_CV1: 1,
+            st_CV2: 0, ld_CV2: 0, fbd_CV2: 0, sfc_CV2: 0 }
+      - given: { CU1: false }
+        scans: 5 # idle scans: the count is retained
+        expect:
+          { st_CV1: 1, ld_CV1: 1, fbd_CV1: 1, sfc_CV1: 1,
+            st_Q1: false, ld_Q1: false, fbd_Q1: false, sfc_Q1: false,
+            st_CV2: 0, ld_CV2: 0, fbd_CV2: 0, sfc_CV2: 0 }
+      - given: { CU1: true } # second edge, scans later: reaches PV
+        scans: 1
+        expect:
+          { st_CV1: 2, ld_CV1: 2, fbd_CV1: 2, sfc_CV1: 2,
+            st_Q1: true, ld_Q1: true, fbd_Q1: true, sfc_Q1: true,
+            st_CV2: 0, ld_CV2: 0, fbd_CV2: 0, sfc_CV2: 0,
+            st_Q2: false, ld_Q2: false, fbd_Q2: false, sfc_Q2: false }
+
+  - name: the second instance counts on its own while the first holds its count
+    steps:
+      - given: { CU1: true }
+        scans: 1
+      - given: { CU1: false, CU2: true }
+        scans: 1
+        expect:
+          { st_CV1: 1, ld_CV1: 1, fbd_CV1: 1, sfc_CV1: 1,
+            st_CV2: 1, ld_CV2: 1, fbd_CV2: 1, sfc_CV2: 1 }
+      - given: { CU2: false }
+        scans: 3
+      - given: { CU2: true }
+        scans: 1
+        expect:
+          { st_CV1: 1, ld_CV1: 1, fbd_CV1: 1, sfc_CV1: 1,
+            st_Q1: false, ld_Q1: false, fbd_Q1: false, sfc_Q1: false,
+            st_CV2: 2, ld_CV2: 2, fbd_CV2: 2, sfc_CV2: 2,
+            st_Q2: true, ld_Q2: true, fbd_Q2: true, sfc_Q2: true }
+
+  - name: one input rising for both counts each instance once
+    steps:
+      - given: { CU1: true, CU2: true }
+        scans: 1
+        expect:
+          { st_CV1: 1, ld_CV1: 1, fbd_CV1: 1, sfc_CV1: 1,
+            st_CV2: 1, ld_CV2: 1, fbd_CV2: 1, sfc_CV2: 1 }

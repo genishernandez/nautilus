@@ -30,6 +30,10 @@ tags:
   - { name: sfc_SL, role: state, init: false, desc: "SL: on for 100ms from A's activation, even after A is left; R cuts it short" }
   # An ACTION body under L: counts the scans it runs.
   - { name: sfc_CntL, role: state, init: 0, desc: "scans the L body ran (100 timed + 1 final)" }
+  # S on A, R on Clear: a stored BOOL and a stored ACTION body (counts the
+  # scans it runs) that only Clear's R ends.
+  - { name: sfc_S,    role: state, init: false, desc: "S: set on A's activation, cleared by Clear's R" }
+  - { name: sfc_CntS, role: state, init: 0, desc: "scans the S-stored body ran" }
 
 driver:
   type: memory

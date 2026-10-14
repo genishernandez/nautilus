@@ -1,0 +1,110 @@
+# fn-ops — the operator blocks of docs/functions.md "Operators": AND, OR,
+# XOR (logical on BOOL, n-ary), NOT, ADD and MUL (n-ary), SUB (binary), DIV
+# and MOD on integers, MOVE, and the six comparisons on INT, REAL and TIME.
+# FBD calls the blocks by name; ST writes the operators they lower to. Every
+# step asserts both. Bitwise AND/OR/XOR/NOT on integers is st-bitwise.
+#
+#   go test ./lang/conformance/ -run 'TestConformance/fn-ops'
+#   go run ./cmd/naut test lang/conformance/fn-ops
+name: fn-ops
+
+tasks:
+  - program: fn-ops.st   # the first task is always "main"; its prefix is still st_
+    scan: 10ms
+  - name: fbd
+    program: fn-ops.fbd
+    scan: 10ms
+
+tags:
+  # Shared inputs.
+  - { name: A, role: state, init: false }
+  - { name: B, role: state, init: false }
+  - { name: C, role: state, init: false }
+  - { name: X, role: state, init: 0 }
+  - { name: Y, role: state, init: 0 }
+  - { name: Z, role: state, init: 0 }
+  - { name: R, role: state, init: 0.0 }
+  - { name: RX, role: state, init: 0.0 }
+  - { name: RY, role: state, init: 0.0 }
+  - { name: T1, role: state, init: 0 }
+  - { name: T2, role: state, init: 0 }
+  - { name: S, role: state, init: '' }
+
+  # Outputs, one set per language.
+  - { name: st_AND, role: state, init: false }
+  - { name: st_OR, role: state, init: false }
+  - { name: st_XOR, role: state, init: false }
+  - { name: st_NOT, role: state, init: false }
+  - { name: st_AND3, role: state, init: false }
+  - { name: st_OR3, role: state, init: false }
+  - { name: st_XOR3, role: state, init: false }
+  - { name: st_MOVEB, role: state, init: false }
+  - { name: st_ADD3, role: state, init: 0 }
+  - { name: st_MUL3, role: state, init: 0 }
+  - { name: st_SUB, role: state, init: 0 }
+  - { name: st_DIV, role: state, init: 0 }
+  - { name: st_MOD, role: state, init: 0 }
+  - { name: st_MOVEI, role: state, init: 0 }
+  - { name: st_ADDR, role: state, init: 0.0 }
+  - { name: st_MULR, role: state, init: 0.0 }
+  - { name: st_SUBR, role: state, init: 0.0 }
+  - { name: st_MOVER, role: state, init: 0.0 }
+  - { name: st_MOVES, role: state, init: '' }
+  - { name: st_GT, role: state, init: false }
+  - { name: st_GE, role: state, init: false }
+  - { name: st_LT, role: state, init: false }
+  - { name: st_LE, role: state, init: false }
+  - { name: st_EQ, role: state, init: false }
+  - { name: st_NE, role: state, init: false }
+  - { name: st_RGT, role: state, init: false }
+  - { name: st_RGE, role: state, init: false }
+  - { name: st_RLT, role: state, init: false }
+  - { name: st_RLE, role: state, init: false }
+  - { name: st_REQ, role: state, init: false }
+  - { name: st_RNE, role: state, init: false }
+  - { name: st_TGT, role: state, init: false }
+  - { name: st_TGE, role: state, init: false }
+  - { name: st_TLT, role: state, init: false }
+  - { name: st_TLE, role: state, init: false }
+  - { name: st_TEQ, role: state, init: false }
+  - { name: st_TNE, role: state, init: false }
+  - { name: fbd_AND, role: state, init: false }
+  - { name: fbd_OR, role: state, init: false }
+  - { name: fbd_XOR, role: state, init: false }
+  - { name: fbd_NOT, role: state, init: false }
+  - { name: fbd_AND3, role: state, init: false }
+  - { name: fbd_OR3, role: state, init: false }
+  - { name: fbd_XOR3, role: state, init: false }
+  - { name: fbd_MOVEB, role: state, init: false }
+  - { name: fbd_ADD3, role: state, init: 0 }
+  - { name: fbd_MUL3, role: state, init: 0 }
+  - { name: fbd_SUB, role: state, init: 0 }
+  - { name: fbd_DIV, role: state, init: 0 }
+  - { name: fbd_MOD, role: state, init: 0 }
+  - { name: fbd_MOVEI, role: state, init: 0 }
+  - { name: fbd_ADDR, role: state, init: 0.0 }
+  - { name: fbd_MULR, role: state, init: 0.0 }
+  - { name: fbd_SUBR, role: state, init: 0.0 }
+  - { name: fbd_MOVER, role: state, init: 0.0 }
+  - { name: fbd_MOVES, role: state, init: '' }
+  - { name: fbd_GT, role: state, init: false }
+  - { name: fbd_GE, role: state, init: false }
+  - { name: fbd_LT, role: state, init: false }
+  - { name: fbd_LE, role: state, init: false }
+  - { name: fbd_EQ, role: state, init: false }
+  - { name: fbd_NE, role: state, init: false }
+  - { name: fbd_RGT, role: state, init: false }
+  - { name: fbd_RGE, role: state, init: false }
+  - { name: fbd_RLT, role: state, init: false }
+  - { name: fbd_RLE, role: state, init: false }
+  - { name: fbd_REQ, role: state, init: false }
+  - { name: fbd_RNE, role: state, init: false }
+  - { name: fbd_TGT, role: state, init: false }
+  - { name: fbd_TGE, role: state, init: false }
+  - { name: fbd_TLT, role: state, init: false }
+  - { name: fbd_TLE, role: state, init: false }
+  - { name: fbd_TEQ, role: state, init: false }
+  - { name: fbd_TNE, role: state, init: false }
+
+driver:
+  type: memory

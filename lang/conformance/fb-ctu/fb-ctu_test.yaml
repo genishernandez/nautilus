@@ -1,0 +1,101 @@
+# CTU conformance. CTU counts rising CU edges up from 0; Q is TRUE while
+# CV >= PV; R resets CV := 0 and dominates a CU edge on the same scan.
+# Every step asserts st_, ld_ and fbd_ together.
+tests:
+  - name: from power-up CV is 0 and Q is FALSE
+    steps:
+      - scans: 3
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_CV: 0, ld_CV: 0, fbd_CV: 0 }
+
+  - name: counts one per rising CU edge and Q rises the scan CV reaches PV
+    steps:
+      - scans: 1
+        expect: { st_CV: 0, ld_CV: 0, fbd_CV: 0 }
+      - given: { CU: true } # edge 1
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+      - given: { CU: false }
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+      - given: { CU: true } # edge 2: the edge before Q
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_CV: 2, ld_CV: 2, fbd_CV: 2 }
+      - given: { CU: false }
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_CV: 2, ld_CV: 2, fbd_CV: 2 }
+      - given: { CU: true } # edge 3: CV = PV, Q rises on the scan of the edge
+        scans: 1
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true, st_CV: 3, ld_CV: 3, fbd_CV: 3 }
+
+  - name: CU held TRUE counts once, not every scan, and its fall does not count
+    steps:
+      - scans: 1
+      - given: { CU: true }
+        scans: 1
+        expect: { st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+      - scans: 10
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+      - given: { CU: false }
+        scans: 1
+        expect: { st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+
+  - name: Q stays TRUE as counting continues past PV (CV >= PV)
+    given: { PV: 1 }
+    steps:
+      - given: { CU: true }
+        scans: 1
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true, st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+      - given: { CU: false }
+        scans: 1
+      - given: { CU: true }
+        scans: 1
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true, st_CV: 2, ld_CV: 2, fbd_CV: 2 }
+
+  - name: R resets CV to 0 and drops Q
+    given: { PV: 2 }
+    steps:
+      - given: { CU: true }
+        scans: 1
+      - given: { CU: false }
+        scans: 1
+      - given: { CU: true }
+        scans: 1
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true, st_CV: 2, ld_CV: 2, fbd_CV: 2 }
+      - given: { R: true }
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_CV: 0, ld_CV: 0, fbd_CV: 0 }
+      - given: { R: false, CU: false } # releasing R leaves CV at 0
+        scans: 2
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false, st_CV: 0, ld_CV: 0, fbd_CV: 0 }
+
+  - name: R dominates a CU edge on the same scan, and edges while R is held do not count
+    steps:
+      - given: { CU: true }
+        scans: 1
+        expect: { st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+      - given: { CU: false }
+        scans: 1
+      - given: { R: true, CU: true } # CU rises while R is TRUE: reset wins
+        scans: 1
+        expect: { st_CV: 0, ld_CV: 0, fbd_CV: 0 }
+      - given: { CU: false }
+        scans: 1
+      - given: { CU: true } # another rise, R still held
+        scans: 1
+        expect: { st_CV: 0, ld_CV: 0, fbd_CV: 0 }
+      - given: { R: false } # CU held across R's release: not a new edge
+        scans: 1
+        expect: { st_CV: 0, ld_CV: 0, fbd_CV: 0 }
+      - given: { CU: false }
+        scans: 1
+      - given: { CU: true }
+        scans: 1
+        expect: { st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+
+  - name: first scan with CU already TRUE counts (the edge memory starts FALSE)
+    given: { CU: true }
+    steps:
+      - scans: 1
+        expect: { st_CV: 1, ld_CV: 1, fbd_CV: 1 }
+      - scans: 3
+        expect: { st_CV: 1, ld_CV: 1, fbd_CV: 1 }

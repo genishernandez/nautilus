@@ -1,0 +1,30 @@
+# ld-assign — the ladder assignment element { Tag := expr; ... }: made
+# only when the rung has power at that point, power passing through it
+# unchanged, several chained with ";". ST writes the same logic as an IF.
+# FBD has no assignment element (it is the FBD SEL the rung compiles to),
+# so it has no column here.
+#
+#   go test ./lang/conformance/ -run 'TestConformance/ld-assign'
+name: ld-assign
+
+tasks:
+  - program: ld-assign.st
+    scan: 10ms
+  - name: ld
+    program: ld-assign.ld
+    scan: 10ms
+
+tags:
+  - { name: A, role: state, init: false, desc: "Contact ahead of the assignment" }
+  - { name: B, role: state, init: false, desc: "Contact after the assignment" }
+  - { name: X, role: state, init: 0,     desc: "The value assigned" }
+
+  - { name: st_Y, role: state, init: 0 }
+  - { name: st_N, role: state, init: 0 }
+  - { name: st_P, role: state, init: false }
+  - { name: ld_Y, role: state, init: 0 }
+  - { name: ld_N, role: state, init: 0 }
+  - { name: ld_P, role: state, init: false }
+
+driver:
+  type: memory

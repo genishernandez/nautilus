@@ -1,0 +1,57 @@
+# R_TRIG conformance. Q is TRUE for exactly the one scan in which CLK is
+# seen TRUE after having been FALSE on the scan before (the edge memory
+# starts FALSE, as the standard's M := FALSE). Every step asserts st_, ld_
+# and fbd_ together.
+tests:
+  - name: CLK FALSE from power-up never pulses
+    steps:
+      - scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+      - scans: 5
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+
+  - name: a rising edge pulses for exactly one scan
+    steps:
+      - scans: 2 # the scan before the rise: CLK FALSE
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+      - given: { CLK: true }
+        scans: 1 # the scan of the rise
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true }
+      - scans: 1 # the scan after: CLK still TRUE, pulse is over
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+      - scans: 4 # CLK held TRUE fires nothing more
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+
+  - name: the falling edge itself does not pulse
+    given: { CLK: true }
+    steps:
+      - scans: 2
+      - given: { CLK: false }
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+      - scans: 2
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+
+  - name: first scan with CLK already TRUE pulses once (the memory starts FALSE)
+    given: { CLK: true }
+    steps:
+      - scans: 1
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true }
+      - scans: 3
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+
+  - name: each rise of a toggling CLK pulses once
+    steps:
+      - scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+      - given: { CLK: true }
+        scans: 1
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true }
+      - given: { CLK: false }
+        scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
+      - given: { CLK: true }
+        scans: 1
+        expect: { st_Q: true, ld_Q: true, fbd_Q: true }
+      - scans: 1
+        expect: { st_Q: false, ld_Q: false, fbd_Q: false }
