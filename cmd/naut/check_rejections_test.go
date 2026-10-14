@@ -75,7 +75,7 @@ func TestCheckRejects(t *testing.T) {
 
 		// Function Block Diagram (FBD-026 .. FBD-029)
 		{name: "FBD FUNCTION", file: "p.fbd", src: "FUNCTION f : REAL\nVAR_INPUT\n  x : REAL;\nEND_VAR\nFBD\n  f := x\nEND_FBD\nEND_FUNCTION\n",
-			want: "?", bug: "a FUNCTION with an FBD body is accepted by naut check (exit 0) although the docs say authoring a FUNCTION in FBD is not supported"},
+			want: "a FUNCTION can't have an FBD body"},
 		{name: "FBD IF", file: "p.fbd", src: fbdHead + "  IF A THEN\n    Out := B\n  END_IF\n" + fbdTail,
 			want: `expected a wire, coil, or block, got "IF"`},
 		{name: "FBD CASE", file: "p.fbd", src: fbdHead + "  CASE i OF\n  1: Out := B\n  END_CASE\n" + fbdTail,
