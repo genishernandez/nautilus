@@ -82,6 +82,18 @@ func derefErr(caret Token) error {
 	return fmt.Errorf("line %d: the ^ dereference operator is not supported (Nautilus has no pointers or REF_TO); use the variable directly", caret.Line)
 }
 
+// calendarLitErr refuses a date or time-of-day literal (D#, DATE#, TOD#,
+// TIME_OF_DAY#, DT#, DATE_AND_TIME#). Those types are not run-time types, so
+// their literals are rejected too, rather than compiling as bare integers.
+func calendarLitErr(tok Token) error {
+	prefix, _, _ := strings.Cut(tok.Literal, "#")
+	switch strings.ToUpper(prefix) {
+	case "D", "DATE", "LDATE", "TOD", "TIME_OF_DAY", "LTOD", "DT", "DATE_AND_TIME", "LDT":
+		return fmt.Errorf("line %d: %s# literals are not supported: DATE, TIME_OF_DAY and DATE_AND_TIME are not run-time types", tok.Line, strings.ToUpper(prefix))
+	}
+	return nil
+}
+
 func (p *Parser) match(tt TokenType) bool {
 	if p.peek().Type == tt {
 		p.advance()
@@ -1214,6 +1226,9 @@ func (p *Parser) parsePrimary() (Expression, error) {
 		return &TimeLit{Raw: tok.Literal, Pos: pos}, nil
 	case TokenTypedLiteral:
 		p.advance()
+		if err := calendarLitErr(tok); err != nil {
+			return nil, err
+		}
 		return buildTypedLit(tok.Literal, pos), nil
 	case TokenLParen:
 		p.advance()
