@@ -7,6 +7,7 @@ import { Badge } from '@astrojs/starlight/components';
 import { STATUS_VARIANT, docsUrl, loadRuntime, pageSlug, refUrl, sourceUrl, verdictMeta } from '../../../lib/runtime';
 import { commitUrl, formatDate, loadVerified } from '../../../lib/verified';
 import '../../../styles/verified.css';
+import { RUNTIME_LISTED } from '../../../lib/runtime-listed.mjs';
 
 export function getStaticPaths() {
   const r = loadRuntime();
@@ -28,6 +29,7 @@ const split = (ref: string) => ref.replace(/^(go|naut) /, '').split(/ (.*)/s);
     title: `Verified: ${page.title}`,
     description: `Each behaviour the ${page.title} page promises, with the tests that prove it in the last green CI run.`,
     tableOfContents: false,
+    head: RUNTIME_LISTED ? [] : [{ tag: 'meta', attrs: { name: 'robots', content: 'noindex' } }],
     prev: false,
     next: false,
   }}
