@@ -399,6 +399,12 @@ func (b Binding) validateLocator(f hw.Field) error {
 		}
 	}
 	if b.Expr != "" {
+		// The expression is the whole conversion: the member gets its
+		// result, coerced, and nothing else. Accepting map/scale/rate here
+		// would be a manifest that says one thing and delivers another.
+		if hb := b.Binding; hb.Map != nil || hb.Eq != nil || hb.Rate || hb.Width != 0 || hb.Scale != 0 || hb.Offset != 0 || hb.Ports != nil {
+			return fmt.Errorf("expr: takes no map/eq/rate/width/scale/offset/ports — write the arithmetic into the expression, and put rate: on a from: selector")
+		}
 		expr, err := hw.ParseExpr(b.Expr)
 		if err != nil {
 			return err

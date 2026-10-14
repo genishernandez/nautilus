@@ -120,6 +120,12 @@ func TestManifestValidation(t *testing.T) {
 		{"from no metric", func(m *Manifest) {
 			m.Tags[0].Members["CpuPct"] = Binding{Expr: "x", From: map[string]Selector{"x": {}}}
 		}, "missing metric"},
+		{"expr with scale", func(m *Manifest) {
+			m.Tags[0].Members["CpuPct"] = Binding{Expr: "1", Binding: hw.Binding{Scale: 100}}
+		}, "expr: takes no"},
+		{"expr with rate", func(m *Manifest) {
+			m.Tags[0].Members["CpuPct"] = Binding{Expr: "x", From: map[string]Selector{"x": {Metric: "m"}}, Binding: hw.Binding{Rate: true}}
+		}, "expr: takes no"},
 		{"write unknown tag", func(m *Manifest) {
 			m.Writes = []hw.WriteDecl{{Name: "X", Tag: "NOPE", Member: "Load1"}}
 		}, "unknown tag"},
