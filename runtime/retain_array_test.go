@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/joyautomation/nautilus/internal/k8sapi"
 	"github.com/joyautomation/nautilus/lang/ir"
+	"github.com/joyautomation/nautilus/lang/st"
 	"github.com/joyautomation/nautilus/retain"
 )
 
@@ -309,12 +311,22 @@ func TestRetainSkipsArrayOfFunctionBlocks(t *testing.T) {
 	if !retainable(nested) {
 		t.Fatal("an array of arrays of INT reads as unretainable")
 	}
-	// The tag model refuses a TON-typed tag but accepts an ARRAY OF TON, so
-	// a project can declare one as a setpoint.
+	// The tag model refuses `type: ARRAY[1..2] OF TON` (as it refuses
+	// `type: TON`), so a manifest cannot type a tag that way. An untyped
+	// setpoint still takes the type a program's VAR_EXTERNAL declares for
+	// it, and the lowerer refuses only a call on an FB global, not the
+	// declaration: that is the route left to such a tag, and why the skip
+	// stays.
+	if _, err := New(Options{
+		Program: `PROGRAM Main VAR_EXTERNAL Timers : ARRAY[1..2] OF TON; END_VAR END_PROGRAM`,
+		Tags:    []TagDef{Typed("Timers", RoleSetpoint, "ARRAY[1..2] OF TON")},
+	}); err == nil || !errors.Is(err, st.ErrFunctionBlockType) {
+		t.Fatalf("type: ARRAY[1..2] OF TON: err = %v, want the function-block refusal", err)
+	}
 	rt, err := New(Options{
 		Program: `PROGRAM Main VAR_EXTERNAL Timers : ARRAY[1..2] OF TON; SP : REAL; END_VAR END_PROGRAM`,
 		Tags: []TagDef{
-			Typed("Timers", RoleSetpoint, "ARRAY[1..2] OF TON"),
+			{Name: "Timers", Role: RoleSetpoint},
 			Setpoint("SP", 65.0),
 		},
 		Retain: &fakeStore{},

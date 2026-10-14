@@ -44,15 +44,26 @@ func Types(prog *Program) (map[string]*ir.Type, error) {
 }
 
 // ErrFunctionBlockType is what ResolveTypeName's refusal of a
-// function-block type wraps, standard (TON) or project-declared.
+// function-block type wraps, standard (TON) or project-declared, whether
+// the type is the block itself or holds one (an ARRAY OF TON, a STRUCT
+// with a TON member).
 var ErrFunctionBlockType = errors.New("a function block — an instance is program state, not a tag")
+
+// fbInsideError is the refusal of a type that holds a function block
+// rather than naming one: the message names the block, and errors.Is
+// still finds ErrFunctionBlockType.
+type fbInsideError struct{ msg string }
+
+func (e *fbInsideError) Error() string { return e.msg }
+func (e *fbInsideError) Unwrap() error { return ErrFunctionBlockType }
 
 // ResolveTypeName resolves a type as a manifest writes it — an IEC
 // elementary type (`INT`, `REAL`, `TIME`, `STRING`), a TYPE
 // the project declares (`Motor`), or an array of either
 // (`ARRAY[1..4] OF REAL`) — against types, the project's TYPE table. A
 // function-block type is refused: an FB instance is program state, never a
-// tag.
+// tag. So is a type that holds one at any depth — an ARRAY OF TON, an
+// array of a project block, a STRUCT with a TON member.
 func ResolveTypeName(name string, types map[string]*ir.Type) (*ir.Type, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -74,15 +85,47 @@ func ResolveTypeName(name string, types map[string]*ir.Type) (*ir.Type, error) {
 	if t.Kind == ir.TypeFB {
 		return nil, fmt.Errorf("%s is %w", name, ErrFunctionBlockType)
 	}
-	// An array of a standard block is a tag type (retain skips it). A
-	// project block's entry from Types has no FBDef to build instances
-	// from, so an array of one stays the unknown type it was.
-	for e := t.Elem; e != nil; e = e.Elem {
-		if e.Kind == ir.TypeFB && e.FB == nil {
-			return nil, fmt.Errorf("unknown type %q", e.Name)
+	if fb, member := fbInside(t, "", map[*ir.StructDef]bool{}); fb != "" {
+		if member == "" {
+			// An array of blocks, at any nesting.
+			return nil, &fbInsideError{fmt.Sprintf(
+				"%s — %s is a function block; an instance is program state, not a tag", name, fb)}
 		}
+		return nil, &fbInsideError{fmt.Sprintf(
+			"%s — member %s is a %s, a function block; an instance is program state, not a tag", name, member, fb)}
 	}
 	return t, nil
+}
+
+// fbInside finds a function block t holds — as an array's element or a
+// struct's member, at any depth — and returns its name and, when it sits
+// under a struct, the member path to it (`Delay`, `Stages.Delay`). An
+// array's element is reached without a path step: every element holds the
+// same type. Empty when t holds none.
+func fbInside(t *ir.Type, path string, seen map[*ir.StructDef]bool) (fb, member string) {
+	switch {
+	case t == nil:
+		return "", ""
+	case t.Kind == ir.TypeFB:
+		if t.Name == "" && t.FB != nil {
+			return t.FB.Name, path
+		}
+		return t.Name, path
+	case t.Kind == ir.TypeArray:
+		return fbInside(t.Elem, path, seen)
+	case t.Kind == ir.TypeStruct && t.Struct != nil && !seen[t.Struct]:
+		seen[t.Struct] = true
+		for _, f := range t.Struct.Fields {
+			p := f.Name
+			if path != "" {
+				p = path + "." + f.Name
+			}
+			if fb, member := fbInside(f.Type, p, seen); fb != "" {
+				return fb, member
+			}
+		}
+	}
+	return "", ""
 }
 
 // FileGlobal is one variable a file-level VAR_GLOBAL block (a GVL)

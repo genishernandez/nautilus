@@ -19,8 +19,9 @@ claims:
     claim: >-
       Every `role: setpoint` tag is saved to the retain store, whatever its
       shape: a scalar, a struct, an array of scalars, an array of structs, or a
-      multi-dimensional array. The one exception, an array of function-block
-      instances, is not saved and the log names the tag once.
+      multi-dimensional array. An array of function-block instances, which
+      reaches the store only through an untyped setpoint a program's
+      VAR_EXTERNAL declares, is not saved and the log names the tag once.
     source: "#retained-state"
     tests:
       - go ./runtime TestRetainStateContents
@@ -34,9 +35,10 @@ claims:
       a struct, and arrays of REAL, DINT, BOOL, TIME, STRING, a struct with an
       enumerated member, and a two-dimensional INT array, through the file
       store (restart) and the ConfigMap store (failover). Each element comes
-      back at its declared kind. The skip test asserts an ARRAY OF TON
-      setpoint is left out, the rest of the state still saves, and the tag
-      is logged once across two saver ticks.
+      back at its declared kind. The skip test asserts that `type: ARRAY[1..2]
+      OF TON` is refused, that an untyped setpoint a VAR_EXTERNAL declares
+      ARRAY[1..2] OF TON is left out, that the rest of the state still
+      saves, and that the tag is logged once across two saver ticks.
 
   - id: RED-003
     claim: An integer-typed setpoint tag is restored with its retained value.

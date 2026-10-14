@@ -141,7 +141,13 @@ number`). A typed `setpoint` or `state` tag with no `init:` starts at the
 zero of its type. A type that is none of the above names what the project
 does declare (`type Widget is neither an IEC elementary type … nor a TYPE
 this project's ST declares (known: DoseRecipe, Motor)`); a function-block
-type is refused, since an instance is program state, not a tag.
+type is refused, since an instance is program state, not a tag. So is a
+type that holds one: an array of a block, standard or the project's own,
+at any nesting (`tag Timers: ARRAY[1..2] OF TON — TON is a function block;
+an instance is program state, not a tag`), and a TYPE whose STRUCT has a
+block member (`tag Line1: Station — member Delay is a TON, a function
+block; …`). An array of timers belongs in the program's `VAR`; publish the
+values it produces as tags.
 
 `GET /api/meta` reports each tag's declared type beside its `desc` and
 `unit`, and an enumeration's members, so a client can tell an enumerated

@@ -348,7 +348,9 @@ func (r *Runtime) saveRetained(lastSaved []byte) []byte {
 // it (an ARRAY OF TON): an FB is identity, not a value, and the load path
 // cannot write one back, so persisting it would be a promise loadRetained
 // could not keep. Such a tag is skipped and named in the log once (see
-// retainable).
+// retainable). The tag model refuses `type: ARRAY OF TON`, so one reaches
+// here only as an untyped setpoint a program's VAR_EXTERNAL declares as an
+// array of blocks; the skip is defense for that route.
 //
 // Compatibility: arrays add no field and no version to retain.State — they
 // are one more JSON shape under Tags. A store written before arrays were
