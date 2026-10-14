@@ -1092,6 +1092,9 @@ func (rt *routine) ref(a string, blockType string) (string, *refusal) {
 	if f == nil {
 		return "", refuse("undefined", "tag %s is not in scope", base)
 	}
+	if f.alias != nil {
+		return "", f.alias
+	}
 	up := strings.ToUpper(f.dtype)
 	if up == "TIMER" || up == "COUNTER" {
 		// An element of an array of timers: Timers[2] is the instance,
@@ -1114,6 +1117,9 @@ func (rt *routine) ref(a string, blockType string) (string, *refusal) {
 				g := rt.sc.lookup(inner)
 				if g == nil {
 					return "", refuse("undefined", "index tag %s is not in scope", inner)
+				}
+				if g.alias != nil {
+					return "", g.alias
 				}
 				if !rt.im.declareFound(rt.sc, rt.p, g, "") {
 					return "", refuse("type", "%s has no nautilus declaration", inner)
@@ -1207,6 +1213,9 @@ func (rt *routine) accessors(rest string) (string, *refusal) {
 				f := rt.sc.lookup(idx)
 				if f == nil {
 					return "", refuse("undefined", "index tag %s is not in scope", idx)
+				}
+				if f.alias != nil {
+					return "", f.alias
 				}
 				if !rt.im.declareFound(rt.sc, rt.p, f, "") {
 					return "", refuse("type", "%s: type %s has no nautilus declaration", f.name, f.dtype)

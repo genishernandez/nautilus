@@ -796,9 +796,10 @@ tags:
 
 The program names `StartPB`; the Logix writer emits it as an alias tag;
 the L5X importer turns an export's alias tags, and rack points the logic
-named directly, into tags with `alias:`. The nautilus runtime ignores the
-binding — the tag is a tag — so a simulation runs the same source. It is
-the one place a hardware address lives in a project.
+named directly, into tags with `alias:`, and a rung that names an alias
+tag imports with the tag typed through its target. The nautilus runtime
+ignores the binding — the tag is a tag — so a simulation runs the same
+source. It is the one place a hardware address lives in a project.
 
 ## User function blocks
 

@@ -284,20 +284,30 @@ claims:
     claim: >-
       Alias tags and rack points the logic names directly become tags with
       `alias:`, and a `RES` on a timer run by `TON` imports as `dialect:
-      logix` `TONR`.
+      logix` `TONR`. A rung that names an alias tag comes in like any other:
+      the tag takes its target's type, whether the target is a tag, a member
+      of a UDT or Add-On Instruction instance, an array element, a bit or a
+      rack point's bit. An alias the export cannot type, such as one of a
+      whole rack word with no module definition, is refused by name.
     source: "#bringing-an-existing-program-in"
     tests:
       - go ./logix/importer TestDialectAndAliasImport
       - go ./logix/importer TestEveryLadderRoutineBecomesAProgram
-    partial: true
+      - go ./logix/importer TestAliasTagsInRungsImportAndRoundTrip
+      - go ./logix/importer TestAliasTagsTheExportCannotTypeAreRefusedByName
     note: >-
       Rack points named directly, the TONR fold, and an alias tag in the
-      export becoming a tag with `alias:` are asserted. A rung that names an
-      alias tag is not carried: Logix exports an alias tag with no DataType,
-      and the import refuses the rung ("type: <tag>: type has no nautilus
-      declaration"), so a program that uses its alias tags imports with those
-      rungs as comments. Reported as a bug; the test keeps its alias tag out
-      of the logic.
+      export becoming a tag with `alias:` are asserted. A hand-built export
+      (logix/importer/testdata/aliases.L5X) has rungs naming an alias of each
+      target kind (Pump1Run; Pump1.Speed; the BIT member Pump1.Running; the
+      Add-On Instruction output Valve1Ctl.Open; TankStatus.5;
+      TankLevels[2]; Local:1:I.Data.3): every rung imports, each tag is
+      declared as its target's type (BOOL, REAL), and written back the rung
+      text is the export's with each tag an alias tag of the same target
+      (#330). Refused by name, each asserted: an alias of Local:2:I.Ch0Data
+      ("the export has no module definition to type it"), of a tag not in
+      the export, of a whole TIMER, of a member the target lacks, and a
+      program-scoped alias tag.
 
   - id: LGA-026
     claim: >-

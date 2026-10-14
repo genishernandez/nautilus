@@ -1179,9 +1179,16 @@ tag. The writer emits the tag as `TagType="Alias" AliasFor="…"`; the
 importer turns an export's alias tags, and rack points the logic names
 directly (`Local:1:I.Data.3`), into tags with `alias:` (a trailing bit
 index types the guess BOOL, else DINT; the module gives the real type on
-the controller). The nautilus runtime ignores the binding. Controller
-status flags (`S:FS`, first scan) are not rack points: refused by name,
-113 rungs — a first-scan block is the obvious next dialect entry.
+the controller). An export's alias tag carries no DataType, so a rung
+naming one is typed through the target (#330): a tag, a UDT or Add-On
+Instruction member, an array element, a bit, or a rack point's bit (a
+BOOL whatever the module). A whole rack word is typed only by the module
+definition the export does not carry, so an alias of one is refused by
+name rather than guessed, and so are an alias of a whole TIMER, COUNTER
+or AOI instance (a nautilus block instance is never a binding) and a
+program-scoped alias tag (`alias:` is a controller tag's). The nautilus
+runtime ignores the binding. Controller status flags (`S:FS`, first
+scan) are not rack points: refused by name, 113 rungs — a first-scan block is the obvious next dialect entry.
 
 **Measured on Echo:** the `dialect` conformance project (a free-running
 TONR pulse counted by edge; a TONR an input resets while it runs) — 2 of
