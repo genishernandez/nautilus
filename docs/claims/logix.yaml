@@ -118,10 +118,10 @@ claims:
       - go ./logix/facade TestWritesReachTheController
     partial: true
     note: >-
-      That the write reaches the controller is asserted. The frame is checked
-      only after a write whose read-back equals the value sent, so a frame
-      that echoed the request would pass too: "the value read back, not the
-      value sent" is not distinguished.
+      The write reaches the controller, which held a different value first,
+      and after the read-back the frame follows a later controller-side
+      change. No case has the controller hold a value other than the one sent,
+      so a frame that showed the request until the next poll would still pass.
 
   - id: LGX-013
     claim: >-
@@ -191,11 +191,14 @@ claims:
     source: "#when-something-isnt-working"
     tests:
       - go ./logix/logixd TestClientUnreachableIsFatalAndNamesTheURL
+      - go ./cmd/naut TestLogixAgentReportsAnUnreachableAgentHelpfully
     partial: true
     note: >-
-      The test asserts an unreachable agent is an error naming the URL, not
-      the `logixd: unreachable` wording; the `logixd: unauthorized` reply
-      comes from the C# agent and has no CI test.
+      An unreachable agent is asserted to read `logixd: unreachable` ...
+      refused and to name the URL, in the client and in naut logix agent. The
+      `logixd: unauthorized` / 401 reply comes from the C# agent:
+      TestAgentRejectsMissingToken checks the 401 only in the logix workflow,
+      which feeds no evidence, and not the wording.
 
   - id: LGX-019
     claim: >-
@@ -223,11 +226,12 @@ claims:
       1 on a mismatch, so it works as a CI gate; it requests the same export
       kind (detailed or basic) as the repo file.
     source: "#online-edits"
-    tests: []
+    tests:
+      - go ./cmd/naut TestLogixDriftAsksForTheRepoFilesExportKind
+    partial: true
     note: >-
-      No test runs `naut logix drift`. TestConvertSendsDetailedFlag was
-      listed, but it only checks the client puts a caller-chosen flag on a
-      convert request; it would pass if drift ignored the repo file's kind.
+      Drift asking the agent for the repo file's own export kind (basic or
+      detailed) is asserted. Exiting 1 on a mismatch is not.
 
   - id: LGX-022
     claim: >-

@@ -28,27 +28,21 @@ claims:
     source: "#the-tag-model"
     tests:
       - go ./runtime TestTagDefs
+      - go ./server TestWriteTag
+      - go ./runtime TestScanReadOfUnwrittenTagFaults
     partial: true
     note: >-
-      Only the seed writer (a seeded tag exists before scan one) is
-      asserted. An operator write or a program coil write creating a tag,
-      and a bound-but-unwritten name not existing, are not. The claim
-      previously said a write to an unknown name through the API is
-      refused, which the page does not say (it lists the operator as a
-      writer); TestWriteTag's refusal is of a non-scalar value, and the two
-      SetPath tests are member-path refusals (TAG-024), so they were
-      removed.
+      Asserted: a seeded tag exists before scan one; an operator write through
+      POST /api/tags creates a new tag; a name a program binds but nothing has
+      written does not exist (the scan faults). A driver input or the
+      program's own assignment creating a tag is not.
   - id: TAG-003
     claim: >-
       Reading a tag nobody has ever written stops the scan with "undefined
       tag <name>" instead of running on a silent zero.
     source: "#the-tag-model"
-    tests: []
-    note: >-
-      Gap. The message is asserted only for the force and SetPath APIs, not
-      for a program reading an unwritten tag on scan one. naut check's
-      "reading an undeclared tag fails the check" (TestCheckFailsOnUndeclaredRead)
-      covers the static side only.
+    tests:
+      - go ./runtime TestScanReadOfUnwrittenTagFaults
   - id: TAG-004
     claim: >-
       An output tag seeded with Init (or any seeded setpoint/state) exists

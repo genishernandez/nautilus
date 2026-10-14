@@ -7,12 +7,12 @@ claims:
       An `eip` driver without `host:` or without `manifest:` is rejected at
       project load (so `naut check` fails, not `naut run`).
     source: "#"
-    tests: []
+    tests:
+      - go ./internal/project TestSchemaRequiresWhatLoaderRequires
     note: >-
-      TestSchemaRequiresWhatLoaderRequires was removed: it builds the eip
-      driver against an empty filesystem, so buildDriver fails reading the
-      missing manifest file whether or not the host/manifest checks exist;
-      its remaining assertion is about the JSON schema, not project load.
+      The loader's buildDriver is given a readable manifest, so a missing host
+      or manifest key is the only reason left to refuse; the error must name
+      the key, and the complete config must build.
   - id: EIP-002
     claim: >-
       `New` never dials: it decodes the manifest, rejects bad scan-class
@@ -219,12 +219,14 @@ claims:
       are read individually and the struct is assembled client-side in
       manifest field order.
     source: "#scan-classes-and-leaf-mode"
-    tests: []
+    tests:
+      - go ./eip TestDriverLeafModeFallback
+    partial: true
     note: >-
-      TestDriverLeafModeFallback was removed: it checks only the assembled
-      values, which a whole-struct read produces identically, so it passes
-      whether or not the refusal happened and leaf mode ran. Session-long
-      stickiness is also unasserted.
+      With struct roots refused, both struct bindings drop to member-wise
+      reads (Health().LeafMode = 2) and the struct is assembled in field
+      order. That leaf mode sticks for the session is not asserted: a driver
+      that retried the whole-struct read every poll would report the same.
   - id: EIP-022
     claim: >-
       In leaf mode a member the controller never serves is detected by its
@@ -437,12 +439,15 @@ claims:
       a real controller refuses an AOI backing tag, which is how leaf mode
       is tested.
     source: "#no-plc-the-logix-emulator"
-    tests: []
+    tests:
+      - go ./eip TestDriverLeafModeFallback
+      - go ./eip TestRuntimeRoundTrip
+    partial: true
     note: >-
-      TestDriverLeafModeFallback was removed: it would pass the same if
-      DenyStructRoots did nothing (a whole-struct read yields the same
-      assembled values); it checks neither the refusal nor that leaf mode
-      was entered.
+      DenyStructRoots is what puts the driver in leaf mode (LeafMode 2 with
+      it, 0 without it in TestRuntimeRoundTrip). That the refusal is a
+      privilege violation, as a real controller's is, is not asserted: the
+      driver drops to leaf mode on any non-fatal struct read error.
   - id: EIP-042
     claim: >-
       `naut test` never opens a socket: whatever `driver:` configures,

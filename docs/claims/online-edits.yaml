@@ -12,12 +12,12 @@ claims:
       - go ./runtime TestSwapWarmCarriesRetainedState
       - go ./runtime TestSwapWarmTypeChangeResets
       - go ./runtime TestSwapWarmFBDCarriesRetainedState
-    partial: true
+      - go ./runtime TestSwapWarmLadderCarriesRetainedState
     note: >-
-      An integrator carrying (ST and FBD) and new / retyped variables being
-      reported as resets are asserted. Timers and counters are not: the TON
-      in the swap fixture is declared but never run or read back, and the
-      counter is dropped by the edit.
+      TestSwapWarmCarriesRetainedState carries an integrator, a running TON
+      (its preset lands 10 s after the original start), a CTU's count and edge
+      memory and a user FB's internal sum, and reports the new variable as a
+      reset; TestSwapWarmTypeChangeResets reports a retyped one.
   - id: OE-002
     claim: >-
       A program that fails to compile leaves the running program untouched,

@@ -88,10 +88,12 @@ claims:
       - go ./sparkplug TestRBEDeadbandAndHeartbeat
       - go ./sparkplug TestRBEDeadbandOnStructMembers
       - go ./sparkplug TestRBEDeadbandOnNestedStruct
+      - go ./internal/project TestSparkplugManifestClassesReachTheNode
     partial: true
     note: >-
-      Sub- and over-deadband moves are asserted (scalars and struct
-      members); a zero deadband publishing a small numeric change is not.
+      Sub- and over-deadband moves are asserted (scalars, struct members, and
+      classes set in the manifest reaching the node); a zero deadband
+      publishing a small numeric change is not.
   - id: SPB-011
     claim: >-
       `min-interval` means never publishing more often than that, even on
@@ -100,6 +102,7 @@ claims:
     tests:
       - go ./sparkplug TestRBEDeadbandAndHeartbeat
       - go ./sparkplug TestRBEMinIntervalStillAppliesToStructs
+      - go ./internal/project TestSparkplugManifestClassesReachTheNode
   - id: SPB-012
     claim: >-
       `max-interval` publishes at least that often even when the value is
@@ -108,6 +111,7 @@ claims:
     tests:
       - go ./sparkplug TestRBEDeadbandAndHeartbeat
       - go ./sparkplug TestShouldPublishSampleGeneration
+      - go ./internal/project TestSparkplugManifestClassesReachTheNode
   - id: SPB-013
     claim: >-
       `every-change: true` publishes every transition unconditionally,
@@ -116,11 +120,12 @@ claims:
     source: "#publish-classes"
     tests:
       - go ./sparkplug TestRBEDisableAndBoolChange
-    partial: true
+      - go ./internal/project TestSparkplugManifestClassesReachTheNode
     note: >-
-      A transition publishing inside `min-interval` and an unchanged sample
-      staying quiet are asserted (with BOOL values); ignoring the deadband
-      (a sub-deadband numeric change still publishing) is not.
+      TestRBEDisableAndBoolChange: a transition inside min-interval publishes
+      and an unchanged sample stays quiet.
+      TestSparkplugManifestClassesReachTheNode: a 0.001 move under a 100
+      deadband, inside a 1 h min-interval, publishes.
   - id: SPB-014
     claim: >-
       `metric-classes` assigns tags to a named class by glob, and every tag
@@ -147,9 +152,13 @@ claims:
       link drops the host sees that device die rather than stale values,
       while every other device stays born.
     source: "#devices-and-connection-health"
-    tests: []
+    tests:
+      - go ./sparkplug TestDeviceBirthWaitsForFirstRead
+    partial: true
     note: >-
-      No test drives a device `Health` function false and asserts DDEATH.
+      A device whose connection drops gets a DDEATH
+      (TestDeviceBirthWaitsForFirstRead, one device). Every other device
+      staying born is not asserted.
   - id: SPB-017
     claim: >-
       With `primary-host` set, the node defers its birth until the host's

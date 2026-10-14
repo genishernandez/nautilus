@@ -93,13 +93,11 @@ claims:
       always: is checked after every scan in the step (an invariant, not an
       endpoint).
     source: "#steps-and-time"
-    tests: []
+    tests:
+      - go ./acceptance TestAlwaysCatchesAViolationThatRecovers
     note: >-
-      Gap. The tests that used to be listed cannot tell checking after every
-      scan from checking only at the end of the step: heated-tank's always:
-      simply holds throughout, and the failure-line "always" case
-      (TestFailureLinePointsAtTheAssertion) is false at the endpoint too. No
-      test has a transient mid-step violation that recovers by the end.
+      Spike is TRUE on the third scan only: always: fails at 300 ms (that
+      scan) while an end-of-step expect: passes, with scans: and with until:.
   - id: TEST-010
     claim: >-
       given: writes are routed by the role the manifest declared: an input
@@ -370,13 +368,11 @@ claims:
     partial: true
     note: >-
       Run against an in-process fake controller; the real-controller run is
-      verified on hardware only. Given writes going to the controller and
-      a write that never reads back being refused are asserted; the
+      verified on hardware only. Given writes going to the controller, a write
+      that never reads back being refused, and always: catching a violation
+      that recovers before the step ends (per poll) are asserted; the
       advance/scans timing, suspend being a no-op and the alarm-verb refusal
-      are not, and the always: case breaks at the endpoint too, so it cannot
-      tell per-poll from end-of-step checking. (TestLiveScansWaitOnTheHeartbeat
-      and TestLiveReseedsInputsPerTest were removed: heartbeat-counted scans
-      and per-test reseeding are not on the page.)
+      are not.
   - id: TEST-032
     claim: >-
       Program-scope tags on a Logix controller are served as

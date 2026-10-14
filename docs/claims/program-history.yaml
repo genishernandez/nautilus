@@ -81,12 +81,13 @@ claims:
       - go ./server TestActivate
       - go ./internal/vcs TestSnapshotComposesSources
       - go ./server TestActivateImplicitTags
-    partial: true
+      - go ./server TestActivateEveryTask
+      - go ./cmd/naut TestBuiltControllerActivatesWarm
     note: >-
-      Every activation test uses a single-task project, so "every task" is
-      not asserted (a swap of only the main task would pass); library
-      composition is asserted in vcs, while the server tests stub the
-      sha-to-sources wiring.
+      TestActivateEveryTask swaps both tasks of a two-task controller warm.
+      TestBuiltControllerActivatesWarm activates an older commit on a real
+      built controller over HTTP: both tasks, each using a library
+      FUNCTION_BLOCK, run that commit and keep their timers and FB state.
   - id: PH-009
     claim: >-
       Activation is gated like any online edit: it needs online-edits: true

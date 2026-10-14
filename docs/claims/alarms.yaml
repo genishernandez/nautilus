@@ -201,12 +201,12 @@ claims:
     tests:
       - go ./alarm TestRetainedAckSurvivesRestart
       - go ./runtime TestAlarmStateRoundTripsThroughRetain
-    partial: true
+      - go ./cmd/naut TestRunWiresAlarmAcksThroughRetain
     note: >-
-      The two halves are tested apart: the engine's snapshot and restore, and
-      the runtime's retain plumbing with a fake engine. Registering the real
-      engine with the runtime (rt.SetAlarms in cmd/naut) is not tested, so
-      dropping that line would leave both tests green.
+      The engine's snapshot and restore (ack and shelf) and the runtime's
+      retain plumbing are tested apart; TestRunWiresAlarmAcksThroughRetain
+      runs naut run's startAlarms wiring with the real engine and restores an
+      ack across a restart.
 
   - id: ALM-019
     claim: >-
@@ -240,11 +240,13 @@ claims:
       Acknowledgement and shelf are never written back to the edge device's
       tags.
     source: "#ack-is-host-state"
-    tests: []
+    tests:
+      - go ./acceptance TestAlarmAckVerb
+    partial: true
     note: >-
-      No test asserts that ack or shelve performs no tag write.
-      (TestAlarmAckVerb's `expect: FIT_001.L: true` after an ack cannot count:
-      the program rewrites that bit every scan.)
+      An ack with no scan after it leaves the alarm's bit and the PV, HH and
+      Online tags unchanged. Shelve and unshelve writing nothing are not
+      asserted, and only those four tags are checked.
 
   - id: ALM-022
     claim: GET /api/alarms returns a timestamp, the summary and the active alarm list.
@@ -414,14 +416,14 @@ claims:
     tests:
       - go ./alarm TestWebhookPostsTheEventAsJSON
       - go ./alarm TestEngineNotifiesOffTheScanGoroutine
+      - go ./alarm TestLogNotifier
     partial: true
     note: >-
-      Asserted: the engine hands each event to a notifier, and the webhook
-      posts it with a custom header. Not asserted: running off the scan
-      goroutine (the test passes with synchronous delivery too), the log
-      notifier's output (TestLogNotifier logs to io.Discard and checks only
-      for no error, so it was removed), and header-env. Retry and
-      final-status behaviour are not page claims; their tests were removed.
+      Asserted: each event reaches the notifier, the log notifier writes one
+      record carrying the event, the webhook posts it with a custom header,
+      and Evaluate returns while a notifier is blocked (off the scan
+      goroutine). `header-env:` (the key read from the environment) has no
+      test.
 
   - id: ALM-039
     claim: >-
@@ -487,13 +489,10 @@ claims:
       - go ./acceptance TestAlarmAckVerb
       - go ./acceptance TestAlarmShelveAndUnshelveVerbs
       - go ./acceptance TestAlarmFailureNamesWhatItSaw
-    partial: true
     note: >-
-      Only the active matcher is shown to fail on a wrong expectation
-      (TestAlarmFailureNamesWhatItSaw). unacked, shelved, state, priority and
-      journal appear only in suites that must pass, so a matcher that ignored
-      its argument would go unnoticed. The no-leak and no-engine error cases
-      are not page claims; their tests were removed.
+      TestAlarmFailureNamesWhatItSaw has every matcher (active, unacked,
+      shelved, state, priority, journal) fail on a value wrong in one way and
+      say what it saw.
 
   - id: ALM-045
     claim: >-

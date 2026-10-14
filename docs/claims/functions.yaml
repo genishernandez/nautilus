@@ -11,13 +11,15 @@ claims:
     source: "#how-a-scan-evaluates"
     tests:
       - go ./runtime TestLadderProgram
+      - go ./lang/fbd TestSealInLatch
+      - go ./lang/fbd TestArrayElementFeedback
     partial: true
     note: >-
-      The seal-in is proven end to end (TestLadderProgram); "visible below in
-      the same scan" is exercised implicitly, not asserted as its own case.
-      Removed: TestSealInLatch hands Run back in on each fresh run, so it
-      cannot show a value carrying to the next scan; TestIfElse runs one IF
-      statement and says nothing about statement order.
+      The seal-in is proven end to end (TestLadderProgram, and FBD's
+      TestSealInLatch across scans with nothing re-seeded). Visible below in
+      the same scan is asserted for FBD statements (a[2] := a[1] in
+      TestArrayElementFeedback); a coil read as a contact on a following rung
+      in the same scan is not (see LD-014).
 
   - id: FN-002
     claim: >-
@@ -245,14 +247,11 @@ claims:
       - go ./lang/conformance TestConformance/ld-coils/FB-only rung (no coil) still runs, its outputs read elsewhere
       - go ./lang/st TestUserFB_OutputBinding
       - go ./lang/fbd TestOutputBinding
-    partial: true
+      - go ./lang/ld TestLadderOutputBinding
     note: >-
-      Ladder (CV => ld_Cnt in ld-coils) and ST (Y => result) are run and the
-      bound variable asserted. In FBD, TestOutputBinding only checks that
-      "ET => Elapsed" transpiles verbatim and compiles; nothing runs an FBD
-      output binding (other than ENO) and reads the variable.
-      TestLadderOutputBinding was removed: it too only checks text and
-      compilation, and ladder is covered by the conformance run.
+      Ladder (CV => ld_Cnt in ld-coils; ET => Elapsed in
+      TestLadderOutputBinding), ST (Y => result) and FBD (ET => Elapsed in
+      TestOutputBinding) are run and the bound variable asserted.
 
   - id: FN-021
     claim: >-
@@ -301,11 +300,13 @@ claims:
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/R before PT cuts SL short and stops SD from ever coming on
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/re-entry restarts L and D; a timed-out SL stays off until an R
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/after an R, SL arms again on the next activation
+      - go ./lang/conformance TestConformance/sfc-timed-qualifiers/R acts once on its step's activation, not on every scan the step is active
     partial: true
     note: >-
-      R clearing SD, DS and SL on its activation scan is asserted, and so is
-      a timed-out SL staying off until an R. R clearing an S-qualified latch
-      is not asserted: sfc-qualifiers has no R on an S target.
+      R acting once on its activation scan (not on every scan its step is
+      active), R clearing SD, DS and SL, and a timed-out SL staying off until
+      an R are asserted. R clearing an S-qualified latch is not:
+      sfc-qualifiers has no R on an S target.
 
   - id: FN-025
     claim: >-
@@ -521,12 +522,11 @@ claims:
       - go ./lang/st TestLowerTimeArithmetic
       - go ./lang/conformance TestConformance/fn-conversions/TIME is milliseconds in both directions
       - go ./lang/conformance TestConformance/sfc-step-t/a Step.T condition fires one scan after T reaches PT
-    partial: true
+      - go ./lang/st TestParseTimeLiterals
     note: >-
-      Milliseconds (T#2s + T#500ms = 2500) and a TIME comparison (Wait.T >=
-      T#100ms) are asserted. The value of a compound literal such as T#2M30S
-      is not. TestParseTimeLiterals was removed: it checks only that the raw
-      literal text survives parsing, not its value.
+      Milliseconds (T#2s + T#500ms = 2500) and a TIME comparison are run;
+      TestParseTimeLiterals checks compound literals' values (T#1h30m, T#2d4h)
+      through ParseTimeMs, which lowering uses and which ignores unit case.
 
   - id: FN-042
     claim: >-
@@ -588,15 +588,11 @@ claims:
       - go ./lang/st TestEnumBasics
       - go ./lang/st TestEnumDeclarationErrors
       - go ./lang/conformance TestCodesysEnumTypeCompiles
-    partial: true
+      - go ./lang/st TestEnumNumberingOrderingInit
     note: >-
-      Uniqueness errors, first member 0, and the Codesys base type (DINT
-      after the list) are asserted. No fixture has an implicit member after
-      an explicit one (Mode has no values, Valve and WashState give every
-      later member a value), so position-based numbering would pass too;
-      and every type's initial value after the list is its first member
-      (Mode := Idle), so "after the list" is not told apart from "first
-      member".
+      TestEnumNumberingOrderingInit: an implicit member after an explicit one
+      takes the previous value plus one (Mid = 6, Top = 2), and the initial
+      value after the list (Mid) is not the first member.
 
   - id: FN-047
     claim: >-
@@ -619,12 +615,11 @@ claims:
       - go ./lang/st TestEnumBasics
       - go ./lang/st TestEnumTypeErrors
       - go ./lang/conformance TestConformance/st-enum
-    partial: true
+      - go ./lang/st TestEnumNumberingOrderingInit
     note: >-
-      =, <>, > and CASE labels run, and every refusal (INT, other enum,
-      arithmetic) is asserted. < is never used, and > is only applied to
-      Mode, whose member values equal their positions, so ordering "by
-      member value" is not told apart from ordering by position.
+      TestEnumNumberingOrderingInit compares members whose values differ from
+      their positions with < and >, so ordering by member value is told apart
+      from ordering by position.
 
   - id: FN-049
     claim: >-
@@ -1418,14 +1413,9 @@ claims:
     source: "#eneno-execution-control"
     tests:
       - go ./lang/st TestENOnUserFunctionStatementAndOwnEN
-    partial: true
     note: >-
-      The test shows a block declaring EN/ENO compiles and binds them, but it
-      cannot tell "ordinary pin" from "execution control": the body only
-      counts when EN is TRUE and sets ENO := EN, so skipping the body on EN
-      FALSE gives the same results.
-
-  # ── Power pins in ladder ────────────────────────────────────────────
+      Gate's body runs with its own EN FALSE (it counts the call but not the
+      run), so EN is an ordinary pin, not execution control.
   - id: FN-119
     claim: >-
       In a rung, rung power drives a standard block's power-in pin (TON/TOF/TP
@@ -1722,13 +1712,13 @@ claims:
     source: "#an-input-left-unbound-keeps-its-value"
     tests:
       - go ./lang/st TestENOOnlyAndPositional
+      - go ./lang/st TestUserFB_UnboundInputKeepsInitial
     partial: true
     note: >-
-      Unbound EN reading TRUE is asserted (on a standard function). No test
-      leaves a user block's VAR_INPUT unbound and checks it keeps its
-      declared initial value. TestUserFB_InitialValues and
-      TestUserFunc_InitialValues were removed: they bind every input and
-      test VAR / VAR_OUTPUT initial values.
+      Unbound EN reading TRUE (on a standard function) and an omitted user
+      block VAR_INPUT holding its declared initial value across scans are
+      asserted. An input bound on one call and omitted on a later one keeping
+      the written value is not.
 
   - id: FN-145
     claim: >-

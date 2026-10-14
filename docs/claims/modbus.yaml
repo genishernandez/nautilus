@@ -79,10 +79,6 @@ claims:
     source: "#the-block-plan"
     tests:
       - go ./modbus TestPlanGapTolerance
-    partial: true
-    note: >-
-      The test bridges a 7-register hole and splits at 9; a hole of exactly
-      8 (the documented limit) is never planned, so a gap of 7 would pass.
   - id: MB-009
     claim: >-
       Without `max-block`, a block holds at most 125 registers (FC3/FC4) or
@@ -140,13 +136,14 @@ claims:
     tests:
       - go ./modbus TestWriteCoalescingAndBaseline
       - go ./modbus TestForeignDecodesEverySeededValue
+      - go ./modbus TestClientReadsAndDecodes
     partial: true
     note: >-
-      The wire recorder sees binding address 200 go out as PDU address 200,
-      and manifest addresses read a foreign server's seeded PDU addresses;
-      `browse` and the plan output are not asserted. TestClientReadsAndDecodes
-      was dropped: it seeds and reads the same address through our own
-      slave, so a shift on both sides would pass.
+      The client's request frames carry the binding address as the PDU address
+      (TestClientReadsAndDecodes through a recording proxy,
+      TestWriteCoalescingAndBaseline), our slave serves a seeded address there
+      and not one below, and manifest addresses read a foreign server's seeded
+      PDU addresses. `browse` and the plan output are not asserted.
   - id: MB-014
     claim: >-
       Marking a binding on a read-only table (input or discrete) `writable`
@@ -297,11 +294,12 @@ claims:
     source: "#per-tag-quality"
     tests:
       - go ./modbus TestSlaveDeathHoldsValuesQueuesWritesRecovers
-    partial: true
+      - go ./modbus TestForeignLatencyAboveTimeoutReconnects
     note: >-
-      Held values are asserted; the NotConnected quality for a
-      never-delivered tag is not (TestForeignLatencyAboveTimeoutReconnects
-      explicitly accepts Good or NotConnected).
+      A never-delivered tag is NotConnected and absent from the inputs through
+      repeated timeouts (TestForeignLatencyAboveTimeoutReconnects); values are
+      held while a source is down
+      (TestSlaveDeathHoldsValuesQueuesWritesRecovers).
   - id: MB-027
     claim: >-
       Quality is reported non-Good only (a healthy plant reports an empty
@@ -475,19 +473,22 @@ claims:
       only.
   - id: MB-044
     claim: >-
-      Each driver keeps its own `/api/drivers` row in a multi-driver set,
-      quality merges per tag, and a Sparkplug `device:` is healthy only
-      when every child bus is.
+      In a multi-driver set each driver keeps its own `/api/drivers` row,
+      quality merges per tag, and on a `sparkplug:` edge node each driver is
+      its own Sparkplug device, born and killed by its own connection, so one
+      dead bus takes only its own tags offline.
     source: "#modbus-alongside-another-bus-drivers"
     tests:
       - go ./internal/project TestDriversBuildAMultiWithStatusRows
       - go ./io TestMultiQualityMerges
+      - go ./sparkplug TestDeviceBirthWaitsForFirstRead
     partial: true
     note: >-
-      The Sparkplug health gate is checked only with both child brokers
-      down, which an any-child-healthy gate would also report unhealthy;
-      one child up and one down is not tested, so "only when every child
-      bus is" is not asserted.
+      Rows per driver, the per-tag quality merge and per-driver device health
+      are asserted: with one broker up and one down only the connected
+      driver's device reads healthy. A device dying when its health falls is
+      asserted for a single device (TestDeviceBirthWaitsForFirstRead); an edge
+      node keeping the other devices born while one dies is not.
   - id: MB-045
     claim: >-
       The `memory` loopback cannot join a `drivers:` list.

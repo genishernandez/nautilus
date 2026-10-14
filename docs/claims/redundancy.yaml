@@ -57,8 +57,12 @@ claims:
     source: "#retained-state"
     tests:
       - go ./runtime TestRetainStateContents
+      - go ./runtime TestLoadIgnoresTagsOutsideTheRetainedSet
     partial: true
-    note: Asserts a state tag is excluded; inputs, outputs and the PID warm start are not asserted.
+    note: >-
+      A state tag is excluded from what is saved and ignored on load even if
+      the store names it. Inputs, outputs and the PID warm start are not
+      asserted.
 
   - id: RED-007
     claim: >-
