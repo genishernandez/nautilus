@@ -510,8 +510,11 @@ claims:
     source: "#types"
     tests:
       - go ./lang/st TestPartialAccessErrorsNameDeclaredType
-    partial: true
-    note: Only the partial-access diagnostic is asserted.
+    note: >-
+      Beyond partial access ("bit 32 is out of range for DINT (bits
+      0..31)"), the same test asserts ordinary diagnostics naming the
+      declared type: "cannot assign STRING to DINT" and "member access on
+      non-struct type WORD".
 
   - id: FN-041
     claim: >-
