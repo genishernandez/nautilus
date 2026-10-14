@@ -394,12 +394,12 @@ func (f *fakeAlarms) RestoreAlarms(m map[string]retain.AlarmRetain) {
 func TestAlarmStateRoundTripsThroughRetain(t *testing.T) {
 	store := &fakeStore{state: retain.State{
 		Alarms: map[string]retain.AlarmRetain{
-			"HiTemp": {Acked: true, AckBy: "rchon", AckMs: 1700000000000},
+			"HiTemp": {Acked: true, AckBy: "operator1", AckMs: 1700000000000},
 		},
 	}}
 	rt := newRetained(t, store, nil)
 	eng := &fakeAlarms{held: map[string]retain.AlarmRetain{
-		"LoFlow": {ShelfUntilMs: 1700000600000, ShelfBy: "rchon"},
+		"LoFlow": {ShelfUntilMs: 1700000600000, ShelfBy: "operator1"},
 	}}
 	rt.SetAlarms(eng)
 
@@ -408,11 +408,11 @@ func TestAlarmStateRoundTripsThroughRetain(t *testing.T) {
 	if len(eng.restored) != 1 {
 		t.Fatalf("RestoreAlarms called %d times, want once on takeover", len(eng.restored))
 	}
-	if got := eng.restored[0]["HiTemp"]; !got.Acked || got.AckBy != "rchon" {
+	if got := eng.restored[0]["HiTemp"]; !got.Acked || got.AckBy != "operator1" {
 		t.Errorf("restored %+v, want the stored acknowledgement", got)
 	}
 
-	if got := rt.retainState().Alarms; len(got) != 1 || got["LoFlow"].ShelfBy != "rchon" {
+	if got := rt.retainState().Alarms; len(got) != 1 || got["LoFlow"].ShelfBy != "operator1" {
 		t.Errorf("saved alarms = %+v, want the engine's shelf", got)
 	}
 }
@@ -423,7 +423,7 @@ func TestAlarmStateRoundTripsThroughRetain(t *testing.T) {
 func TestTakeoverRestoresAlarmsOnTheLeadershipEdge(t *testing.T) {
 	f := &flag{lead: true}
 	store := &fakeStore{state: retain.State{
-		Alarms: map[string]retain.AlarmRetain{"HiTemp": {Acked: true, AckBy: "rchon"}},
+		Alarms: map[string]retain.AlarmRetain{"HiTemp": {Acked: true, AckBy: "operator1"}},
 	}}
 	rt := newRetained(t, store, f)
 	eng := &fakeAlarms{}

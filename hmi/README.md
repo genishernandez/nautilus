@@ -168,7 +168,7 @@ shapes are contracted against `docs/design/alarms.md` (see `src/lib/alarms.ts`).
 {#if alarms.supported}
 	<AlarmTable
 		alarms={alarms.instances}
-		operator="rchon"
+		operator="operator1"
 		onack={(ids, by) => alarms.ack(ids[0] === '*' ? 'all' : ids, by).then(() => toast.success('acked'))}
 		onshelve={(id, until, by) => alarms.shelve(id, (until - Date.now()) / 1000, by)}
 		onunshelve={(id, by) => alarms.unshelve(id, by)}

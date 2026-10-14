@@ -36,7 +36,7 @@ func TestPGJournal(t *testing.T) {
 	base := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
 	events := []Event{
 		{TS: base.UnixMilli(), ID: "RTU9_FIT.HH", Name: "Flow High High", Kind: KindActive, Priority: High, Site: "RTU9", State: "unack-active"},
-		{TS: base.Add(time.Minute).UnixMilli(), ID: "RTU9_FIT.HH", Name: "Flow High High", Kind: KindAck, Priority: High, Site: "RTU9", State: "ack-active", By: "rchon"},
+		{TS: base.Add(time.Minute).UnixMilli(), ID: "RTU9_FIT.HH", Name: "Flow High High", Kind: KindAck, Priority: High, Site: "RTU9", State: "ack-active", By: "operator1"},
 		{TS: base.Add(2 * time.Minute).UnixMilli(), ID: "RTU12_INT_YA", Name: "Intrusion", Kind: KindActive, Priority: Critical, Site: "RTU12", State: "unack-active"},
 	}
 	for _, e := range events {
@@ -73,7 +73,7 @@ func TestPGJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(byKind) != 1 || byKind[0].By != "rchon" {
+	if len(byKind) != 1 || byKind[0].By != "operator1" {
 		t.Fatalf("kind filter returned %+v", byKind)
 	}
 	inRange, err := j.Query(base.Add(90*time.Second), time.Now(), Filter{})

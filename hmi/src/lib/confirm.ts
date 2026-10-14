@@ -35,7 +35,7 @@ export interface ConfirmOptions {
 	 * point before an unauthenticated record is written.
 	 */
 	operator?: boolean;
-	/** A standing caveat under the body, e.g. "Recorded as rchon — unauthenticated". */
+	/** A standing caveat under the body, e.g. "Recorded as operator1 — unauthenticated". */
 	note?: string;
 }
 

@@ -5,7 +5,7 @@ package server
 //
 //	GET  /api/alarms                    active + unack-RTN + shelved, plus the summary
 //	GET  /api/alarms/journal?from&to&…  the append-only event log
-//	POST /api/alarms/ack       {"ids":[…]|{"all":true}, "by":"rchon"}
+//	POST /api/alarms/ack       {"ids":[…]|{"all":true}, "by":"operator1"}
 //	POST /api/alarms/shelve    {"id":…, "until"|"seconds":…, "by":…}
 //	POST /api/alarms/unshelve  {"id":…, "by":…}
 //
