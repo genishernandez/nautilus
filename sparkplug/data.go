@@ -327,7 +327,7 @@ func (n *Node) collectChanged(snap map[string]runtime.Sample, now time.Time, own
 func (n *Node) deviceHealthLocked(snap map[string]runtime.Sample) []func(*Node) {
 	var events []func(*Node)
 	for _, d := range n.devices {
-		healthy := deviceReady(d, func(name string) bool { _, ok := snap[name]; return ok })
+		healthy := n.deviceReadyLocked(d, func(name string) bool { _, ok := snap[name]; return ok }, time.Now())
 		was := n.devHealth[d.ID]
 		if healthy == was {
 			continue

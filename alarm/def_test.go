@@ -185,14 +185,22 @@ func TestExpandRejectsDuplicateIDs(t *testing.T) {
 // TestExpandRejectsRuleCollidingWithExplicitAlarm — the case the tag-files
 // precedent cares about: a generated file and a hand-written one.
 func TestExpandRejectsRuleCollidingWithExplicitAlarm(t *testing.T) {
-	rules := []Rule{{Match: Match{Type: "AnalogInput", Member: "HH"}}}
-	defs := []Def{{ID: "RTU9_FIT_001.HH", Tag: "RTU9_FIT_001.HH"}}
+	rules := []Rule{{Match: Match{Type: "AnalogInput", Member: "HH"}, Source: "manifest"}}
+	defs := []Def{{ID: "RTU9_FIT_001.HH", Tag: "RTU9_FIT_001.HH", Source: "alarms/rtu9.yaml"}}
 	_, err := Expand(rules, defs, fleet())
 	if err == nil {
 		t.Fatal("Expand accepted a rule colliding with an explicit alarm")
 	}
 	if !strings.Contains(err.Error(), "RTU9_FIT_001.HH") {
 		t.Errorf("error should name the id, got: %v", err)
+	}
+	for _, want := range []string{
+		"manifest rule 0 (match type=AnalogInput member=HH)",
+		`alarms/rtu9.yaml alarm "RTU9_FIT_001.HH"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should contain %q, got: %v", want, err)
+		}
 	}
 }
 

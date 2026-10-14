@@ -37,9 +37,9 @@ the editor draws it as a chart.
 | --- | --- | --- |
 | `Step.X`, `Step.T` | `Step.X`, `Step.T`, an elapsed `TIME`: `ChargeA.T >= T#5M` | Today |
 | Qualifiers `N`, `S`, `R`, `P` | the same, plus `P1` and `P0` | Today |
-| Qualifiers `L`, `D`, `SD`, `DS`, `SL` | parse, then error naming the supported set. Until they land, use `Step.T` in the action or in the transition | Planned, [#190](https://github.com/joyautomation/nautilus/issues/190), error text [#184](https://github.com/joyautomation/nautilus/issues/184) |
-| The IEC textual association `Detergent(D, T#3S);` | not accepted | Planned, [#189](https://github.com/joyautomation/nautilus/issues/189) |
-| `SFCError` and step supervision (maximum step time) | no step supervision today. Planned: a small per-step maximum time that raises an alarm through the alarm engine and sets an error flag | Planned, [#191](https://github.com/joyautomation/nautilus/issues/191) |
+| Qualifiers `L`, `D`, `SD`, `DS`, `SL` | the same, as timed associations: `D XV201A_Cmd(T#3S);`. Each association has its own timer; see [timed qualifiers](/languages/sfc/#action-qualifiers) | Today |
+| The IEC textual association `Detergent(D, T#3S);` | read as the same association as `D Detergent(T#3S);` | Today |
+| `SFCError` and step supervision (maximum step time) | `STEP Fill (MAXTIME := T#60S, ERROR := FillOverrun):` sets a retained `Fill.ERR` flag when the step stays active longer than the limit. It raises no alarm by itself; a transition or `ACTION` reads the flag. See [step supervision](/languages/sfc/#step-supervision) | Today |
 | Alternative branch priority | declaration order, first highest. Reordering gestures are planned | Today; gestures [#181](https://github.com/joyautomation/nautilus/issues/181) |
 | Numeric transition priority | not supported; declaration order is the only rule | Declined |
 | Transition conditions in LD, FBD or IL | not supported; a transition is an ST expression | Declined |

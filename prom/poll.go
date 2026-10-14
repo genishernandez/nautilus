@@ -44,6 +44,13 @@ func (d *Driver) poll(ctx context.Context, sourceID, class string) (hw.Result, e
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
+	// A scrape's samples are stamped with its start, as Prometheus stamps
+	// them: the exporter reads its counters as the request arrives, so the
+	// start is closer to when they were read than the end is, which adds the
+	// response's transfer and parse time. Stamped at the end, that varying
+	// latency skewed every rate: a fully idle host's idle-CPU rate came out
+	// above its CPU count, and 100*(1 - idle/cpus) slightly negative.
+	now := time.Now()
 	body, err := d.fetch(ctx, sr.cfg.URL, sr.headers, sr.cfg.InsecureSkipVerify, timeout)
 	if err != nil {
 		sr.mu.Lock()
@@ -59,7 +66,6 @@ func (d *Driver) poll(ctx context.Context, sourceID, class string) (hw.Result, e
 		return hw.Result{}, fmt.Errorf("prom: scrape %s: %w", sourceID, err)
 	}
 	idx := buildIndex(scrape.Samples)
-	now := time.Now()
 
 	sr.mu.Lock()
 	reconnected := sr.wasDown[class]
@@ -323,6 +329,21 @@ func aggregate(agg string, matches []Sample) (float64, error) {
 }
 
 // ── per-source runtime state ────────────────────────────────────────────
+
+// onReconnect is hw.Config.OnReconnect: a source back from a park — which
+// wasDown never sees, since a parked source is not polled — or an outage
+// forgets every counter's last sample.
+func (d *Driver) onReconnect(sourceID string) {
+	sr := d.sources[sourceID]
+	if sr == nil {
+		return
+	}
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	for _, c := range sr.counters {
+		c.Reset()
+	}
+}
 
 // counterFor returns key's counter, creating it on first use.
 func (sr *sourceRuntime) counterFor(key string) *hw.Counter {

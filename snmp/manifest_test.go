@@ -154,6 +154,11 @@ func TestManifestValidate(t *testing.T) {
 			mb.Eq = 1
 			m.Tags[1].Members["InputV"] = mb
 		}, "eq: makes a BOOL"},
+		{"eq a yaml bool", func(m *Manifest) {
+			mb := m.Tags[0].Members["OperUp"]
+			mb.Map, mb.Eq = nil, true
+			m.Tags[0].Members["OperUp"] = mb
+		}, "SNMP has no booleans"},
 		{"write without oid", func(m *Manifest) { m.Writes[0].OID = "" }, "needs an oid"},
 		{"dup tag", func(m *Manifest) { m.Tags[1].Name = "SW1_Port01" }, "duplicate tag"},
 	} {

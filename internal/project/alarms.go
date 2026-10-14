@@ -190,6 +190,13 @@ func composeAlarms(fsys fs.FS, m *Manifest) error {
 		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("%s: %w", p, err)
 		}
+		file.Path = p
+		for i := range file.Rules {
+			file.Rules[i].Source = p
+		}
+		for i := range file.Defs {
+			file.Defs[i].Source = p
+		}
 		// Prepended, not appended: a file's rules and defs are read BEFORE
 		// the manifest's own, so `alarms:` is the last word — the same
 		// order composeTags uses.

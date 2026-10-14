@@ -1,8 +1,24 @@
 package st
 
 import (
+	"strings"
 	"testing"
 )
+
+func TestTrailingAfterEndProgram(t *testing.T) {
+	for _, tail := range []string{"\ngarbage garbage ;", "\nFUNCTION_BLOCK X\nEND_FUNCTION_BLOCK\n"} {
+		if _, err := Parse("PROGRAM P\nVAR a : INT; END_VAR\na := 1;\nEND_PROGRAM" + tail); err == nil {
+			t.Errorf("no error for trailing %q", tail)
+		} else if !strings.Contains(err.Error(), "line 5") {
+			t.Errorf("error for trailing %q does not name line 5: %v", tail, err)
+		}
+	}
+	for _, tail := range []string{"", "\n", "\n(* done *)\n", "\n// done\n"} {
+		if _, err := Parse("PROGRAM P\nVAR a : INT; END_VAR\na := 1;\nEND_PROGRAM" + tail); err != nil {
+			t.Errorf("trailing %q: %v", tail, err)
+		}
+	}
+}
 
 func mustParse(t *testing.T, src string) *Program {
 	t.Helper()

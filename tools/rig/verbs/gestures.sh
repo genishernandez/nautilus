@@ -1149,6 +1149,9 @@ fbd_wire() {
 # _fbd_assert_pin <node.PIN> <source spec> — save, then check the pin's
 # argument in the node's statement names the source (its last name part:
 # a wire "low", a tag "PumpRun", an instance output "a1.Q" → "a1.Q").
+# Only a call matches (NODE := FN(args)). A bare coil assignment with no
+# function, `SpeedRef := lic.CV`, has no pin to find: check it with
+# assert_file_contains "$G_FILE" 'SpeedRef *:= *lic\.CV' (it saves first).
 _fbd_assert_pin() {
   local to=$1 from=$2 src
   src=$from
@@ -1426,6 +1429,14 @@ _mimic_json() {
     [[ -s $f ]] && python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null && break
     sleep 0.15
   done
+  # Still 0 bytes: nothing written yet, which the editor reads as the empty
+  # document (EMPTY_DOC), so hand the python that instead of crashing it.
+  if [[ ! -s $f ]]; then
+    local empty rc; empty=$(mktemp)
+    printf '{"canvas":{"width":960,"height":540},"equipment":[],"pipes":[]}\n' >"$empty"
+    python3 - "$empty" "$@"; rc=$?
+    rm -f "$empty"; return $rc
+  fi
   python3 - "$f" "$@"
 }
 mimic_ids() { _mimic_json <<'PY'

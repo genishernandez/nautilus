@@ -61,7 +61,8 @@ type SourceConfig struct {
 	RetryMin time.Duration // backoff floor (default 1s)
 	RetryMax time.Duration // backoff ceiling (default 60s)
 	// StaleAfter: a source whose last complete poll is older than this
-	// reports Stale even in the connected state (default 3×Interval).
+	// reports Stale even in the connected state (default 3× the interval
+	// of the fastest scan class the source polls).
 	StaleAfter time.Duration
 	// Enable names an optional BOOL tag: false parks the source. It is a
 	// synthesized OUTPUT (the runtime hands its value to WriteOutputs).
@@ -328,9 +329,6 @@ func NewBase(c Config) (*Base, error) {
 		if sc.Interval <= 0 {
 			sc.Interval = rates[DefaultClass]
 		}
-		if sc.StaleAfter <= 0 {
-			sc.StaleAfter = 3 * sc.Interval
-		}
 		s := &Source{
 			cfg:       sc,
 			values:    map[string]ir.Value{},
@@ -433,6 +431,19 @@ func NewBase(c Config) (*Base, error) {
 	}
 	for _, s := range b.sources {
 		sort.Slice(s.classes, func(i, j int) bool { return s.classes[i].name < s.classes[j].name })
+		// Default StaleAfter: three periods of the fastest class this source
+		// actually polls — any class's good poll refreshes lastPoll, so that
+		// is the cadence __Online sees. The default class's interval would
+		// flap a source whose members all sit in a slower class.
+		if s.cfg.StaleAfter <= 0 {
+			cadence := s.cfg.Interval
+			for i, c := range s.classes {
+				if i == 0 || c.interval < cadence {
+					cadence = c.interval
+				}
+			}
+			s.cfg.StaleAfter = 3 * cadence
+		}
 	}
 
 	// Writes.

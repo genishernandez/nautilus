@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -213,5 +214,65 @@ func TestMultiStartStopFanout(t *testing.T) {
 	}
 	if !reflect.DeepEqual(stopped, []string{"second", "first"}) {
 		t.Fatalf("stopped = %v — teardown runs in reverse start order", stopped)
+	}
+}
+
+// gated is a child with a leadership gate the way modbus and the hw drivers
+// have one: while the gate is closed a command never leaves the driver.
+type gated struct {
+	named
+	gate *func() bool
+	sent *[]string
+}
+
+func (g gated) SetWriteGate(gate func() bool) { *g.gate = gate }
+func (g gated) WriteOutputs(v Values) error {
+	if gf := *g.gate; gf != nil && !gf() {
+		return nil
+	}
+	for k := range v {
+		*g.sent = append(*g.sent, k)
+	}
+	return nil
+}
+
+func TestMultiWriteGateReachesChildren(t *testing.T) {
+	var sent []string
+	var gateA, gateB func() bool
+	a := gated{named: named{Memory: NewMemory(), outs: []string{"A_Cmd"}}, gate: &gateA, sent: &sent}
+	b := gated{named: named{Memory: NewMemory(), outs: []string{"B_Cmd"}}, gate: &gateB, sent: &sent}
+	// A child with no gate is skipped, not an error.
+	c := plain{mem: NewMemory(), outs: []string{"C_Cmd"}}
+	m, err := NewMulti(NamedDriver{"a", a}, NamedDriver{"b", b}, NamedDriver{"c", c})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// `naut run` gates whatever driver the project built; for a multi-driver
+	// project that is the Multi, so it must accept the gate...
+	g, ok := Driver(m).(interface{ SetWriteGate(func() bool) })
+	if !ok {
+		t.Fatal("Multi has no SetWriteGate — a follower's children would write")
+	}
+	leader := false
+	g.SetWriteGate(func() bool { return leader })
+	if gateA == nil || gateB == nil {
+		t.Fatal("the gate did not reach every gated child")
+	}
+
+	// ...and a follower's write through it is refused by every child.
+	if err := m.WriteOutputs(Values{"A_Cmd": true, "B_Cmd": true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("follower sent %v", sent)
+	}
+	leader = true
+	if err := m.WriteOutputs(Values{"A_Cmd": true, "B_Cmd": true}); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(sent)
+	if !reflect.DeepEqual(sent, []string{"A_Cmd", "B_Cmd"}) {
+		t.Fatalf("leader sent %v", sent)
 	}
 }

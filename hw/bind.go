@@ -96,6 +96,14 @@ func (b Binding) Validate(f Field) error {
 		if b.Map != nil {
 			return fmt.Errorf("member %s: map: and eq: are alternatives", f.Name)
 		}
+		if b.Rate {
+			return fmt.Errorf("member %s: eq: and rate: are alternatives — eq: compares the wire value, a rate is computed from it", f.Name)
+		}
+	}
+	if b.Rate && b.Map != nil {
+		// Apply maps first, and a rate over a mapped value is never
+		// computable: the member would be Bad on every poll.
+		return fmt.Errorf("member %s: rate: and map: are alternatives — a rate needs the raw counter, not a mapped value", f.Name)
 	}
 	for k, v := range b.Map {
 		if _, err := coerce(v, f); err != nil {

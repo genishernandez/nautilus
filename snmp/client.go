@@ -383,6 +383,18 @@ func fromPDU(p gosnmp.SnmpPDU) (walk.Varbind, error) {
 		}
 		b, _ := p.Value.([]byte)
 		vb.Bytes = append([]byte{}, b...)
+	case gosnmp.OpaqueFloat, gosnmp.OpaqueDouble:
+		// gosnmp unwraps net-snmp's Opaque floats; re-wrap them, so a
+		// recording holds (and serves) the bytes the agent sent.
+		vb.Type = walk.Opaque
+		switch f := p.Value.(type) {
+		case float32:
+			vb.Bytes = walk.OpaqueFloatBytes(f)
+		case float64:
+			vb.Bytes = walk.OpaqueDoubleBytes(f)
+		default:
+			return vb, fmt.Errorf("%s: %s carries a %T", vb.OID, p.Type, p.Value)
+		}
 	case gosnmp.ObjectIdentifier:
 		vb.Type = walk.ObjectID
 		s, _ := p.Value.(string)

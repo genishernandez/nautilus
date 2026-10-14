@@ -45,6 +45,29 @@ func TestCounterWrap32(t *testing.T) {
 	}
 }
 
+// A counter whose wire form flips between int and float must not compute a
+// delta against the other path's zero: 1e6 as int, then 1000050.0 as a
+// float, read as a million per second before the paths kept their own.
+func TestCounterSwitchingPathsStartsOver(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	var c Counter
+	c.Observe(1000000, 64, t0)
+	if r, ok := c.ObserveFloat(1000050, t0.Add(time.Second)); ok {
+		t.Fatalf("int then float yielded rate %v; the switch is a first sample", r)
+	}
+	r, ok := c.ObserveFloat(1000150, t0.Add(2*time.Second))
+	if !ok || r != 100 {
+		t.Fatalf("float after float: rate = %v, %v; want 100", r, ok)
+	}
+	if r, ok := c.Observe(1000200, 64, t0.Add(3*time.Second)); ok {
+		t.Fatalf("float then int yielded rate %v; the switch is a first sample", r)
+	}
+	r, ok = c.Observe(1000300, 64, t0.Add(4*time.Second))
+	if !ok || r != 100 {
+		t.Fatalf("int after int: rate = %v, %v; want 100", r, ok)
+	}
+}
+
 func TestCounterFloat(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	var c Counter

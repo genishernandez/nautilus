@@ -6,7 +6,7 @@
 // webview pure-logic tests.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { minInteriorPoints, resolveDraftFinish, type NamedPort } from "./pipeDraft.ts";
+import { minInteriorPoints, nearestPort, resolveDraftFinish, type NamedPort } from "./pipeDraft.ts";
 
 // `hoverPort`/`cursor` carry the port's resolved position (as the real
 // EditorCanvas caller does); `draftFrom`/`draftLastSnap` are the already-
@@ -137,4 +137,12 @@ test("draft already meets the floor via clicks alone: a hovered port is NOT retr
     from: { equip: "tank1", port: "left" },
     to: { equip: "tank2", port: "right" }
   });
+});
+
+test("nearestPort: the closest of two overlapping hit areas wins, not the first", () => {
+	const a: NamedPort = { equip: "e1", port: "a", x: 100, y: 100 };
+	const b: NamedPort = { equip: "e2", port: "b", x: 116, y: 100 };
+	assert.equal(nearestPort([110, 100], [a, b], 14), b);
+	assert.equal(nearestPort([105, 100], [a, b], 14), a);
+	assert.equal(nearestPort([300, 300], [a, b], 14), null);
 });

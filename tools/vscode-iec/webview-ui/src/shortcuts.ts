@@ -104,7 +104,7 @@ export const LD_SHORTCUTS: ShortcutGroup[] = [
 			{ keys: 'N', does: 'Toggle a contact between NO and NC', hint: 'N: NO/NC' },
 			{ keys: 'P', does: 'Cycle a contact: NO → P (rising edge) → N (falling edge) → NC', hint: 'P: edge contact' },
 			{ keys: 'M', does: 'Cycle a coil: normal → set → reset', hint: 'M: coil mode' },
-			{ keys: 'B', does: 'Wrap the selection in a parallel branch', hint: 'B: branch around' },
+			{ keys: 'B', does: 'Wrap the selection in a parallel branch — the new leg arrives with a _ placeholder to retag', hint: 'B: branch around' },
 			{ keys: 'Ctrl + C / X / V', does: 'Copy, cut, paste an element or a whole rung (its name selected) — pastes after the selection, into another ladder too; a pasted rung gets the next name (m1 → m2) and renamed blocks', hint: 'Ctrl+C/X/V: copy cut paste' },
 			{ keys: 'Esc', does: 'Cancel a drag', hint: 'Esc: cancel drag' }
 		]

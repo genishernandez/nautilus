@@ -5,8 +5,14 @@
 	// keys Ladder/SFC get from ZoomPane: Ctrl+= / Ctrl+- / Ctrl+0 (fit).
 	import { useSvelteFlow } from '@xyflow/svelte';
 
-	let { structureKey }: { structureKey: string } = $props();
-	const { fitView, zoomIn, zoomOut } = useSvelteFlow();
+	let { structureKey, centre = $bindable() }: { structureKey: string; centre?: () => { x: number; y: number } | null } = $props();
+	const { fitView, zoomIn, zoomOut, screenToFlowPosition } = useSvelteFlow();
+	// The canvas point at the middle of the visible pane (where a new
+	// palette chip should land).
+	centre = () => {
+		const r = document.querySelector('.svelte-flow')?.getBoundingClientRect();
+		return r ? screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : null;
+	};
 	let last = '';
 
 	$effect(() => {

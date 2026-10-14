@@ -201,6 +201,11 @@ func (p *Parser) parseProgram() (*Program, error) {
 	}
 	if nameSet {
 		p.match(TokenEndProgram)
+		// One POU per file: FUNCTION_BLOCKs and FUNCTIONs belong before
+		// END_PROGRAM, so anything after it would silently never compile.
+		if t := p.peek(); t.Type != TokenEOF {
+			return nil, fmt.Errorf("line %d: unexpected %s after END_PROGRAM; one POU per file (declare FUNCTION_BLOCKs and FUNCTIONs before END_PROGRAM)", t.Line, t.describe())
+		}
 	}
 	if prog.Name == "" {
 		prog.Name = "main"

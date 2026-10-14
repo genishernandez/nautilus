@@ -44,6 +44,43 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Fixed
 
+- **Text after `END_PROGRAM` is an error, not silently ignored.** A
+  `FUNCTION_BLOCK` (or anything else) placed after `END_PROGRAM` was never
+  compiled, yet the file showed no diagnostics and `naut check` passed it.
+  It is now an error on that line; declare function blocks and functions
+  before `END_PROGRAM`. Comments and blank lines after it are still fine.
+  Needs a `naut` newer than 0.16.2.
+
+- **No completions inside comments or strings.** Typing prose in a
+  `(* … *)` comment, a `//` comment or a `'string'` offered keywords, and a
+  space after "while" or "real" turned it into `WHILE` or `REAL`. The
+  completion list is now empty there; code right after a closed comment
+  completes as before. Needs a `naut` newer than 0.16.2.
+
+- **The nearest port wins when two sit close together on a mimic.** Ports
+  about 16 px apart shared a hit area and the one earlier in the file took
+  the click; a pipe now snaps to whichever port is closest to the cursor.
+  (#95)
+
+- **Rollback and Download ask which program when the active tab names
+  none.** Right after closing a diff view they refused with "multiple
+  program files"; they now use the last program you had open, or offer a
+  picker. (#84)
+
+- **A retag editor near the pane's edge stays on screen.** The floating
+  editor on the ladder and other diagrams is kept 8 px inside the pane, and
+  its suggestion list shifts or flips when it would run off the edge. (#83)
+
+- **New input-reference chips no longer stack on the FBD canvas.** "+ add
+  → input reference" places the chip at the middle of the view, offset
+  from any chip already there, and a chip you wire is placed by
+  auto-layout with its network rather than staying at its drop spot. The
+  wiring part comes from `naut`'s edit operations, so it needs a `naut`
+  newer than 0.16.2. (#80, #81)
+
+- **The "?" shortcuts list says what `B` does to the new leg.** It arrives
+  with a `_` placeholder to retag. (#77)
+
 - **A rung's coils see one evaluation of its condition.** In a rung where
   a coil writes a tag the condition reads, such as `/Lamp ( Lamp ) ( Horn )`,
   later coils re-evaluated the condition after the earlier coil's write, so
@@ -53,6 +90,15 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   locals. **Programs with such a rung compute different (correct) values
   after upgrading.** Rungs without the pattern are unchanged. Comes from the
   runtime and `naut lsp`, so it needs a `naut` newer than 0.16.1. (#258)
+
+- **Rename only renames the symbol.** Renaming a local `Q` also rewrote
+  the member in `t1.Q`, renaming a local `T` turned `T#2s` into `Flag#2s`,
+  and a name used undeclared in another POU of the file was renamed along
+  with the local it is not. Rename now edits exactly what Find All
+  References finds. Renaming a FUNCTION_BLOCK's variable, from its
+  declaration or from `p1.Run` / `p1(Run := …)`, also renames it where
+  instances of that FB in the same file use it; a builtin's member such as
+  `t1.Q` cannot be renamed. Needs a `naut` newer than 0.16.2. (#195)
 
 ## [0.15.0] - 2026-10-12
 
