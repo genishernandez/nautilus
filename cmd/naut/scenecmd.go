@@ -106,6 +106,18 @@ func runSceneInit(args []string) int {
 		fmt.Fprintf(os.Stderr, "naut scene init: warning: %s\n", w)
 	}
 
+	// The generated file is held to the same check as a hand-written one,
+	// so a --kind that points a UDT at a kind whose members it lacks is
+	// reported now, not at the first naut check — and before anything is
+	// written, so the rerun with a corrected --kind needs no --force.
+	if errs, _ := scene.Check(doc, tags); len(errs) > 0 {
+		for _, m := range errs {
+			fmt.Printf("error: %s\n", m)
+		}
+		fmt.Fprintln(os.Stderr, "naut scene init: the generated scene does not check; nothing written")
+		return 1
+	}
+
 	path := *out
 	if path == "" {
 		path = filepath.Join(dir, proj.Name+".scene.json")
@@ -157,15 +169,6 @@ func runSceneInit(args []string) int {
 			fmt.Printf("  %-16s %s\n", t, strings.Join(byT[t], ", "))
 		}
 		fmt.Printf("place them with --kind <Type>=tank|pump|valve, or declare a kind of your own under kinds: (docs/design/spatial-hmi.md §3b)\n")
-	}
-	// The generated file is held to the same check as a hand-written one,
-	// so a --kind that points a UDT at a kind whose members it lacks is
-	// reported now, not at the first naut check.
-	if errs, _ := scene.Check(doc, tags); len(errs) > 0 {
-		for _, m := range errs {
-			fmt.Printf("error: %s\n", m)
-		}
-		return 1
 	}
 	return 0
 }
