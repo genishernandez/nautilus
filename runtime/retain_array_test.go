@@ -299,57 +299,68 @@ func TestRetainedArrayLengthChange(t *testing.T) {
 	}
 }
 
-// An array holding function-block instances has no value to persist and
-// cannot be written back: it is left out (and logged once), and the rest
-// of the state still saves.
+// An array or struct holding function-block instances has no value to
+// persist and cannot be written back: it is left out (and logged once), and
+// the rest of the state still saves.
+//
+// No project reaches this: the tag model refuses a block, or a type
+// holding one, both as a manifest tag's type: and as the type a program
+// declares for a manifest tag. The skip stays as defense in depth, so this
+// drives retain directly, writing the values into the store.
 func TestRetainSkipsArrayOfFunctionBlocks(t *testing.T) {
 	fbs := ir.Value{Kind: ir.TypeArray, Arr: []ir.Value{{Kind: ir.TypeFB}}}
 	if retainable(fbs) {
 		t.Fatal("an array of FB instances reads as retainable")
 	}
+	holder := ir.Value{Kind: ir.TypeStruct, Fld: []ir.Value{ir.IntVal(1), {Kind: ir.TypeFB}}}
+	if retainable(holder) {
+		t.Fatal("a struct with an FB member reads as retainable")
+	}
 	nested := ir.Value{Kind: ir.TypeArray, Arr: []ir.Value{{Kind: ir.TypeArray, Arr: []ir.Value{ir.IntVal(1)}}}}
 	if !retainable(nested) {
 		t.Fatal("an array of arrays of INT reads as unretainable")
 	}
-	// The tag model refuses `type: ARRAY[1..2] OF TON` (as it refuses
-	// `type: TON`), so a manifest cannot type a tag that way. An untyped
-	// setpoint still takes the type a program's VAR_EXTERNAL declares for
-	// it, and the lowerer refuses only a call on an FB global, not the
-	// declaration: that is the route left to such a tag, and why the skip
-	// stays.
-	if _, err := New(Options{
-		Program: `PROGRAM Main VAR_EXTERNAL Timers : ARRAY[1..2] OF TON; END_VAR END_PROGRAM`,
-		Tags:    []TagDef{Typed("Timers", RoleSetpoint, "ARRAY[1..2] OF TON")},
-	}); err == nil || !errors.Is(err, st.ErrFunctionBlockType) {
-		t.Fatalf("type: ARRAY[1..2] OF TON: err = %v, want the function-block refusal", err)
+	// The manifest routes are closed: typed, and untyped with the program
+	// declaring the block.
+	for _, d := range []TagDef{Typed("Timers", RoleSetpoint, "ARRAY[1..2] OF TON"), {Name: "Timers", Role: RoleSetpoint}} {
+		if _, err := New(Options{
+			Program: `PROGRAM Main VAR_EXTERNAL Timers : ARRAY[1..2] OF TON; END_VAR END_PROGRAM`,
+			Tags:    []TagDef{d},
+		}); err == nil || !errors.Is(err, st.ErrFunctionBlockType) {
+			t.Fatalf("tag %+v: err = %v, want the function-block refusal", d, err)
+		}
 	}
 	rt, err := New(Options{
-		Program: `PROGRAM Main VAR_EXTERNAL Timers : ARRAY[1..2] OF TON; SP : REAL; END_VAR END_PROGRAM`,
-		Tags: []TagDef{
-			{Name: "Timers", Role: RoleSetpoint},
-			Setpoint("SP", 65.0),
-		},
-		Retain: &fakeStore{},
+		Program:    `PROGRAM Main VAR_EXTERNAL SP : REAL; END_VAR END_PROGRAM`,
+		Tags:       []TagDef{Setpoint("SP", 65.0)},
+		RetainTags: []string{"Timers", "Station", "SP"},
+		Retain:     &fakeStore{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = rt.Tags().WriteGlobal("Timers", fbs)
+	_ = rt.Tags().WriteGlobal("Station", holder)
 	var logs bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	defer slog.SetDefault(prev)
 
 	rt.Scan()
-	st := rt.retainState()
-	if _, ok := st.Tags["Timers"]; ok {
-		t.Fatal("an array of FB instances was persisted")
+	state := rt.retainState()
+	for _, name := range []string{"Timers", "Station"} {
+		if _, ok := state.Tags[name]; ok {
+			t.Errorf("%s, which holds an FB instance, was persisted", name)
+		}
 	}
-	if _, ok := st.Tags["SP"]; !ok {
-		t.Fatal("skipping one array dropped the rest of the state")
+	if _, ok := state.Tags["SP"]; !ok {
+		t.Fatal("skipping one tag dropped the rest of the state")
 	}
 	rt.retainState() // a second saver tick
-	if n := strings.Count(logs.String(), "tag=Timers"); n != 1 {
-		t.Fatalf("the skipped array was named %d times in the log, want once:\n%s", n, logs.String())
+	for _, name := range []string{"Timers", "Station"} {
+		if n := strings.Count(logs.String(), "tag="+name); n != 1 {
+			t.Errorf("the skipped %s was named %d times in the log, want once:\n%s", name, n, logs.String())
+		}
 	}
 }
 

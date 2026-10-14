@@ -881,7 +881,7 @@ func gvlTags(libs []string, declared []runtime.TagDef) []runtime.TagDef {
 				continue
 			}
 			have[ir.NameKey(g.Name)] = true
-			out = append(out, runtime.TagDef{Name: g.Name, Role: runtime.RoleState})
+			out = append(out, runtime.TagDef{Name: g.Name, Role: runtime.RoleState, GVL: true})
 		}
 	}
 	return out

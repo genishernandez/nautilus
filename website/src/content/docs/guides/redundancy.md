@@ -40,11 +40,9 @@ retain:
   onto the current tag, so if the project has since grown an array, the
   new elements keep their `init:` seeds; if it has shrunk one, the array
   keeps its seeds and the mismatch shows in `lastRetainError`. A setpoint
-  cannot be typed as an array of function-block instances (the tag model
-  refuses `type: ARRAY OF TON`); if one reaches the store anyway, through
-  an untyped setpoint a program declares `VAR_EXTERNAL Timers : ARRAY[1..2]
-  OF TON`, it is not saved, since an FB instance is program state, not a
-  value, and the log names the tag once.
+  cannot hold a function-block instance: the tag model refuses an `ARRAY
+  OF TON`, or a struct with a TON member, as a tag's type, whether the
+  manifest or a program's `VAR_EXTERNAL` declares it.
 - **When:** every 2 seconds, only when something changed, and only by the
   leader. A hard kill can lose at most 2 seconds of operator input.
 - **Load order:** retained values are applied before the first scan and

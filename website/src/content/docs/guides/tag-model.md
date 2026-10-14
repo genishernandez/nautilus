@@ -146,8 +146,12 @@ type that holds one: an array of a block, standard or the project's own,
 at any nesting (`tag Timers: ARRAY[1..2] OF TON — TON is a function block;
 an instance is program state, not a tag`), and a TYPE whose STRUCT has a
 block member (`tag Line1: Station — member Delay is a TON, a function
-block; …`). An array of timers belongs in the program's `VAR`; publish the
-values it produces as tags.
+block; …`). A tag with no `type:` is held to the same rule through the
+type a program declares for it: `VAR_EXTERNAL Timers : ARRAY[1..2] OF
+TON;` naming a manifest tag is refused at load (`tag Timers: program Main
+declares it ARRAY[1..2] OF TON — TON is a function block; …`). An array of
+timers belongs in the program's `VAR`; publish the values it produces as
+tags.
 
 `GET /api/meta` reports each tag's declared type beside its `desc` and
 `unit`, and an enumeration's members, so a client can tell an enumerated

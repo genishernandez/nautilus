@@ -59,6 +59,11 @@ type TagDef struct {
 	// the logic, the tag store, the driver, and the HMI. Empty for a scalar,
 	// whose type comes from its seed as before.
 	Type string
+	// GVL marks a tag no manifest entry declares: a library's file-level
+	// VAR_GLOBAL made it one (project.gvlTags). A program's declaration of
+	// it is the global's own, so New does not hold it to the tag model's
+	// refusal of a function-block type the way it holds a manifest tag.
+	GVL bool
 }
 
 // TagOpt customizes a TagDef (Desc, Unit, Init).

@@ -85,16 +85,44 @@ func ResolveTypeName(name string, types map[string]*ir.Type) (*ir.Type, error) {
 	if t.Kind == ir.TypeFB {
 		return nil, fmt.Errorf("%s is %w", name, ErrFunctionBlockType)
 	}
-	if fb, member := fbInside(t, "", map[*ir.StructDef]bool{}); fb != "" {
-		if member == "" {
-			// An array of blocks, at any nesting.
-			return nil, &fbInsideError{fmt.Sprintf(
-				"%s — %s is a function block; an instance is program state, not a tag", name, fb)}
-		}
-		return nil, &fbInsideError{fmt.Sprintf(
-			"%s — member %s is a %s, a function block; an instance is program state, not a tag", name, member, fb)}
+	if err := FunctionBlockIn(t); err != nil {
+		return nil, fmt.Errorf("%s — %w", name, err)
 	}
 	return t, nil
+}
+
+// FunctionBlockIn reports whether t is or holds a function block — an
+// array of blocks at any nesting, a STRUCT with a block member: nil when
+// it holds none, else an error naming the block (`TON is a function
+// block; …`, or `member Delay is a TON, a function block; …`) that
+// errors.Is finds as ErrFunctionBlockType. The caller prefixes what
+// declared the type.
+func FunctionBlockIn(t *ir.Type) error {
+	fb, member := fbInside(t, "", map[*ir.StructDef]bool{})
+	switch {
+	case fb == "":
+		return nil
+	case member == "":
+		return &fbInsideError{fb + " is a function block; an instance is program state, not a tag"}
+	}
+	return &fbInsideError{fmt.Sprintf(
+		"member %s is a %s, a function block; an instance is program state, not a tag", member, fb)}
+}
+
+// TypeSpelling writes a resolved type the way a declaration spells it —
+// `ARRAY[1..2] OF TON`, a block's or a TYPE's name — for a diagnostic. A
+// multi-dimensional array reads as nested arrays, which is how it
+// resolves.
+func TypeSpelling(t *ir.Type) string {
+	switch {
+	case t == nil:
+		return "?"
+	case t.Kind == ir.TypeArray:
+		return fmt.Sprintf("ARRAY[%d..%d] OF %s", t.ArrLoBound, t.ArrLoBound+t.ArrLen-1, TypeSpelling(t.Elem))
+	case t.Kind == ir.TypeFB && t.Name == "" && t.FB != nil:
+		return t.FB.Name
+	}
+	return t.String()
 }
 
 // fbInside finds a function block t holds — as an array's element or a
