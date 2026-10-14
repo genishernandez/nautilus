@@ -27,11 +27,11 @@ claims:
     source: "#tags-arrive-documented"
     tests:
       - go ./lang/l5x TestTagsScopes
-    partial: true
+      - go ./cmd/naut TestLogixImportScopeStarTakesProgramTags
     note: >-
-      Scope selection is asserted on the library (TagsYAML with Scope "*");
-      the CLI test that passes `--scope '*'` binds only controller-scope
-      tags, so a CLI that dropped the flag would not be caught.
+      The CLI test runs `naut logix import --scope '*'` and finds a
+      program-scope tag (MainProgram_Scratch) beside the controller-scope
+      ones, and checks the default scope leaves it out.
 
   - id: LGX-004
     claim: >-
@@ -98,16 +98,26 @@ claims:
       `naut logix serve` leaves module I/O tags out, and `--tags` narrows
       what is served with globs such as `Program:MainProgram.*`.
     source: "#live-values-from-a-running-controller"
-    tests: []
-    note: The facade tests use an emulator with no module I/O and never pass a glob.
+    tests:
+      - go ./cmd/naut TestLogixServeLeavesModuleIOOut
+      - go ./cmd/naut TestLogixServeTagsGlobNarrows
+    note: >-
+      `naut logix serve` against the in-process emulator with a module I/O tag
+      (Local:1:I) beside user tags: the default serves every user tag and not
+      the module tag, which the emulator does serve when a glob asks for it;
+      `--tags` with one glob and with a comma-separated pair serves exactly
+      the matches.
 
   - id: LGX-011
     claim: >-
       `--l5x` supplies tag descriptions to the served API, since a CIP
       browse cannot read documentation.
     source: "#live-values-from-a-running-controller"
-    tests: []
-    note: No test feeds an L5X to the facade and checks descriptions.
+    tests:
+      - go ./cmd/naut TestLogixServeL5XSuppliesDescriptions
+    note: >-
+      Without `--l5x` /api/meta has no description; with it, the export's
+      descriptions are served under the served names (MainProgram_StartPB).
 
   - id: LGX-012
     claim: >-
@@ -116,12 +126,12 @@ claims:
     source: "#live-values-from-a-running-controller"
     tests:
       - go ./logix/facade TestWritesReachTheController
-    partial: true
+      - go ./logix/facade TestTheFrameShowsTheReadBackNotTheRequest
     note: >-
-      The write reaches the controller, which held a different value first,
-      and after the read-back the frame follows a later controller-side
-      change. No case has the controller hold a value other than the one sent,
-      so a frame that showed the request until the next poll would still pass.
+      With one poll at startup and none after, the frame keeps the polled
+      value after a write the controller took, so the request never reaches
+      the frame; and a REAL written as 0.1 shows as the float32 the controller
+      holds, not the 0.1 sent.
 
   - id: LGX-013
     claim: >-
@@ -132,11 +142,12 @@ claims:
     tests:
       - go ./logix/facade TestWritesReachTheController
       - go ./logix/facade TestWritesThatCannotWork
-    partial: true
+      - go ./logix/facade TestAWriteTheControllerRefusesReturnsItsRefusal
     note: >-
-      Member writes and the whole-UDT refusal are asserted. Every refusal
-      tested comes from the facade itself; a refusal coming back from the
-      controller is never exercised.
+      Member writes and the whole-UDT refusal are asserted. An out-of-range
+      array index, which the facade passes through, is refused by the
+      (emulated) controller and the reply carries that refusal (CIP status
+      0x05).
 
   - id: LGX-014
     claim: >-
@@ -153,8 +164,13 @@ claims:
       for writes; without it, writes are open to anything that can reach the
       port.
     source: "#live-values-from-a-running-controller"
-    tests: []
-    note: logixserve.go hands the token to the server, but no test exercises that wiring for logix serve.
+    tests:
+      - go ./cmd/naut TestLogixServeNautilusTokenGuardsWrites
+    note: >-
+      `naut logix serve` run with NAUTILUS_TOKEN answers a write with no token
+      or a wrong one with 401 and the controller keeps its value, and takes a
+      write with the bearer token; without NAUTILUS_TOKEN a write from a
+      non-browser client lands.
 
   - id: LGX-016
     claim: >-
@@ -180,8 +196,12 @@ claims:
       - go ./cmd/naut TestLogixProbePrintsTheRemedyForAFailingGate
     partial: true
     note: >-
-      The remedy text is asserted to appear in the output; its position
-      under the failing gate is not.
+      The CLI half: against a fake agent that attaches a remedy to the failing
+      gate, the remedy is the indented line directly under that gate, before
+      the next gate, and a passing gate carries none. The remedies themselves
+      come from the C# agent (its Remedies table in tools/logixd), and that
+      the real agent attaches one to every failing gate is not asserted by
+      any test, in CI or on hardware.
 
   - id: LGX-018
     claim: >-
@@ -192,13 +212,16 @@ claims:
     tests:
       - go ./logix/logixd TestClientUnreachableIsFatalAndNamesTheURL
       - go ./cmd/naut TestLogixAgentReportsAnUnreachableAgentHelpfully
+      - go ./cmd/naut TestLogixAgentReportsAWrongToken
     partial: true
     note: >-
-      An unreachable agent is asserted to read `logixd: unreachable` ...
-      refused and to name the URL, in the client and in naut logix agent. The
-      `logixd: unauthorized` / 401 reply comes from the C# agent:
-      TestAgentRejectsMissingToken checks the 401 only in the logix workflow,
-      which feeds no evidence, and not the wording.
+      An unreachable agent reads `logixd: unreachable` ... refused and names
+      the URL. Page and code disagree on the wrong-token wording: given
+      logixd's own 401 reply ({"error":"unauthorized"}), naut prints `logixd:
+      bad_reply: HTTP 401: {"error":"unauthorized"}`, not the `logixd:
+      unauthorized` the page quotes. The test asserts what is printed (HTTP
+      401, unauthorized); the 401 itself comes from the C# agent and is
+      verified on hardware only (LGX-031).
 
   - id: LGX-019
     claim: >-
@@ -228,10 +251,12 @@ claims:
     source: "#online-edits"
     tests:
       - go ./cmd/naut TestLogixDriftAsksForTheRepoFilesExportKind
-    partial: true
+      - go ./cmd/naut TestLogixDriftExitsOneOnAMismatch
     note: >-
-      Drift asking the agent for the repo file's own export kind (basic or
-      detailed) is asserted. Exiting 1 on a mismatch is not.
+      Against a fake agent standing in for the controller's upload: drift
+      uploads from the given comm path, exits 0 with "no drift" when the
+      controller's export matches the repo file and 1 with "DRIFT" when one
+      setpoint differs, and asks for the repo file's own export kind.
 
   - id: LGX-022
     claim: >-
@@ -241,12 +266,15 @@ claims:
     source: "#what-you-can-then-do"
     tests:
       - go ./logix/logixd TestParseLinxConfigFindsTheController
+      - go ./cmd/naut TestLogixBrowseListsWhatFTLinxDiscovered
       - go ./logix/logixd TestAgentCommPaths
     partial: true
     note: >-
-      Parsing the Linx configuration (comm path and controller name) is
-      CI-tested; the catalog number is not asserted there, and the live
-      agent listing is verified on hardware only.
+      With a fake agent returning the committed FT Linx configuration, `naut
+      logix browse` prints the comm path, the controller name and its catalog
+      number on one line and asks the agent for nothing but that
+      configuration. That the real agent hands back the FT Linx files it finds
+      is the C# agent's, verified on hardware only.
 
   - id: LGX-023
     claim: >-
@@ -299,16 +327,30 @@ claims:
       `logixd` listening on a routable address requires a token and refuses
       to start without one.
     source: "#security"
-    tests: []
-    note: The agent is C# (tools/logixd) and has no automated tests at all.
+    tests:
+      - go ./logix/logixd TestAgentRefusesARoutableBindWithoutAToken
+    partial: true
+    note: >-
+      Verified on hardware only: the test starts the built agent (LOGIXD_BIN,
+      which builds only beside the Logix Designer SDK) on 0.0.0.0 with no
+      token and expects exit status 2 and the refusal, then with a token
+      expects it to start. Skipped in CI; not yet run (the SDK machine is
+      unavailable).
 
   - id: LGX-029
     claim: >-
       `LOGIXD_COMM_ALLOW` is agent-side configuration only, so a request
       cannot name a controller the operator has not allowed.
     source: "#security"
-    tests: []
-    note: No test; the agent is C# with no automated tests.
+    tests:
+      - go ./logix/logixd TestAgentRefusesACommPathOutsideItsAllowlist
+    partial: true
+    note: >-
+      Verified on hardware only: the test starts the built agent with
+      LOGIXD_COMM_ALLOW set and expects an upload from a comm path outside it
+      to be refused 403 forbidden, naming the allowlist. Only the upload
+      endpoint is exercised (the session comm-path endpoint applies the same
+      check). Skipped in CI; not yet run (the SDK machine is unavailable).
 
   - id: LGX-030
     claim: >-
@@ -325,19 +367,28 @@ claims:
     source: "#security"
     tests:
       - go ./logix/logixd TestAgentRejectsMissingToken
+      - go ./logix/logixd TestAgentAnswersAMissingOrWrongTokenWith401
     partial: true
     note: >-
-      Verified on hardware only (needs a running agent with a token);
-      skipped in CI. Only a wrong token is sent; a request with no token at
-      all is not tested.
+      Verified on hardware only (needs a running agent with a token, or the
+      built agent); skipped in CI. TestAgentAnswersAMissingOrWrongTokenWith401
+      sends both no token and a wrong one, and is not yet run (the SDK machine
+      is unavailable).
 
   - id: LGX-032
     claim: >-
       The installer refuses to run while plain `DOTNET_ROOT` is set and
       prints the commands that fix it.
     source: "#install-it"
-    tests: []
-    note: install.ps1 has no automated test.
+    tests:
+      - go ./logix/logixd TestInstallerRefusesPlainDOTNET_ROOT
+    partial: true
+    note: >-
+      Verified on hardware only (an elevated Windows session): the test sets
+      DOTNET_ROOT at User scope, runs install.ps1 elevated and expects the
+      refusal, both fix commands and nothing installed. Opt-in
+      (NAUTILUS_LOGIXD_INSTALLER_TEST=1), skipped in CI and not yet run (the
+      Windows SDK machine is unavailable).
 
   - id: LGX-033
     claim: >-
