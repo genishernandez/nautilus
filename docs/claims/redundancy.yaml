@@ -21,11 +21,11 @@ claims:
     source: "#retained-state"
     tests:
       - go ./runtime TestRetainStateContents
+    partial: true
     note: >-
-      Rewritten to the page's wording. TestLoadIgnoresTagsOutsideTheRetainedSet
-      was removed: its program writes Count every scan, so a wrongly loaded 999
-      would be overwritten and the test cannot fail. That non-setpoint roles
-      are not saved is RED-006.
+      A REAL setpoint is asserted to be in the saved state. "Every" is not:
+      retainState skips ARRAY-typed tags, so an array setpoint is not saved,
+      and no test covers that case.
 
   - id: RED-003
     claim: An integer-typed setpoint tag is restored with its retained value.
@@ -104,10 +104,11 @@ claims:
       - go ./retain TestConfigMapStoreSaveCreatesWhenAbsent
       - go ./retain TestConfigMapStoreSaveUpdatesWhenPresent
       - go ./retain TestConfigMapStoreRoundTrip
+    partial: true
     note: >-
-      Rewritten to the page's promise; load-when-missing and the no-auth-header
-      case are code details the page does not state, so their tests were
-      removed.
+      Create-if-absent and the round trip are asserted on a ConfigMap store
+      built directly; retain.New choosing the ConfigMap store in a cluster, and
+      the retain.configmap wiring, are not exercised.
 
   - id: RED-012
     claim: >-

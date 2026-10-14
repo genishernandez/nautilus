@@ -54,7 +54,7 @@ claims:
     claim: >-
       With -min-interval at its default 0, every matched tag is recorded on
       every poll (change filtering is off).
-    source: "#cutting-rowsminute---deadband---min-interval"
+    source: "#cutting-rowsminute--deadband---min-interval"
     tests:
       - go ./cmd/naut TestChangeFilterDisabledByDefault
     partial: true
@@ -66,16 +66,22 @@ claims:
       more than -deadband since last recorded, or when min-interval has
       elapsed since last recorded (heartbeat); otherwise it is dropped, and
       each tag is tracked independently.
-    source: "#cutting-rowsminute---deadband---min-interval"
+    source: "#cutting-rowsminute--deadband---min-interval"
     tests:
       - go ./cmd/naut TestChangeFilterRecordsOnChangeOrHeartbeat
       - go ./cmd/naut TestChangeFilterPerTagIndependent
+    partial: true
+    note: >-
+      New, past-deadband, heartbeat, dropped and per-tag cases are asserted.
+      That the deadband and heartbeat are measured from the last recorded
+      sample, not the last poll, is not: a filter that updated its reference
+      on every poll passes both tests. "More than" (strict) is not asserted.
 
   - id: HST-008
     claim: >-
       Retention is a rolling window (-retention, default 7 days) pruned
       hourly.
-    source: "#the-historian"
+    source: "#"
     tests: []
     note: Prune and the hourly pruneLoop have no test; the Postgres store tests skip in CI.
 
@@ -84,7 +90,7 @@ claims:
       Pointing -source at the Service in front of the replicas keeps samples
       flowing across a failover, because a standby proxies the poll to the
       leader.
-    source: "#the-historian"
+    source: "#"
     tests: []
     note: >-
       Standby proxying of /api/state is tested in the server package, but no

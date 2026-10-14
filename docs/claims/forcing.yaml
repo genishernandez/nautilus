@@ -9,7 +9,6 @@ claims:
     source: "#what-a-force-does"
     tests:
       - go ./runtime TestForceInputOverridesDriver
-      - go ./acceptance TestForceHoldsAgainstPlantAndLogic
   - id: FRC-002
     claim: >-
       A force on an output or state tag is laid back over whatever the logic
@@ -31,6 +30,7 @@ claims:
     source: "#what-a-force-does"
     tests:
       - go ./runtime TestForceStructMember
+      - go ./runtime TestForceEnumMemberByName
   - id: FRC-004
     claim: >-
       A forced value is coerced like any write: an enumerated tag or member
@@ -85,6 +85,12 @@ claims:
     tests:
       - go ./runtime TestSFCFireTransition
       - go ./server TestSFCAPI
+    partial: true
+    note: >-
+      Firing against a FALSE condition, the source/target swap, the refusal
+      and t<line> addressing are asserted; "once" is not: no scan after a
+      firing could tell a held transition from a released one (its source
+      step is already inactive).
   - id: FRC-010
     claim: >-
       An SFC command needs pou only when two running charts share the step

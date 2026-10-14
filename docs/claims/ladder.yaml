@@ -121,6 +121,12 @@ claims:
       - go ./lang/ld TestFBOnlyRung
       - go ./lang/ld TestRungErrors
       - go ./lang/conformance TestConformance/ld-coils/FB-only rung (no coil) still runs, its outputs read elsewhere
+    partial: true
+    note: >-
+      A rung with neither a coil nor a block is rejected, and a block-only
+      rung runs with its output read elsewhere; that the block must be the
+      last element is not asserted (the compiler accepts a block anywhere in
+      the rung, including inside a branch leg, as TestFBOnlyRung shows).
 
   - id: LD-012
     claim: >-
