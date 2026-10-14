@@ -26,6 +26,38 @@ func run(t *testing.T, src string, seed map[string]ir.Value) *host {
 	return h
 }
 
+// scanner compiles src once and keeps its frame and host across scans, so a
+// test can drive retained state (a latch, a timer) the way the runtime does:
+// nothing is fed back by hand.
+type scanner struct {
+	t     *testing.T
+	prog  *ir.Program
+	frame *ir.Frame
+	h     *host
+}
+
+func newScanner(t *testing.T, src string) *scanner {
+	t.Helper()
+	prog, err := Compile(src)
+	if err != nil {
+		t.Fatalf("compile: %v\n--- transpiled ---\n%s", err, mustTranspile(src))
+	}
+	return &scanner{t: t, prog: prog, frame: ir.NewFrame(prog), h: &host{vals: map[string]ir.Value{}}}
+}
+
+// scan writes set into the tag store, advances the clock to nowMs, and runs
+// one scan.
+func (s *scanner) scan(nowMs int64, set map[string]ir.Value) {
+	s.t.Helper()
+	for k, v := range set {
+		s.h.vals[k] = v
+	}
+	s.h.now = nowMs
+	if err := ir.Run(s.prog, s.frame, s.h); err != nil {
+		s.t.Fatalf("run: %v", err)
+	}
+}
+
 func mustTranspile(src string) string {
 	s, err := Transpile(src)
 	if err != nil {
@@ -35,7 +67,10 @@ func mustTranspile(src string) string {
 }
 
 // host is a minimal ir.Host backed by a map.
-type host struct{ vals map[string]ir.Value }
+type host struct {
+	vals map[string]ir.Value
+	now  int64
+}
 
 func (h *host) ReadGlobal(name string) (ir.Value, error) {
 	if v, ok := h.vals[name]; ok {
@@ -44,11 +79,13 @@ func (h *host) ReadGlobal(name string) (ir.Value, error) {
 	return ir.Value{}, nil // undefined reads as zero, like a fresh tag
 }
 func (h *host) WriteGlobal(name string, v ir.Value) error { h.vals[name] = v; return nil }
-func (h *host) NowMs() int64                              { return 0 }
+func (h *host) NowMs() int64                              { return h.now }
 
 func TestSealInLatch(t *testing.T) {
 	// Classic seal-in: Run = (Start OR Run) AND NOT Stop. The feedback is
 	// through the Run variable, which the netlist reads before it writes.
+	// One program and one tag store across all scans: nothing re-seeds Run,
+	// so it can only stay on if the latch really holds it.
 	src := `PROGRAM Latch
 VAR_EXTERNAL
   Start : BOOL; Stop : BOOL; Run : BOOL;
@@ -58,21 +95,32 @@ FBD
   Run  := AND(seal, NOT Stop)
 END_FBD
 END_PROGRAM`
+	s := newScanner(t, src)
+	tru, fls := ir.BoolVal(true), ir.BoolVal(false)
 
+	s.scan(0, map[string]ir.Value{"Start": fls, "Stop": fls})
+	if s.h.vals["Run"].B {
+		t.Fatal("Run must start off")
+	}
 	// Start pressed → latches on.
-	h := run(t, src, map[string]ir.Value{"Start": ir.BoolVal(true)})
-	if !h.vals["Run"].B {
+	s.scan(0, map[string]ir.Value{"Start": tru})
+	if !s.h.vals["Run"].B {
 		t.Fatal("Start should latch Run on")
 	}
-	// Start released but Run already on → stays on (seal-in).
-	h = run(t, src, map[string]ir.Value{"Start": ir.BoolVal(false), "Run": ir.BoolVal(true)})
-	if !h.vals["Run"].B {
+	// Start released → stays on (seal-in), scan after scan.
+	s.scan(0, map[string]ir.Value{"Start": fls})
+	s.scan(0, nil)
+	if !s.h.vals["Run"].B {
 		t.Fatal("Run should seal in when Start released")
 	}
-	// Stop pressed → drops out.
-	h = run(t, src, map[string]ir.Value{"Run": ir.BoolVal(true), "Stop": ir.BoolVal(true)})
-	if h.vals["Run"].B {
+	// Stop pressed → drops out, and stays out once Stop is released.
+	s.scan(0, map[string]ir.Value{"Stop": tru})
+	if s.h.vals["Run"].B {
 		t.Fatal("Stop should drop Run")
+	}
+	s.scan(0, map[string]ir.Value{"Stop": fls})
+	if s.h.vals["Run"].B {
+		t.Fatal("Run must stay off after Stop is released")
 	}
 }
 
@@ -113,8 +161,6 @@ FBD
   t1 : TON(IN := Run, PT := T#5S)
 END_FBD
 END_PROGRAM`
-	// Just compile + one scan (timing needs NowMs; we assert it runs and the
-	// call was ordered before the pin read).
 	st := mustTranspile(src)
 	if strings.Index(st, "t1(IN") > strings.Index(st, "Elapsed := t1.Q") {
 		t.Fatalf("FB call must be ordered before its pin read:\n%s", st)
@@ -122,7 +168,24 @@ END_PROGRAM`
 	if !strings.Contains(st, "VAR\n  t1 : TON;") {
 		t.Fatalf("FB instance not declared:\n%s", st)
 	}
-	run(t, src, map[string]ir.Value{"Run": ir.BoolVal(false)})
+	// Run it: the TON's Q reaches the coil only once PT has elapsed.
+	sc := newScanner(t, src)
+	sc.scan(1000, map[string]ir.Value{"Run": ir.BoolVal(true)})
+	if sc.h.vals["Elapsed"].B {
+		t.Fatal("Q must be false at the first scan of IN")
+	}
+	sc.scan(5999, nil)
+	if sc.h.vals["Elapsed"].B {
+		t.Fatal("Q must be false until PT (5 s) has elapsed")
+	}
+	sc.scan(6000, nil)
+	if !sc.h.vals["Elapsed"].B {
+		t.Fatal("Q must reach the coil once PT has elapsed")
+	}
+	sc.scan(6001, map[string]ir.Value{"Run": ir.BoolVal(false)})
+	if sc.h.vals["Elapsed"].B {
+		t.Fatal("Q must drop with IN")
+	}
 }
 
 func TestTranspileLineMap(t *testing.T) {
@@ -247,6 +310,20 @@ END_PROGRAM`
 				t.Fatalf("ET must render as an output pin: %+v", n)
 			}
 		}
+	}
+	// The binding runs: ET lands in Elapsed at the call site.
+	sc := newScanner(t, src)
+	sc.scan(1000, map[string]ir.Value{"Run": ir.BoolVal(true)})
+	sc.scan(3000, nil)
+	if got := sc.h.vals["Elapsed"]; got.I != 2000 {
+		t.Fatalf("Elapsed = %+v, want 2000 (ET bound to the variable)", got)
+	}
+	if sc.h.vals["Done"].B {
+		t.Fatal("Done must wait for PT")
+	}
+	sc.scan(6000, nil)
+	if got := sc.h.vals["Elapsed"]; got.I != 5000 || !sc.h.vals["Done"].B {
+		t.Fatalf("Elapsed = %+v Done = %v, want 5000 and true", got, sc.h.vals["Done"].B)
 	}
 	// A non-variable target is rejected at parse.
 	bad := `PROGRAM p

@@ -411,6 +411,16 @@ END_PROGRAM`
 	if m := mustGraph(t, src); len(m.Networks) != 0 {
 		t.Fatal("Network := A is a coil")
 	}
+	// ...and it is a coil that runs: the tag follows A.
+	sc := newScanner(t, src)
+	sc.scan(0, map[string]ir.Value{"A": ir.BoolVal(true)})
+	if !sc.h.vals["Network"].B {
+		t.Fatal("Network := A must write the Network tag")
+	}
+	sc.scan(0, map[string]ir.Value{"A": ir.BoolVal(false)})
+	if sc.h.vals["Network"].B {
+		t.Fatal("Network := A must follow A back to false")
+	}
 	bad := strings.Replace(src, "  Network := A", "  NETWORK 'x' Network := A", 1)
 	if _, err := Graph(bad); err == nil || !strings.Contains(err.Error(), "only the word NETWORK") {
 		t.Fatalf("a statement on the NETWORK line: %v", err)

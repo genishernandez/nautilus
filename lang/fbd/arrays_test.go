@@ -3,6 +3,8 @@ package fbd
 import (
 	"strings"
 	"testing"
+
+	"github.com/joyautomation/nautilus/lang/ir"
 )
 
 // Arrays in the netlist: element reads (Levels[2], m[1][2], tbl[i].vals),
@@ -83,6 +85,17 @@ END_PROGRAM`
 	}
 	if feedback == 0 {
 		t.Error("a[1] reading its own coil must be a feedback edge")
+	}
+
+	// And it runs as an accumulator: a[1] keeps its value between scans, so
+	// the element feeds itself while a[2] copies it.
+	sc := newScanner(t, src)
+	for i, want := range []float64{3, 6, 9} {
+		sc.scan(0, map[string]ir.Value{"x": ir.RealVal(3)})
+		a := sc.h.vals["a"]
+		if len(a.Arr) != 2 || a.Arr[0].F != want || a.Arr[1].F != want {
+			t.Fatalf("scan %d: a = %+v, want both elements %v", i+1, a.Arr, want)
+		}
 	}
 }
 
