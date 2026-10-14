@@ -309,6 +309,11 @@ func (p *bodyParser) parseAssoc() (Assoc, error) {
 			}
 			a.Qualifier = strings.ToUpper(q[0].Literal)
 		}
+		if len(parts) == 2 && untimedQualifiers[a.Qualifier] && len(parts[1]) == 1 && parts[1][0].Type == TokenIdent {
+			// IEC 61131-3: an untimed qualifier takes no duration, so a bare
+			// name after it is an indicator variable, not a time argument.
+			return Assoc{}, fmt.Errorf("sfc: line %d: association %s(%s, %s): indicator variables are not supported (after an untimed qualifier the second entry is an indicator, not a duration) — %s", pos.Line, first.Literal, a.Qualifier, parts[1][0].Literal, assocForms)
+		}
 		if len(parts) > 1 {
 			t := parts[1]
 			if len(t) == 0 {
@@ -326,6 +331,20 @@ func (p *bodyParser) parseAssoc() (Assoc, error) {
 		return Assoc{}, fmt.Errorf("sfc: line %d: association %s %s: expected ';'", a.Pos.Line, a.Qualifier, a.Target)
 	}
 	return a, nil
+}
+
+// transitionForm is the reminder the transition-indicator error ends with.
+const transitionForm = "a transition is `TRANSITION [name] FROM S0 TO S1 := condition; END_TRANSITION`, with a step set `(S1, S2)` after FROM or TO for a divergence or convergence"
+
+// allBareNames reports whether every entry of a parenthesised list is a
+// single identifier.
+func allBareNames(parts [][]Token) bool {
+	for _, part := range parts {
+		if len(part) != 1 || part[0].Type != TokenIdent {
+			return false
+		}
+	}
+	return len(parts) > 0
 }
 
 // parseTransition parses `TRANSITION [name] FROM step-set TO step-set :=
@@ -352,6 +371,14 @@ func (p *bodyParser) parseTransition() (*Transition, error) {
 		return nil, err
 	}
 	tr.To = to
+	if p.peek().Type == TokenLParen {
+		// A parenthesised name list after the target steps is an indicator
+		// variable (IEC 61131-3); say so instead of a bare "expected ':='".
+		if parts, _, err := p.parenList(p.advance()); err == nil && allBareNames(parts) {
+			return nil, fmt.Errorf("sfc: line %d: transition %s: indicator variables on a transition are not supported — %s", kwTok.Line, trName(tr), transitionForm)
+		}
+		return nil, fmt.Errorf("sfc: line %d: transition %s: expected ':='", kwTok.Line, trName(tr))
+	}
 	if _, err := p.expect(TokenAssign); err != nil {
 		return nil, fmt.Errorf("sfc: line %d: transition %s: expected ':='", kwTok.Line, trName(tr))
 	}

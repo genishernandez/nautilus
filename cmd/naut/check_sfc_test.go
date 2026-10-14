@@ -77,9 +77,9 @@ func TestCheckSFCDiagnostics(t *testing.T) {
 }
 
 // The page's "Not supported" list: a step nested in a step, a whole chart
-// nested in a step, an explicit numeric transition priority (either spelling
-// a vendor might use), and an indicator variable on a transition are each
-// refused by `naut check` (exit 1), not accepted.
+// nested in a step, an explicit numeric transition priority (any spelling
+// a vendor might use), and an indicator variable in an association or on a
+// transition are each refused by `naut check` (exit 1), not accepted.
 func TestCheckSFCNotSupported(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"step nested in a step",
@@ -96,6 +96,12 @@ func TestCheckSFCNotSupported(t *testing.T) {
 			"expected FROM"},
 		{"indicator on a transition",
 			"INITIAL_STEP S0:\nEND_STEP\nTRANSITION t FROM S0 TO S0 (Ind) := A;\nEND_TRANSITION\n",
+			"indicator variables on a transition are not supported — a transition is `TRANSITION [name] FROM S0 TO S1 := condition; END_TRANSITION`"},
+		{"indicator in an association",
+			"INITIAL_STEP S0:\n  Lamp(N, Ind);\nEND_STEP\nTRANSITION FROM S0 TO S0 := A;\nEND_TRANSITION\n",
+			"association Lamp(N, Ind): indicator variables are not supported"},
+		{"parenthesised priority after TO",
+			"INITIAL_STEP S0:\nEND_STEP\nTRANSITION t FROM S0 TO S0 (PRIORITY := 1) := A;\nEND_TRANSITION\n",
 			"expected ':='"},
 	}
 	for _, tc := range cases {

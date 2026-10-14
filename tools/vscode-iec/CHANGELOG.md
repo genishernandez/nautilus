@@ -5,6 +5,20 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Changed
+
+- **A ladder rung with no coil must end at its last block.** In
+  `Start t1:TON(PT := T#5S) Stop`, the `Stop` contact drove nothing and was
+  dropped without a word; it is now an error that says to end the rung
+  with a coil or at the block. A block mid-rung with a coil after it is
+  unchanged. Needs a `naut` newer than 0.17.0.
+
+- **SFC indicator variables are named as such.** `Valve(N, Ind);` was
+  reported as a time argument on an untimed qualifier, and
+  `TRANSITION t FROM S0 TO S1 (Ind) := ...` as `expected ':='`; both now
+  say indicator variables are not supported and list the forms that are.
+  Needs a `naut` newer than 0.17.0.
+
 ## [0.17.0] - 2026-10-14
 
 The pre-release line after the stable release 0.16.0. Same contents as

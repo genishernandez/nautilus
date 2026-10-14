@@ -111,20 +111,18 @@ claims:
 
   - id: LD-011
     claim: >-
-      A rung needs at least one coil or a function block as its last element;
-      a rung whose only output is a block (A B t1:TON(PT := T#5S)) is
-      complete and its output is t1.Q read elsewhere.
+      A rung needs at least one coil, function block or assignment. A block
+      can sit anywhere in the rung, power continuing from its output pin
+      (A t1:TON(PT := T#5S) B ( Lamp ) sets Lamp to t1.Q AND B). Without a
+      coil the rung ends at its last block: A B t1:TON(PT := T#5S) is a
+      complete rung whose output is t1.Q read elsewhere, and anything after
+      that block is an error.
     source: "#how-a-rung-evaluates"
     tests:
       - go ./lang/ld TestFBOnlyRung
       - go ./lang/ld TestRungErrors
       - go ./lang/conformance TestConformance/ld-coils/FB-only rung (no coil) still runs, its outputs read elsewhere
-    partial: true
-    note: >-
-      A rung with neither a coil nor a block is rejected, and a block-only
-      rung runs with its output read elsewhere; that the block must be the
-      last element is not asserted (the compiler accepts a block anywhere in
-      the rung, including inside a branch leg, as TestFBOnlyRung shows).
+      - go ./lang/conformance TestConformance/ld-coils/block mid-rung, its Q carries power to the contact and coil after it
 
   - id: LD-012
     claim: >-

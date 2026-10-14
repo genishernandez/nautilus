@@ -319,8 +319,8 @@ and also assigned in an `ACTION` body, with the rule that decides between
 them.
 
 The chart then transpiles to ST and compiles like any other program, the line
-map putting a type error in a condition on its `TRANSITION` line and one in a
-body on its `ACTION` line.
+map putting a type error in a condition on its `TRANSITION` line and one in an
+action body on the offending statement's own line inside the `ACTION` block.
 
 ## In the editor
 
@@ -419,7 +419,10 @@ into the `.sfc` file for review in `git diff`.
 - Explicit numeric transition priorities; priority is declaration order.
 - Instruction List action bodies. Action bodies are ST.
 - Indicator variables in an association (`Valve(N, Ind);`) and on
-  transitions. `naut check` names the forms it does take.
+  transitions (`TRANSITION t FROM S0 TO S1 (Ind) := ...`). `naut check`
+  refuses each with `indicator variables are not supported` (in an
+  association) or `indicator variables on a transition are not supported`,
+  followed by the forms it does take.
 - Import of vendor SFC (Rockwell `.L5X` routines, Siemens GRAPH, CODESYS).
 - Machine-checked token conservation for pathological branch topologies. The
   structural checks cover the detectable cases.
