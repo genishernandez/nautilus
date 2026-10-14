@@ -17,15 +17,26 @@ claims:
 
   - id: RED-002
     claim: >-
-      Every `role: setpoint` tag is saved to the retain store.
+      Every `role: setpoint` tag is saved to the retain store, whatever its
+      shape: a scalar, a struct, an array of scalars, an array of structs, or a
+      multi-dimensional array. The one exception, an array of function-block
+      instances, is not saved and the log names the tag once.
     source: "#retained-state"
     tests:
       - go ./runtime TestRetainStateContents
-    partial: true
+      - go ./runtime TestRetainStatePersistsStructTag
+      - go ./runtime TestRetainedArraySetpointsSurviveRestart
+      - go ./runtime TestRetainedArraySetpointsSurviveFailover
+      - go ./runtime TestRetainSkipsArrayOfFunctionBlocks
     note: >-
-      A REAL setpoint is asserted to be in the saved state. "Every" is not:
-      retainState skips ARRAY-typed tags, so an array setpoint is not saved,
-      and no test covers that case.
+      The restart and failover tests save and reload one setpoint of every
+      kind the store takes: BOOL, REAL, TIME, STRING and enumeration scalars,
+      a struct, and arrays of REAL, DINT, BOOL, TIME, STRING, a struct with an
+      enumerated member, and a two-dimensional INT array, through the file
+      store (restart) and the ConfigMap store (failover). Each element comes
+      back at its declared kind. The skip test asserts an ARRAY OF TON
+      setpoint is left out, the rest of the state still saves, and the tag
+      is logged once across two saver ticks.
 
   - id: RED-003
     claim: An integer-typed setpoint tag is restored with its retained value.
@@ -269,3 +280,14 @@ claims:
       - go ./runtime TestStandbyDoesNotScan
       - go ./runtime TestTakeoverReloadsAndResetsFrames
     note: Both tests drive the runtime with a hand-written flag Coordinator, which exercises the seam.
+
+  - id: RED-028
+    claim: >-
+      A retained struct or array is restored onto the current tag: an array
+      the project has since grown keeps its seeds for the new elements, and
+      one it has shrunk keeps its seeds and reports the mismatch in
+      lastRetainError.
+    source: "#retained-state"
+    tests:
+      - go ./runtime TestRetainedArrayLengthChange
+      - go ./runtime TestRetainedStructTagRestoresBeforeFirstScan

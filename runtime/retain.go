@@ -148,23 +148,35 @@ func (r *Runtime) loadRetained() error {
 		if !allowed[name] {
 			continue
 		}
-		// A retained STRUCT tag: JSON collapsed it to a plain
-		// map[string]any (see retainState/plain), which setAny has no case
-		// for — a flat write must never conjure a tag from nothing (see
-		// Tags.Set), so a map there is silently dropped. Restoring
-		// configuration is different: the tag already exists, seeded from
-		// the manifest (with its StructDef attached) before takeover ever
-		// runs, so it is read-modify-written member by member through
-		// ir.SetField exactly like a struct's own operator writes
-		// (Tags.SetPath) are — an empty path assigns the whole value, which
-		// for a struct target means the same partial merge SetPath does.
-		if m, isMap := v.(map[string]any); isMap {
+		// A retained STRUCT or ARRAY tag: JSON collapsed it to a plain
+		// map[string]any or []any (see retainState), which setAny has no
+		// case for — a flat write must never conjure a tag from nothing
+		// (see Tags.Set), so a composite there is silently dropped.
+		// Restoring configuration is different: the tag already exists,
+		// seeded from the manifest (with its StructDef and declared type
+		// attached) before takeover ever runs, so it is read-modify-written
+		// through ir.SetFieldTyped exactly like an operator's whole-tag
+		// write (Tags.SetPath) is. An empty path assigns the whole value: a
+		// mapping merges member by member onto a struct, a list element by
+		// element onto an array from its declared lower bound — recursively,
+		// so an array of structs and an ARRAY[..,..] (an array of arrays)
+		// restore the same way. Every leaf is coerced to the kind it
+		// already has, so an INT element stays an INT and an enumeration
+		// element comes back named.
+		//
+		// A retained list LONGER than the declared array (the project
+		// shrank it) is an error and the tag keeps its seed: dropping the
+		// tail would be a guess about which elements still mean what. A
+		// shorter one (the array grew) restores its prefix and the new
+		// elements keep their seeds.
+		switch v.(type) {
+		case map[string]any, []any:
 			cur, err := r.tags.ReadGlobal(name)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("retained tag %q: %w", name, err))
 				continue
 			}
-			nv, err := ir.SetField(cur, nil, m, "tag "+name)
+			nv, err := ir.SetFieldTyped(cur, r.tags.TypeOf(name), nil, v, "tag "+name)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("retained tag %q: %w", name, err))
 				continue
@@ -174,11 +186,18 @@ func (r *Runtime) loadRetained() error {
 		}
 		// JSON collapses every number to float64. If the tag is currently an
 		// integer kind (seeded from the manifest), restore it as one — the
-		// store must not silently retype a DINT setpoint into a REAL.
+		// store must not silently retype a DINT setpoint into a REAL, nor a
+		// TIME into an INT, nor drop an enumeration's member name. The
+		// coercion is the same one an element of a retained array gets.
 		if f, isNum := v.(float64); isNum {
 			if cur, err := r.tags.ReadGlobal(name); err == nil &&
 				(cur.Kind == ir.TypeInt || cur.Kind == ir.TypeTime) {
-				r.tags.setAny(name, int64(f))
+				nv, err := ir.SetFieldTyped(cur, r.tags.TypeOf(name), nil, f, "tag "+name)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("retained tag %q: %w", name, err))
+					continue
+				}
+				r.tags.setAny(name, nv)
 				continue
 			}
 		}
@@ -254,24 +273,48 @@ func (r *Runtime) saveRetained(lastSaved []byte) []byte {
 // retainState assembles what this controller persists: the retained tags'
 // current values, and the source of every program that has drifted from
 // what it compiled from (an online edit not yet pulled into git). A struct
-// (UDT) tag persists as its plain JSON form (see plain) — the same shape
-// GET /api/state already sends an HMI — and loadRetained merges it back
-// member by member through ir.SetField, so a restart doesn't lose a
-// faceplate's setpoints just because they live inside a UDT. Arrays are
-// still skipped: there is no settled path-addressed way to write one back
-// through the tag store (see ir.SetField's TypeArray case), so persisting
-// one would be a lie loadRetained could not make good on.
+// (UDT) tag persists as its plain JSON form (see plainNumeric) — the same
+// shape GET /api/state already sends an HMI — and an ARRAY tag as a JSON
+// list of its elements, lower bound first (an array of structs as a list of
+// mappings, a multi-dimensional array as nested lists). loadRetained writes
+// both back through ir.SetFieldTyped, so a restart or a failover doesn't
+// lose a faceplate's setpoints because they live inside a UDT, or a
+// setpoint table because it is an array.
+//
+// The one array not persisted is one with a function-block instance inside
+// it (an ARRAY OF TON): an FB is identity, not a value, and the load path
+// cannot write one back, so persisting it would be a promise loadRetained
+// could not keep. Such a tag is skipped and named in the log once (see
+// retainable).
+//
+// Compatibility: arrays add no field and no version to retain.State — they
+// are one more JSON shape under Tags. A store written before arrays were
+// retained has no entry for them, and each array keeps its seed. A store
+// written by this version and read by an older one hands the old
+// loadRetained a []any, which its setAny ignores (irValue has no case for
+// one): the array keeps its seed there too, and nothing fails.
 func (r *Runtime) retainState() retain.State {
 	st := retain.State{}
 	for _, name := range r.retainTags {
 		// The ACTUAL value, not a forced one: forces are not retained
 		// (force.go), and persisting a forced setpoint's value would bring
-		// the force back after a restart in all but name.
+		// the force back after a restart in all but name. For an array with
+		// a forced element, that is the element's actual value too: the
+		// force table holds the whole tag's actual beside the forced view.
 		v, err := r.tags.readActual(name)
 		if err != nil {
 			continue
 		}
 		switch v.Kind {
+		case ir.TypeArray:
+			if !retainable(v) {
+				if _, logged := r.retainSkipped.LoadOrStore(name, true); !logged {
+					slog.Warn("runtime: retained array not saved: it holds a function-block instance, which has no value to persist",
+						"tag", name)
+				}
+				continue
+			}
+			fallthrough
 		case ir.TypeBool, ir.TypeReal, ir.TypeInt, ir.TypeTime, ir.TypeString, ir.TypeStruct:
 			if st.Tags == nil {
 				st.Tags = map[string]any{}
@@ -303,6 +346,32 @@ func (r *Runtime) retainState() retain.State {
 		}
 	}
 	return st
+}
+
+// retainable reports whether an array round-trips through the retain
+// store: scalars, and structs and arrays made of them, at any depth. A
+// function-block instance (or a value with no kind yet) anywhere inside
+// does not — loadRetained could not write it back.
+func retainable(v ir.Value) bool {
+	switch v.Kind {
+	case ir.TypeBool, ir.TypeReal, ir.TypeInt, ir.TypeTime, ir.TypeString:
+		return true
+	case ir.TypeArray:
+		for _, e := range v.Arr {
+			if !retainable(e) {
+				return false
+			}
+		}
+		return true
+	case ir.TypeStruct:
+		for _, f := range v.Fld {
+			if !retainable(f) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // noteRetainError folds a store failure into the diagnostics the dashboard

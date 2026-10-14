@@ -106,11 +106,12 @@ claims:
     source: "#lifetime"
     tests:
       - go ./runtime TestRetainSavesActualNotForced
+      - go ./runtime TestRetainedArraySavesActualNotForced
     partial: true
     note: >-
-      Asserts a forced setpoint is retained at its actual value, never the
-      forced one; a restart coming up with an empty force table is not
-      exercised.
+      Asserts a forced setpoint, and a forced element of an array setpoint,
+      is retained at its actual value, never the forced one; a restart
+      coming up with an empty force table is not exercised.
   - id: FRC-012
     claim: >-
       The force table lives on the leader (a standby proxies the API to it),
