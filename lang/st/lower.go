@@ -48,6 +48,11 @@ type LowerOpts struct {
 	ImplicitGlobals map[string]*ir.Type
 	TagTypes        map[string]*ir.Type
 	Types           map[string]*ir.Type
+	// Peers are the project's other programs (the one being lowered may be
+	// among them; it is skipped). They put nothing in scope — they only let
+	// an undeclared identifier that names another program's variable say
+	// that programs share only tags (#327). See PeerProgram.
+	Peers []PeerProgram
 }
 
 // Lower converts a parsed ST program into typed IR.
@@ -110,6 +115,7 @@ func LowerWithOpts(prog *Program, opts LowerOpts) (*ir.Program, error) {
 	l.userFuncs = combinedFuncs
 	l.implicitGlobals = opts.ImplicitGlobals
 	l.tagTypes = opts.TagTypes
+	l.peers = opts.Peers
 	// Seed the file's TYPE table with any the caller supplies (a separately
 	// compiled library), then resolve this file's own TYPE block. Both are
 	// in scope for the POUs below — a FUNCTION_BLOCK pin may name a UDT.
@@ -431,6 +437,7 @@ type lowerer struct {
 	implicitGlobals map[string]*ir.Type    // optional; PLC project vars surfaced as globals
 	tagTypes        map[string]*ir.Type    // optional; tags whose type the project states
 	untypedTags     map[string]string      // NameKey → spelling: project tags with no knowable type
+	peers           []PeerProgram          // optional; the project's other programs, for diagnostics only
 	// returnSlot, when >= 0, marks the slot the bare function-name
 	// identifier should bind to inside a FUNCTION body so `Name := value`
 	// assigns the return value rather than failing as undeclared.
@@ -1717,6 +1724,9 @@ func (l *lowerer) lowerIdent(n *IdentExpr) (ir.Expr, error) {
 		}
 		if tag, isTag := l.untypedTags[ir.NameKey(name)]; isTag {
 			return nil, errName(n.Pos, name, fmt.Errorf("%q is a project tag with no type — give %s a type: (or an init:) in the manifest, or declare it in VAR_EXTERNAL", name, tag))
+		}
+		if hint := l.peerHint(name); hint != "" {
+			return nil, errName(n.Pos, name, fmt.Errorf("undeclared identifier %q: %s", name, hint))
 		}
 		return nil, errName(n.Pos, name, fmt.Errorf("undeclared identifier %q (declare in VAR_* or VAR_GLOBAL block)", name))
 	}

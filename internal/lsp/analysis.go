@@ -76,6 +76,9 @@ type env struct {
 	segs         []stproject.Segment
 	tags         []runtime.TagDef
 	libs         []string // library sources in their original languages (the Logix rules read them)
+	// peers are the project's task programs, so naming another task's
+	// instance (t1.Q) says that tasks share only tags (#327).
+	peers []st.PeerProgram
 }
 
 // TypeMember is one member of a UDT, as declared.
@@ -138,6 +141,7 @@ func analyzeIn(text string, e env) analysis {
 
 	lowerProg, preludeLines := a.index(prog, text, prelude, preludeLines)
 	opts := a.addImplicitTags(e.tags, lowerProg)
+	opts.Peers = e.peers
 	// A program's own VAR named like a tag hides the tag in that program.
 	for _, vd := range runtime.ShadowedTags(prog, e.tags) {
 		a.Diags = append(a.Diags, Diagnostic{

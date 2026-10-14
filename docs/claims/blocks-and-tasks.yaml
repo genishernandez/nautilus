@@ -160,6 +160,23 @@ claims:
     tests: []
     note: >-
       Gap. No test has two tasks write one tag and asserts which value survives.
+  - id: TASK-018
+    claim: >-
+      Tags are all that tasks share: a program's own variables, its
+      function-block instances among them, are private to it. Naming
+      another task's instance is a compile error that says to publish the
+      value to a tag in the owner, and a reader sees that tag as of the
+      owner's last committed scan.
+    source: "#more-than-one-program-tasks"
+    tests:
+      - go ./lang/conformance TestCrossTaskInstanceIsDiagnosed
+      - go ./lang/conformance TestCrossTaskPublishedInstanceOutput
+      - go ./cmd/naut TestCheckGoldenCrossTaskInstance
+      - go ./internal/lsp TestCrossTaskInstanceDiagnostic
+    note: >-
+      Added out of numbering order with #327; it sits where the page makes
+      it. Asserted for function-block instances (ST and ladder readers,
+      through the program's and the task's name) and for a plain VAR.
   - id: TASK-014
     claim: >-
       Each additional task's health is reported in Stats().Tasks and

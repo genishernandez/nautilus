@@ -124,6 +124,28 @@ func parseSource(src string) (*st.Program, error) {
 	return st.Parse(src)
 }
 
+// PeerOf describes program source in any of the four languages as an
+// st.PeerProgram run by task — what another program's undeclared
+// identifier is checked against (#327). libs are the project's library
+// sources, which a ladder rung needs for a user block's pins; ok is false
+// for a library or a source that does not parse.
+func PeerOf(src, task string, libs ...string) (st.PeerProgram, bool) {
+	if Language(src) == "ld" {
+		fbdSrc, err := ld.Transpile(src, libs...)
+		if err != nil {
+			return st.PeerProgram{}, false
+		}
+		src = fbdSrc
+	}
+	ast, err := parseSource(src)
+	if err != nil {
+		return st.PeerProgram{}, false
+	}
+	p, ok := st.PeerOf(ast)
+	p.Task = task
+	return p, ok
+}
+
 // Compile parses and lowers program source (ST or FBD) into a runnable
 // program.
 func Compile(src string) (*Program, error) {

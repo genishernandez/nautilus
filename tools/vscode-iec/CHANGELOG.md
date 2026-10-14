@@ -35,6 +35,13 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Changed
 
+- **Naming another task's variable says why it fails.** `t1.Q` in one
+  task's program, where `t1` is a timer in another task's program (or
+  `Owner.t1.Q` through that program's name), was a bare "undeclared
+  identifier". The squiggle now names the program that owns `t1` and says
+  that tasks share only tags: publish the value to a tag there and read
+  the tag. Needs a `naut` newer than 0.16.2.
+
 - **Manifest schema: `sparkplug.device` is removed** and squiggles with
   the reason. Each field connection is now its own Sparkplug device —
   named after its driver (`eip`, `sparkplug-host`) or its source id

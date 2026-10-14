@@ -154,11 +154,23 @@ SUB, MUL, DIV, MOD, NEG, ABS, SQR, XPY) or a CPT; see
 `docs/design/logix-authoring.md`.
 
 Reading FB outputs: any instance output is addressable as `inst.Pin`
-everywhere — `GE(t2.ET, T#2S)` as a contact, `t2.Q` as an operand, or
-from another task's FBD/ST program. To capture an output **into a
+anywhere in the program that declares the instance — `GE(t2.ET, T#2S)` as
+a contact, `t2.Q` as an operand, in any rung. To capture an output **into a
 variable** at the call site, use the standard's output binding:
 `t2:TON(PT := T#5S, ET => Elapsed)` — the one way ladder stores a
 non-BOOL (coils only assign BOOL). `=>` works in ST and FBD calls too.
+
+An instance is a local of its program, so **another task's program cannot
+name it**: tasks share only tags. `t2.Q` there — or `Owner.t2.Q` through
+the program's name, or through its task's — is an undeclared identifier,
+and the error names the program that owns `t2` and says to go through a
+tag. To use an output in another task, publish it to a tag in the owning
+program (a coil, `t2.Q ( T2Done )`, or an assignment, `{ T2Elapsed :=
+t2.ET }`) and read the tag. The reader sees the value as of the owner's
+last committed scan: a reader that scans after the owner sees a change at
+once, one that scans before it sees the change on its own next scan. (In
+`naut test`, tasks due at the same instant scan main first, then in
+`tasks:` order.)
 
 ## SFC action qualifiers and step supervision
 
@@ -585,7 +597,9 @@ family's edges) and `fn-conversions`; the faults in
 
 Stateful — declare an instance (`VAR t1 : TON; END_VAR`, or inline in a
 rung as `t1:TON(...)`), and each instance keeps its own state between
-scans. Outputs read as `inst.Pin` from any language.
+scans. Outputs read as `inst.Pin` from any language, within the program
+that declares the instance; another task reads one through a tag (see
+[Ladder power flow](#ladder-power-flow)).
 
 | Type | Inputs | Outputs | Behavior |
 | --- | --- | --- | --- |
