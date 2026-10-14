@@ -160,19 +160,33 @@ tag and counted as `commandsRefused` in the node's status.
 
 ## Primary host and store-and-forward
 
-Set `primary-host` to a SCADA host's id and the node watches that host's
-STATE certificate (both the 2.x and 3.0 encodings are accepted). It defers
-its own birth until the host is ONLINE. When the host goes offline, the
-node logs a warning and stays connected and born: it sends no NDEATH, and
-it stops publishing NDATA and DDATA until the host is back. With
-`store-forward` set, that data is buffered and replayed as historical once
-the host returns; without it, data from while the host was offline is not
-sent.
+Set `primary-host` to a SCADA host's id and the node coordinates with that
+host's STATE certificate: it defers its own birth until the host is
+ONLINE (both the 2.x and 3.0 STATE encodings are accepted).
+`primary-host-offline` says what it does when the host goes offline:
 
-This differs from Sparkplug 3.0, in which an edge node ends its MQTT
-session when its primary host goes offline (publishing NDEATH as it
-disconnects) and connects and births again once the host is back online.
-nautilus keeps its session and buffers instead.
+- `buffer`, the default: the node logs a warning and stays connected and
+  born. It sends no NDEATH, and it stops publishing NDATA and DDATA until
+  the host is back. With `store-forward` that data is buffered and
+  replayed as historical once the host returns; without it, it is not
+  sent.
+- `disconnect`, the Sparkplug 3.0 behaviour: the node publishes NDEATH
+  and disconnects, connects again with the next bdSeq, and births only
+  once the host is ONLINE again. With `store-forward` it buffers while it
+  waits and replays the data as historical after the new birth, as it
+  does after a broker outage.
+
+```yaml
+sparkplug:
+  primary-host: ScadaHost
+  primary-host-offline: disconnect   # default: buffer
+  store-forward: 5000
+```
+
+In `disconnect` mode the NDEATH is published before the MQTT DISCONNECT,
+because a clean disconnect makes the broker discard the will; it carries
+the ending session's bdSeq. An offline STATE whose timestamp is older than
+the last online one is ignored, as the spec requires.
 
 `store-forward: 5000` buffers up to that many data messages while the
 broker is unreachable (or the primary host is offline) and replays them,

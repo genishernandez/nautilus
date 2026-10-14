@@ -178,6 +178,12 @@ type SparkplugConfig struct {
 	PrimaryHost     string   `yaml:"primary-host"` // gate births on a SCADA host's STATE
 	PublishInterval Duration `yaml:"publish-interval"`
 	BdSeqFile       string   `yaml:"bdseq-file"` // persists bdSeq across restarts
+	// PrimaryHostOffline is what the node does when the primary host's
+	// STATE goes offline: "buffer" (the default) keeps the session and
+	// stops data, which store-forward buffers; "disconnect" ends the
+	// session as Sparkplug 3.0 has it (NDEATH, disconnect, reconnect, and
+	// birth once the host is back). Needs primary-host.
+	PrimaryHostOffline string `yaml:"primary-host-offline"`
 	// Device was the one Sparkplug device every driver's tags rode on. It
 	// is gone: each field connection is now its own device (see
 	// sparkplugDevices). Kept so Load can say so instead of "unknown field".
@@ -447,6 +453,9 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 		PrimaryHostID:   c.PrimaryHost,
 		PublishInterval: time.Duration(c.PublishInterval),
 		BdSeqFile:       c.BdSeqFile,
+	}
+	if c.PrimaryHostOffline == "disconnect" { // Load refused anything but buffer/disconnect
+		cfg.PrimaryHostOffline = sparkplug.HostOfflineDisconnect
 	}
 	rbe := func(r RBEConfig) sparkplug.RBE {
 		return sparkplug.RBE{
@@ -744,6 +753,17 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 	var drivers []nio.NamedDriver
 	if opts.Driver, drivers, err = buildDrivers(fsys, m); err != nil {
 		return nil, err
+	}
+	if m.Sparkplug != nil {
+		switch m.Sparkplug.PrimaryHostOffline {
+		case "", "buffer":
+		case "disconnect":
+			if m.Sparkplug.PrimaryHost == "" {
+				return nil, fmt.Errorf("sparkplug.primary-host-offline: disconnect needs primary-host: the node ends its session when that host goes offline")
+			}
+		default:
+			return nil, fmt.Errorf("sparkplug.primary-host-offline: %q is not buffer or disconnect", m.Sparkplug.PrimaryHostOffline)
+		}
 	}
 	if m.Sparkplug != nil && m.Sparkplug.Device != "" {
 		return nil, fmt.Errorf("sparkplug.device: removed — each field connection is now its own Sparkplug device, named after its driver (eip, sparkplug-host) or its source id (modbus, snmp, redfish, prometheus); delete device: %s, and give a driver a name: to choose its device id", m.Sparkplug.Device)

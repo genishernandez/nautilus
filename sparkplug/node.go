@@ -37,7 +37,12 @@ type Config struct {
 	// PrimaryHostID gates birth on a primary host's STATE (see host.go).
 	// Empty = publish immediately, no gating.
 	PrimaryHostID string
-	Log           *slog.Logger
+	// PrimaryHostOffline is what the node does when that host's STATE goes
+	// offline (see primaryhost.go). The zero value, HostOfflineBuffer, keeps
+	// the session; HostOfflineDisconnect ends it, as Sparkplug 3.0 has it.
+	// Ignored without a PrimaryHostID.
+	PrimaryHostOffline HostOfflineAction
+	Log                *slog.Logger
 }
 
 // Device is a Sparkplug device behind this edge node — one io.Driver's worth
@@ -284,12 +289,38 @@ func (n *Node) Start(ctx context.Context) error {
 	n.stopping = false // clear any stop from a previous session (Node is reused across Start/Stop)
 	n.mu.Unlock()
 
-	willTopic := n.topic("NDEATH")
-	willPayload, err := n.deathPayload()
+	opts, err := n.clientOptions()
 	if err != nil {
 		return err
 	}
-	n.saveBdSeq(n.bdSeq)
+	n.cli = mqtt.NewClient(opts)
+	tok := n.cli.Connect()
+	if !tok.WaitTimeout(connectTimeout) {
+		return fmt.Errorf("sparkplug: connect %s: timed out", n.cfg.BrokerURL)
+	}
+	if tok.Error() != nil {
+		return fmt.Errorf("sparkplug: connect %s: %w", n.cfg.BrokerURL, tok.Error())
+	}
+
+	go n.run(ctx)
+	return nil
+}
+
+// clientOptions builds the MQTT options for one session: its will is the
+// NDEATH for the current bdSeq, which it persists (the will and the NBIRTH
+// must carry the same value). A new session — Start, or a reconnect after
+// the node ended its session for an offline primary host — needs a new
+// client, as paho fixes the will when the client is made.
+func (n *Node) clientOptions() (*mqtt.ClientOptions, error) {
+	willTopic := n.topic("NDEATH")
+	willPayload, err := n.deathPayload()
+	if err != nil {
+		return nil, err
+	}
+	n.mu.Lock()
+	bd := n.bdSeq
+	n.mu.Unlock()
+	n.saveBdSeq(bd)
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(n.cfg.BrokerURL).
@@ -305,18 +336,7 @@ func (n *Node) Start(ctx context.Context) error {
 	if n.cfg.Username != "" {
 		opts.SetUsername(n.cfg.Username).SetPassword(n.cfg.Password)
 	}
-
-	n.cli = mqtt.NewClient(opts)
-	tok := n.cli.Connect()
-	if !tok.WaitTimeout(connectTimeout) {
-		return fmt.Errorf("sparkplug: connect %s: timed out", n.cfg.BrokerURL)
-	}
-	if tok.Error() != nil {
-		return fmt.Errorf("sparkplug: connect %s: %w", n.cfg.BrokerURL, tok.Error())
-	}
-
-	go n.run(ctx)
-	return nil
+	return opts, nil
 }
 
 // Stop publishes NDEATH, disconnects cleanly, and waits for the loop to exit.
@@ -362,10 +382,14 @@ func (n *Node) Stop() {
 // asynchronously with respect to Start() returning, and (via reconnect) even
 // after Stop() has begun. beginInflight/n.inflight is what lets Stop() wait
 // for this before it mutates bdSeq/born.
-func (n *Node) onConnect(_ mqtt.Client) {
-	n.cli.Subscribe(n.topic("NCMD"), 1, n.handleCommand)
-	n.cli.Subscribe(n.deviceTopic("DCMD", "+"), 1, n.handleCommand)
-	n.subscribeHost() // no-op when no primary host configured
+//
+// It subscribes on the client paho hands it, which is n.cli: after the node
+// ends a session for an offline primary host, n.cli is replaced (see
+// endSession), and reading the field here would race that.
+func (n *Node) onConnect(c mqtt.Client) {
+	c.Subscribe(n.topic("NCMD"), 1, n.handleCommand)
+	c.Subscribe(n.deviceTopic("DCMD", "+"), 1, n.handleCommand)
+	n.subscribeHost(c) // no-op when no primary host configured
 	if n.cfg.PrimaryHostID != "" && !n.primaryOnline() {
 		n.log.Info("sparkplug: waiting for primary host before birth", "host", n.cfg.PrimaryHostID)
 		return // birth deferred until STATE=ONLINE (see host.go)

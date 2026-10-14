@@ -27,6 +27,20 @@ func (n *Node) birth() error {
 	n.pubMu.Lock()
 	defer n.pubMu.Unlock()
 
+	// HostOfflineDisconnect: a birth belongs to a session with the primary
+	// host online. One asked for across endSession (a rebirth command or
+	// timer from the session it ended) would otherwise go out into the new
+	// client while it is still connecting, before the host is back. The
+	// new session's onConnect or the host's ONLINE STATE births instead.
+	if n.disconnectsOnHostOffline() {
+		n.mu.Lock()
+		ready := n.hostOnline && n.cli.IsConnectionOpen()
+		n.mu.Unlock()
+		if !ready {
+			return nil
+		}
+	}
+
 	snap := n.rt.Tags().Snapshot()
 
 	n.mu.Lock()

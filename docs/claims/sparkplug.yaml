@@ -147,10 +147,10 @@ claims:
     claim: >-
       With `primary-host` set, the node defers its birth until the host's
       STATE is ONLINE, and both the 2.x (plain ONLINE/OFFLINE) and 3.0 (JSON)
-      STATE encodings are accepted. When the host goes offline the node
-      stays connected and born (no NDEATH) and stops publishing data, which
-      is buffered and replayed as historical with store-forward and not sent
-      without it.
+      STATE encodings are accepted. By default (`primary-host-offline:
+      buffer`), when the host goes offline the node stays connected and born
+      (no NDEATH) and stops publishing data, which is buffered and replayed
+      as historical with store-forward and not sent without it.
     source: "#primary-host-and-store-and-forward"
     tests:
       - go ./sparkplug TestParseState
@@ -158,10 +158,20 @@ claims:
       - go ./sparkplug TestNoPrimaryHostBirthsOnConnect
       - go ./sparkplug TestStoreForwardBuffersWhileThePrimaryHostIsOffline
       - go ./sparkplug TestPrimaryHostOfflineWithoutStoreForwardSendsNothing
-    note: >-
-      The page states that this differs from Sparkplug 3.0, where the edge
-      node ends its session when the primary host goes offline. Whether the
-      code should follow the spec is open in #333.
+      - go ./sparkplug TestPrimaryHostOfflineDefaultKeepsTheSession
+  - id: SPB-026
+    claim: >-
+      With `primary-host-offline: disconnect`, when the host goes offline the
+      node publishes NDEATH (the ending session's bdSeq) before a clean
+      disconnect, connects again with the next bdSeq, and births only once
+      the host is ONLINE again; with store-forward it buffers meanwhile and
+      replays as historical after the new birth. An offline STATE older than
+      the last online one is ignored. The key needs `primary-host`.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestPrimaryHostOfflineDisconnectEndsTheSession
+      - go ./sparkplug TestHostOfflineDisconnectDoesNotBirthWhileTheHostIsOffline
+      - go ./internal/project TestSparkplugPrimaryHostOffline
   - id: SPB-018
     claim: >-
       With `store-forward: N`, data messages are buffered while the broker
