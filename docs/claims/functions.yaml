@@ -1784,21 +1784,27 @@ claims:
       On a Logix target an array of instances is one TIMER[4] tag; an element
       called with a literal index carries its preset in the tag's data, one
       called with a computed index takes a MOVE to its .PRE ahead of the
-      rung.
+      rung. Once an array is called with a computed index anywhere, its
+      literal-index calls also re-assert their presets with a MOVE ahead of
+      their rungs.
     source: "#arrays-of-instances"
     tests:
       - go ./logix/writer TestTimerInstanceArrayOnLogix
       - go ./logix/writer TestArraysOfBlocks
-    partial: true
+      - go ./logix/writer TestGolden/arrays
+      - go ./logix/importer TestRoundTripArrayPresets
     note: >-
       Asserted: ARRAY[0..3] OF TON is one TIMER tag with Dimensions 4; with
       only literal indices each element's preset is in the tag's data and no
       MOVE is emitted; a computed index takes MOVE(1000,Timers[i].PRE) ahead
-      of its rung. Page and code disagree in one case: when an array is also
-      called with a computed index anywhere, its literal-index calls take a
-      MOVE too (TestArraysOfBlocks: MOVE(2000,Timers[0].PRE)), so "an element
-      called with a literal index carries its preset in the tag's data" does
-      not hold for such an array.
+      of its rung. On an array also called with a computed index, the
+      literal-index elements still carry their presets in the tag's data
+      (TestArraysOfBlocks: PRE 2000 / 0 / 500; the arrays golden:
+      [[0,2000,0],[0,0,0],[0,0,0],[0,500,0]]) and their calls take
+      MOVE(2000,Timers[0].PRE) ahead of the rung (#331). The re-assert is the
+      Echo finding in docs/design/logix-authoring.md: a MOVE to .PRE is
+      sticky on the controller. Written, imported and written again, every
+      call keeps its PT := and the rungs are identical.
 
   # ── Dialects ────────────────────────────────────────────────────────
   - id: FN-138

@@ -210,7 +210,9 @@ type lowered struct {
 	// call, literal index or not: a preset in the tag's data is set once,
 	// while a nautilus call binds PT each time — and a MOVE for the
 	// variable-indexed call would otherwise overwrite a literal-indexed
-	// element's preset for good (found on Echo, 2026-10-03).
+	// element's preset for good (found on Echo, 2026-10-03). A
+	// literal-indexed element still carries its preset in the tag's data
+	// too: that is its value from download until its first call.
 	computedIdx map[string]bool
 	genNames    map[string]bool
 	// types are the UDTs resolved so far (nil: known bad); rawTypes the

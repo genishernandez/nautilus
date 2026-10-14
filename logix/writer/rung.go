@@ -706,6 +706,10 @@ func (c *rungCtx) preset(e ld.Element, st, val string) bool {
 	}
 	// An element of an array of blocks: a literal index gets its preset
 	// in the tag's data; a computed index takes a MOVE ahead of the rung.
+	// When some call indexes the array with a variable, that MOVE can land
+	// on any element and is sticky on the controller, so a literal-index
+	// call re-asserts its own preset with a MOVE as well — while keeping it
+	// in the tag's data, which is the element's preset until then.
 	idx, literalIdx := -1, false
 	if instIdx != "" {
 		inner := strings.TrimSuffix(strings.TrimPrefix(instIdx, "["), "]")
@@ -723,11 +727,14 @@ func (c *rungCtx) preset(e ld.Element, st, val string) bool {
 		switch {
 		case instIdx == "":
 			tag.Preset = lit
-		case literalIdx && !c.lw.computedIdx[strings.ToLower(instBase)]:
+		case literalIdx:
 			if tag.Presets == nil {
 				tag.Presets = map[int]int64{}
 			}
 			tag.Presets[idx] = lit
+			if c.lw.computedIdx[strings.ToLower(instBase)] {
+				c.pre = append(c.pre, rungOut{Text: "MOVE(" + strconv.FormatInt(lit, 10) + "," + e.Inst + ".PRE)", Source: c.r.Name, Line: c.r.Line})
+			}
 		default:
 			c.pre = append(c.pre, rungOut{Text: "MOVE(" + strconv.FormatInt(lit, 10) + "," + e.Inst + ".PRE)", Source: c.r.Name, Line: c.r.Line})
 		}

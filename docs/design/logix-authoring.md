@@ -1094,7 +1094,9 @@ element's preset (179 corpus rungs).
   `Timers[0].PRE` for good on the controller; on nautilus the next call
   bound PT back. Exact rule: when any call indexes an array of blocks
   with a variable, every call on that array presets through a MOVE ahead
-  of its rung. The importer folds those MOVEs back into `PT :=`.
+  of its rung. The importer folds those MOVEs back into `PT :=`. A
+  literal-index element keeps its preset in the tag's data as well (#331):
+  that is its value from download until its first call.
 
 **Measured on Echo:** `bits` 4 of 4 (contacts and coils on bits, a bit
 latched into another word, a masked compare), `arrays` 2 of 2 (four

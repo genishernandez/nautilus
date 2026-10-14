@@ -751,6 +751,10 @@ retained state. Call an element by index and read its outputs by index:
 On a Logix target the array is one `TIMER[4]` tag; an element called
 with a literal index carries its preset in the tag's data, one called
 with a computed index takes a `MOVE` to its `.PRE` ahead of the rung.
+A `MOVE` to `.PRE` stays on the controller, and a computed index can
+land on any element, so once an array is called with a computed index
+anywhere, its literal-index calls also re-assert their presets with a
+`MOVE` ahead of their rungs.
 
 ## Dialects
 

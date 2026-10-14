@@ -1112,8 +1112,9 @@ END_PROGRAM
 		got = append(got, rg.Text)
 	}
 	// Timers is indexed by a variable somewhere, so every call on it
-	// presets through a MOVE (see lowered.computedIdx); Counts is not, so
-	// its element's preset lives in the tag's data.
+	// presets through a MOVE (see lowered.computedIdx); its literal-index
+	// elements carry their presets in the tag's data too. Counts is not, so
+	// its element's preset lives in the tag's data alone.
 	want := []string{
 		"MOVE(2000,Timers[0].PRE);",
 		"XIC(a)TON(Timers[0],?,?)XIC(Timers[0].DN)OTE(b);",
@@ -1149,8 +1150,10 @@ END_PROGRAM
 		}
 		return nil
 	}
-	if pre(0) != int64(0) || pre(1) != int64(0) || pre(2) != int64(0) {
-		t.Errorf("presets = %v %v %v (a variable-indexed array presets by MOVE, not data)", pre(0), pre(1), pre(2))
+	// Timers[1] is only read and Timers[i] is no element in particular:
+	// neither puts a preset in the data.
+	if pre(0) != int64(2000) || pre(1) != int64(0) || pre(2) != int64(500) {
+		t.Errorf("presets = %v %v %v, want 2000 0 500 (literal-index elements keep their presets in the data)", pre(0), pre(1), pre(2))
 	}
 	if counts == nil || counts.DataType != "COUNTER" || counts.Dimensions != "2" {
 		t.Fatalf("Counts tag = %+v", counts)

@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -95,5 +96,58 @@ func TestRoundTripPublicYardstick(t *testing.T) {
 	}
 	if total != 1 || len(identical) != 0 || len(equivalent) != 1 || equivalent[0] != "MainProgram/Receive" || len(differ) != 0 {
 		t.Errorf("routines %d; identical %v; equivalent %v; differ %v; want 1 routine, MainProgram/Receive equivalent (LES->LT)", total, identical, equivalent, differ)
+	}
+}
+
+// An array of timers called by literal and by computed index (the writer's
+// arrays golden): written, imported back, and written again, every call
+// keeps its PT := — the MOVE helpers fold back into presets, and the
+// literal-index elements' presets in the tag's data agree with them.
+func TestRoundTripArrayPresets(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "writer", "testdata", "arrays.ld"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	out, diags, err := writer.Write(src, writer.Options{})
+	if err != nil || len(diags) > 0 {
+		t.Fatalf("writer: %v %v", err, diags)
+	}
+	f, err := l5x.Parse(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := Import(f, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Notes) != 0 {
+		t.Errorf("import notes: %+v", p.Notes)
+	}
+	ld := string(p.Files["MainProgram.ld"])
+	for _, want := range []string{
+		"Delays[0]:TON(PT := T#2S)",
+		"Delays[3]:TON(PT := T#500MS)",
+		"Delays[Sel]:TON(PT := T#1S)",
+		"Starts[1]:CTU(PV := 3)",
+	} {
+		if !strings.Contains(ld, want) {
+			t.Errorf("imported program lacks %q:\n%s", want, ld)
+		}
+	}
+	if strings.Contains(ld, "MOVE") {
+		t.Errorf("a preset helper MOVE was imported as a rung:\n%s", ld)
+	}
+	again, diags, err := writer.Write(ld, writer.Options{Libs: libsOf(p)})
+	if err != nil || len(diags) > 0 {
+		t.Fatalf("write-back: %v %v", err, diags)
+	}
+	back, err := l5x.Parse(again)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := rungTexts(f, "MainProgram", "MainRoutine"), rungTexts(back, "MainProgram", "MainRoutine")
+	if strings.Join(a, "\n") != strings.Join(b, "\n") {
+		t.Errorf("write-back differs:\n first %s\n again %s", strings.Join(a, "\n       "), strings.Join(b, "\n       "))
 	}
 }
