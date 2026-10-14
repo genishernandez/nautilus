@@ -83,16 +83,36 @@ func TestRetainedValueLoadsBeforeFirstScan(t *testing.T) {
 }
 
 // The store is not a back door: a tag outside the retained set is ignored
-// even if a state file (or a tampered ConfigMap) names it.
+// even if a state file (or a tampered ConfigMap) names it. The program
+// here never writes Count, so a value the load let through would still be
+// there after the scan (counterProgram rewrites Count every scan and would
+// hide it).
 func TestLoadIgnoresTagsOutsideTheRetainedSet(t *testing.T) {
 	store := &fakeStore{state: retain.State{Tags: map[string]any{
 		"SP":    72.5,
-		"Count": int64(999), // RoleState — not retained by default
+		"Count": 999.0, // RoleState — not retained by default
 	}}}
-	rt := newRetained(t, store, nil)
-	rt.Scan()
-	if got := rt.Tags().vals["Count"].v.I; got == 999 {
-		t.Fatal("a non-retained tag was written from the store")
+	rt, err := New(Options{
+		Program: `PROGRAM Idle VAR_EXTERNAL Count : INT; SP : REAL; END_VAR END_PROGRAM`,
+		Tags: []TagDef{
+			Setpoint("SP", 65.0),
+			State("Count", int64(7)),
+		},
+		Retain: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Scan() // the first scan's takeover is what loads the store
+	if got := rt.Tags().Real("SP"); got != 72.5 {
+		t.Fatalf("SP = %v; the load did not run (want the retained 72.5)", got)
+	}
+	v, err := rt.Tags().ReadGlobal("Count")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.I != 7 || v.F != 0 {
+		t.Fatalf("Count = %+v; want its seed 7: a non-retained tag was written from the store", v)
 	}
 }
 

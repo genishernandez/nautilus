@@ -93,6 +93,32 @@ func TestWriteTag(t *testing.T) {
 	if _, ok := rt.Tags().All()["Mode"]; ok {
 		t.Error("rejected write should not have created the tag")
 	}
+
+	// A name no tag has yet. The operator is one of the four writers, and
+	// writes create: a scalar write lands as a new tag a program can read.
+	rec = httptest.NewRecorder()
+	body = bytes.NewBufferString(`{"name": "Bias", "value": 2.5}`)
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", body))
+	if rec.Code != 204 {
+		t.Fatalf("scalar write to a new name: status %d, body %s", rec.Code, rec.Body)
+	}
+	if v, err := rt.Tags().ReadGlobal("Bias"); err != nil || v.F != 2.5 {
+		t.Errorf("Bias = %+v, %v; want the operator's 2.5 as a new tag", v, err)
+	}
+	// A member path under an unknown name creates nothing: it is refused
+	// with the reason, and neither the dotted name nor its root appears.
+	rec = httptest.NewRecorder()
+	body = bytes.NewBufferString(`{"name": "Nope.Speed", "value": 1.0}`)
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", body))
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "Nope") {
+		t.Errorf("member write under an unknown tag: status %d, body %q; want 400 naming it", rec.Code, rec.Body)
+	}
+	all := rt.Tags().All()
+	for _, name := range []string{"Nope", "Nope.Speed"} {
+		if _, ok := all[name]; ok {
+			t.Errorf("a refused member write created tag %q", name)
+		}
+	}
 }
 
 func TestStreamDeliversFrames(t *testing.T) {

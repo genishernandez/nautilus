@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	goruntime "runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,38 +87,113 @@ func TestScanCommitsAreAtomic(t *testing.T) {
 	}
 }
 
+// gateClock is a Clock that, once armed, parks the first call made from
+// inside the MAIN task's program (here, a LOCAL_TIME read) until the test
+// releases it: a main scan stopped partway through its logic for as long as
+// the test likes, on any machine, where a slow loop would finish too fast
+// on a quick runner to show anything. Every other call (the scan's own dt
+// reading, any task's) reads the wall clock and returns.
+type gateClock struct {
+	mu      sync.Mutex
+	armed   bool
+	entered chan struct{} // closed when the main program is parked
+	release chan struct{} // closed by the test to let it go on
+}
+
+func newGateClock() *gateClock {
+	return &gateClock{entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (c *gateClock) arm() {
+	c.mu.Lock()
+	c.armed = true
+	c.mu.Unlock()
+}
+
+func (c *gateClock) Now() time.Time {
+	c.mu.Lock()
+	park := c.armed && inMainProgram()
+	if park {
+		c.armed = false
+	}
+	c.mu.Unlock()
+	if park {
+		close(c.entered)
+		<-c.release
+	}
+	return time.Now()
+}
+
+// inMainProgram reports whether the caller is running the main task's
+// program: (*Program).Run beneath (*Runtime).scanAt on this stack.
+func inMainProgram() bool {
+	pcs := make([]uintptr, 64)
+	frames := goruntime.CallersFrames(pcs[:goruntime.Callers(2, pcs)])
+	inProgram, inMain := false, false
+	for {
+		f, more := frames.Next()
+		switch {
+		case strings.HasSuffix(f.Function, ".(*Program).Run"):
+			inProgram = true
+		case strings.HasSuffix(f.Function, ".(*Runtime).scanAt"):
+			inMain = true
+		}
+		if !more {
+			return inProgram && inMain
+		}
+	}
+}
+
 // The point of the change: a fast task beside a slow one does not wait.
+// The main scan is parked in the middle of its program (see gateClock), and
+// the fast task must scan to completion, and commit, while it is.
 func TestFastTaskDoesNotWaitForSlowTask(t *testing.T) {
+	clk := newGateClock()
 	r, err := New(Options{
-		Program: "PROGRAM Main\nVAR_EXTERNAL Acc : REAL; END_VAR\nVAR i : INT; END_VAR\nFOR i := 1 TO 400000 DO Acc := Acc + 1.0; END_FOR;\nEND_PROGRAM",
+		Program: "PROGRAM Main\nVAR_EXTERNAL Acc : REAL; END_VAR\nVAR wall : LOCAL_TIME; END_VAR\nwall();\nAcc := Acc + 1.0;\nEND_PROGRAM",
 		Tasks: []Task{{Name: "fast", Scan: time.Millisecond,
 			Program: "PROGRAM Fast\nVAR_EXTERNAL N : INT; END_VAR\nN := N + 1;\nEND_PROGRAM"}},
-		Seed: map[string]any{"Acc": 0.0, "N": int64(0)},
+		Seed:  map[string]any{"Acc": 0.0, "N": int64(0)},
+		Clock: clk,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Time one main scan alone so the test adapts to the machine.
-	t0 := time.Now()
-	r.Scan()
-	slow := time.Since(t0)
-	if slow < 5*time.Millisecond {
-		t.Skipf("main scan took only %v; too fast to show waiting", slow)
+	r.Scan() // one ordinary main scan: Acc = 1
+	clk.arm()
+	mainDone := make(chan struct{})
+	go func() { r.Scan(); close(mainDone) }()
+	select {
+	case <-clk.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("setup: the main program never read the clock")
 	}
-	done := make(chan struct{})
-	go func() { r.Scan(); close(done) }()
-	time.Sleep(slow / 4) // main is now mid-scan
-	t1 := time.Now()
-	if err := r.ScanTask("fast"); err != nil {
-		t.Fatal(err)
+	// Main is now mid-program, and stays there until released. The
+	// timeout is only how long a broken scheduler is given to show itself.
+	fastDone := make(chan error, 1)
+	go func() { fastDone <- r.ScanTask("fast") }()
+	select {
+	case err := <-fastDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		close(clk.release)
+		<-mainDone
+		t.Fatal("the fast task waited behind a main scan parked mid-program")
 	}
-	fast := time.Since(t1)
-	<-done
-	if fast > slow/2 {
-		t.Errorf("fast task took %v beside a %v main scan: it waited", fast, slow)
+	// The fast scan committed while main was still running: N moved, and
+	// main's half-done scan has not landed.
+	if n := r.Tags().All()["N"]; n != int64(1) {
+		t.Errorf("N = %v with main parked; want the fast task's 1", n)
 	}
-	if r.Tags().Real("Acc") != 800000 || r.Tags().All()["N"] != int64(1) {
-		t.Errorf("results: Acc=%v N=%v", r.Tags().Real("Acc"), r.Tags().All()["N"])
+	if acc := r.Tags().Real("Acc"); acc != 1 {
+		t.Errorf("Acc = %v with main parked; want 1 (its second scan has not committed)", acc)
+	}
+	close(clk.release)
+	<-mainDone
+	if acc := r.Tags().Real("Acc"); acc != 2 {
+		t.Errorf("Acc = %v after main finished; want 2", acc)
 	}
 }
 

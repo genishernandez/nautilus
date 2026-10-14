@@ -126,6 +126,29 @@ tests:
 
 func TestLiveUntilHoldAndAlways(t *testing.T) {
 	c := newFakeController(t)
+	// The plant drains: a level written above the setpoint falls back to
+	// 50 % on its own a while later, so the high-level alarm is a transient
+	// that is over by the time the step's expectation holds. The drain is
+	// long next to a poll, so the first poll after the write sees the
+	// alarm on however loaded a runner; a runner that checked always: only
+	// at the step's end would wait out the drain and pass.
+	const drain = 2 * time.Second
+	var drains []*time.Timer // RunSuiteLive calls Write on this goroutine
+	defer func() {
+		for _, d := range drains {
+			d.Stop()
+		}
+	}()
+	live := c.live()
+	live.Write = func(name string, v any) error {
+		if err := c.write(name, v); err != nil {
+			return err
+		}
+		if name == "MainProgram_LevelPct" && v == 90.0 {
+			drains = append(drains, time.AfterFunc(drain, func() { _ = c.write("MainProgram_LevelPct", 50.0) }))
+		}
+		return nil
+	}
 	s := liveSuite(t, `
 tests:
   - name: hold keeps the condition for its window
@@ -141,16 +164,28 @@ tests:
       - given: { StopPB: true }
         advance: 30ms
         always: { RunCmd: true }
+  - name: an invariant that breaks and recovers still fails the step
+    steps:
+      - given: { LevelPct: 90.0 }
+        until: 10s
+        expect: { HiLevelAlm: false }
+        always: { HiLevelAlm: false }
 `)
-	res, err := RunSuiteLive(s, c.live())
+	res, err := RunSuiteLive(s, live)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("%d results; want 3", len(res))
 	}
 	if !res[0].Passed {
 		t.Errorf("hold: %+v", res[0].Failure)
 	}
 	if res[1].Passed || res[1].Failure.Reason != "invariant broke" {
 		t.Errorf("always: %+v", res[1].Failure)
+	}
+	if res[2].Passed || res[2].Failure.Reason != "invariant broke" {
+		t.Errorf("always, transient: the alarm was on for %v mid-step, and the step gave %+v", drain, res[2])
 	}
 }
 

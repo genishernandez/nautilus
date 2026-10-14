@@ -2,53 +2,93 @@ package runtime
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 )
 
-// runLoop keeps an absolute schedule: over 300 ms at 2 ms it must land
-// close to 150 scans (a drifting ticker loses several percent), and when
-// one scan stalls for several periods the lost slots are reported as
-// missed instead of being fired in a burst.
+// virtualLoopClock is a loopClock in virtual time: a sleep lands `late`
+// past its deadline (the wake-up latency every real sleep has), a scan
+// spends what the test says it spends, and the window closes at `end` —
+// the loop is told to stop when its next slot falls past it. Nothing here
+// depends on how fast or loaded the machine is.
+type virtualLoopClock struct {
+	now, end time.Time
+	late     time.Duration
+}
+
+func (c *virtualLoopClock) Now() time.Time        { return c.now }
+func (c *virtualLoopClock) spend(d time.Duration) { c.now = c.now.Add(d) }
+func (c *virtualLoopClock) SleepUntil(_ context.Context, deadline time.Time) bool {
+	if deadline.After(c.end) {
+		return false
+	}
+	if deadline.After(c.now) {
+		c.now = deadline.Add(c.late)
+	}
+	return true
+}
+
+// The loop keeps an ABSOLUTE schedule: slot n is due at start + n·period
+// whatever happened before it, so the wake-up latency every sleep has is
+// paid once per scan and never adds up. Over 300 ms at 2 ms (150 slots),
+// with every wake 50 µs late and every scan spending 200 µs, a loop that
+// scheduled from its last wake would slip 250 µs a slot, about 12 % of the
+// window. One scan that stalls for five periods loses exactly the four
+// slots that went by under it: they are reported as missed, not fired in a
+// burst, and the next slot due runs at once.
 func TestRunLoopHoldsScheduleAndCountsMissed(t *testing.T) {
-	const period = 2 * time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	var mu sync.Mutex
-	var scans, missed uint64
-	runLoop(ctx, period, func(due time.Time) {
-		mu.Lock()
-		scans++
-		n := scans
-		mu.Unlock()
-		if time.Now().Before(due) {
-			t.Errorf("scan %d started before its slot", n)
+	const (
+		period = 2 * time.Millisecond
+		late   = 50 * time.Microsecond
+		exec   = 200 * time.Microsecond
+		slots  = 150
+		stall  = 50 // the scan that stalls
+	)
+	start := time.Unix(1_700_000_000, 0)
+	clk := &virtualLoopClock{now: start, end: start.Add(slots * period), late: late}
+	type scanAt struct{ due, began time.Time }
+	var scans []scanAt
+	var missed uint64
+	runSchedule(context.Background(), period, clk, func(due time.Time) {
+		scans = append(scans, scanAt{due, clk.Now()})
+		clk.spend(exec)
+		if len(scans) == stall {
+			clk.spend(5 * period)
 		}
-		if n == 50 {
-			time.Sleep(5 * period) // one stall of five periods
+	}, func(k uint64) { missed += k })
+
+	// Every slot is either scanned or reported missed: 150 in all, the
+	// stall's four missed, and the window's last slot reached.
+	if missed != 4 {
+		t.Errorf("missed = %d, want 4 (one stall of five periods)", missed)
+	}
+	if len(scans) != slots-4 {
+		t.Fatalf("scans = %d, want %d", len(scans), slots-4)
+	}
+	if last := scans[len(scans)-1].due; !last.Equal(start.Add(slots * period)) {
+		t.Errorf("last slot due at %v, want the window's end %v: the schedule drifted", last.Sub(start), slots*period)
+	}
+	for i, s := range scans {
+		off := s.due.Sub(start)
+		if off%period != 0 {
+			t.Fatalf("scan %d due at %v, off the start + n·period grid", i+1, off)
 		}
-	}, func(k uint64) {
-		mu.Lock()
-		missed += k
-		mu.Unlock()
-	}, nil)
-	mu.Lock()
-	defer mu.Unlock()
-	// 150 slots minus the ~5 lost to the stall; loose bounds for a shared
-	// CI runner, which can stall the loop on its own.
-	if scans < 120 {
-		t.Errorf("scans = %d, want ≈ 145", scans)
-	}
-	if missed < 3 {
-		t.Errorf("missed = %d, want ≥ 4 (one 5-period stall)", missed)
-	}
-	// No burst: every scan accounts for one slot, so scans + missed can
-	// never exceed the slots that elapsed. A catch-up scan within ONE
-	// period of a late wake is by design (the slot was due); firing extra
-	// scans to make up skipped slots is not.
-	if scans+missed > 152 {
-		t.Errorf("scans %d + missed %d = %d exceeds the ~150 slots elapsed", scans, missed, scans+missed)
+		if i > 0 && s.due.Sub(scans[i-1].due) != period && i != stall {
+			t.Errorf("scan %d due %v after the one before; want one period", i+1, s.due.Sub(scans[i-1].due))
+		}
+		// Lateness is one wake-up's worth on every scan, not a sum of
+		// them — except the slot due while the stall ran, which starts as
+		// soon as the stall ends.
+		lateness := s.began.Sub(s.due)
+		if i == stall {
+			if want := late + exec; lateness != want { // the stalled scan's own lateness and work
+				t.Errorf("catch-up scan %d began %v after its slot, want %v", i+1, lateness, want)
+			}
+			continue
+		}
+		if lateness != late {
+			t.Errorf("scan %d began %v after its slot, want %v", i+1, lateness, late)
+		}
 	}
 }
 
