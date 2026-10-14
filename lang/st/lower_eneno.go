@@ -155,10 +155,8 @@ func (l *lowerer) lowerGatedAssign(a *AssignStmt) (ir.Stmt, bool, error) {
 		return nil, false, nil
 	}
 	ownEN := false
-	if l.userFuncs != nil {
-		if def, _, ok := ir.Lookup(l.userFuncs, call.Name); ok && def != nil {
-			ownEN = funcDeclaresEN(def)
-		}
+	if def, ok := l.userFunc(call.Name); ok {
+		ownEN = funcDeclaresEN(def)
 	}
 	rest, x, err := splitExecControl(call, ownEN, false)
 	if err != nil {

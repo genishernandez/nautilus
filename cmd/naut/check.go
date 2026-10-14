@@ -262,6 +262,15 @@ func runCheck(args []string) int {
 				"this program reads and writes its own %s, not the tag; rename it, "+
 				"or drop the declaration to use the tag\n", f, line, col, vd.Name, vd.Name, vd.Name)
 		}
+		// An FB instance named like a FUNCTION hides it in that POU (#336).
+		for _, sh := range st.InstancesShadowingFunctions(res.prog, res.composed) {
+			blankWarns++
+			line, col := mapLine(sh.Decl.Pos.Line), sh.Decl.Pos.Col
+			if lineMap != nil {
+				col = 1
+			}
+			fmt.Printf("%s:%d:%d: warning: %s\n", f, line, col, sh.Message())
+		}
 		// The target's rules run on a file that compiles: the same
 		// lowering `naut logix write` uses, so what passes here writes.
 		if *target == "logix" && checkLogixTarget(f, original, libSources) {
@@ -604,6 +613,9 @@ type checkResult struct {
 	inLib bool
 	lib   libErr
 	prog  *st.Program // the file's own parse, when it compiled
+	// composed is the library prelude and the file parsed together (prog
+	// when there is no prelude).
+	composed *st.Program
 }
 
 // compileFile runs the same parse+lower pipeline as the LSP: the prelude
@@ -662,7 +674,7 @@ func compileFile(src, prelude string, segs []stproject.Segment, tags []runtime.T
 		}
 		return checkResult{failed: true, msg: msg, pos: pos}
 	}
-	return checkResult{prog: prog}
+	return checkResult{prog: prog, composed: lowerProg}
 }
 
 // inLibDir reports whether f lies under the lib/ directory of a manifest
