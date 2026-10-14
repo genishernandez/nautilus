@@ -1483,11 +1483,12 @@ claims:
     tests:
       - go ./lang/st TestENErrors
       - go ./lang/st TestENOnFunctionAssign
-    partial: true
+      - go ./lang/st TestENOnUserFunctionCalledAsStatement
     note: >-
-      The compile error inside a larger expression and the whole-right-hand-
-      side form are asserted. A user FUNCTION called as a statement with
-      EN/ENO is not exercised.
+      The compile error inside a larger expression (a standard function and
+      a user FUNCTION) and the whole-right-hand-side form are asserted; a
+      user FUNCTION called as a statement with EN FALSE does not run its
+      body and writes ENO FALSE, and with EN TRUE runs with ENO TRUE.
 
   - id: FN-117
     claim: >-
