@@ -1002,17 +1002,94 @@ func TestMqttRebirthTagRisingEdge(t *testing.T) {
 	baselineScan(t, d)
 
 	isRebirth := func(m recMsg) bool { return m.topic == "spBv1.0/G/NCMD/W6" }
-	if err := d.WriteOutputs(map[string]any{"W6__Rebirth": false}); err != nil {
-		t.Fatalf("WriteOutputs: %v", err)
+	write := func(v bool) {
+		t.Helper()
+		if err := d.WriteOutputs(map[string]any{"W6__Rebirth": v}); err != nil {
+			t.Fatalf("WriteOutputs: %v", err)
+		}
 	}
-	time.Sleep(150 * time.Millisecond)
+	// settle gives a wrongly-sent command time to reach the observer.
+	settle := func() { time.Sleep(150 * time.Millisecond) }
+
+	write(false)
+	settle()
 	if n := obs.count(isRebirth); n != 0 {
 		t.Fatalf("a false __Rebirth produced %d NCMDs; want 0", n)
 	}
-	if err := d.WriteOutputs(map[string]any{"W6__Rebirth": true}); err != nil {
-		t.Fatalf("WriteOutputs: %v", err)
+	write(true)
+	m := obs.wait(t, "operator rebirth", isRebirth)
+
+	// The command is Node Control/Rebirth = true, not merely a message on
+	// the right topic.
+	p, err := sparkplug.DecodePayload(m.payload)
+	if err != nil {
+		t.Fatalf("decode NCMD: %v", err)
 	}
-	obs.wait(t, "operator rebirth", isRebirth)
+	if len(p.Metrics) != 1 {
+		t.Fatalf("NCMD has %d metrics, want 1", len(p.Metrics))
+	}
+	if got := p.Metrics[0]; got.Name != RebirthMetric ||
+		got.Datatype != spb.DataType_Boolean || got.Value != true {
+		t.Errorf("NCMD metric = %q %v/%v, want %s Boolean true",
+			got.Name, got.Datatype, got.Value, RebirthMetric)
+	}
+
+	// Held true: the runtime hands the same snapshot every scan, and only a
+	// transition is a command.
+	for i := 0; i < 3; i++ {
+		write(true)
+	}
+	settle()
+	if n := obs.count(isRebirth); n != 1 {
+		t.Fatalf("a held-true __Rebirth produced %d NCMDs in total; want 1", n)
+	}
+	// A falling edge sends nothing either, and the next rising edge sends
+	// again.
+	write(false)
+	settle()
+	if n := obs.count(isRebirth); n != 1 {
+		t.Fatalf("a falling __Rebirth produced a command: %d NCMDs in total; want 1", n)
+	}
+	write(true)
+	deadline := time.Now().Add(8 * time.Second)
+	for obs.count(isRebirth) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("a second rising edge did not send a second rebirth")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A __Rebirth that is already TRUE in the runtime's first snapshot is the
+// baseline, not a command: it is recorded without publishing, so a restart
+// with the tag held true cannot rebirth every site on the first scan. It
+// stays quiet while held, and the next genuine rising edge still fires.
+func TestMqttRebirthTagTrueInFirstSnapshot(t *testing.T) {
+	srv, addr := startBroker(t, "")
+	t.Cleanup(func() { _ = closeBroker(srv) })
+
+	obs := newObserver(t, addr, "obs-rbtag1", "spBv1.0/G/NCMD/+")
+	cfg := testConfig(addr, "h-rbtag1")
+	cfg.NoRebirthOnStart = true
+	d := startDriver(t, cfg)
+	waitConnected(t, d)
+
+	isRebirth := func(m recMsg) bool { return m.topic == "spBv1.0/G/NCMD/W6" }
+	write := func(v bool) {
+		t.Helper()
+		if err := d.WriteOutputs(outputSnapshot(d, map[string]any{"W6__Rebirth": v})); err != nil {
+			t.Fatalf("WriteOutputs: %v", err)
+		}
+	}
+	write(true) // the first snapshot: the baseline
+	write(true)
+	time.Sleep(150 * time.Millisecond)
+	if n := obs.count(isRebirth); n != 0 {
+		t.Fatalf("a __Rebirth true in the first snapshot produced %d NCMDs; want 0", n)
+	}
+	write(false)
+	write(true)
+	obs.wait(t, "rebirth after the baseline fell and rose", isRebirth)
 }
 
 func TestDriverRequestRebirth(t *testing.T) {

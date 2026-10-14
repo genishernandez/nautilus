@@ -161,6 +161,38 @@ func TestDeltaFrameKeepsDiagnostics(t *testing.T) {
 	if d.Scan == nil || d.Scan.TargetMs == 0 {
 		t.Errorf("the first broadcast after connect did not re-offer the scan block: %+v", d.Scan)
 	}
+
+	// A LATER frame, not the first after connect, still carries the headline
+	// pair: they ride every tick, not just the first.
+	rt.Scan()
+	f.tick()
+	later := f.next()
+	if later.Full || later.Seq < 3 {
+		t.Fatalf("expected a later delta frame, got full=%v seq=%d", later.Full, later.Seq)
+	}
+	if later.Scans == 0 || later.TS == 0 {
+		t.Errorf("a later delta frame lost its headline diagnostics: scans=%d ts=%d", later.Scans, later.TS)
+	}
+	if later.Scans <= d.Scans {
+		t.Errorf("scans did not advance: %d then %d", d.Scans, later.Scans)
+	}
+
+	// And with the scan block gated out (?blocks=delta, inside its cadence)
+	// the headline pair is what a dashboard has left to watch the loop by.
+	g := openStream(t, newTestRuntime(t), "?delta=1&blocks=delta")
+	g.next()
+	g.rt.Scan()
+	g.tick()
+	g.next() // the connect repeat, which re-offers the blocks
+	g.rt.Scan()
+	g.tick()
+	gated := g.next()
+	if gated.Scan != nil {
+		t.Fatalf("the scan block was not gated out of a steady-state frame: %+v", gated.Scan)
+	}
+	if gated.Scans == 0 || gated.TS == 0 {
+		t.Errorf("a frame with the scan block gated out lost its headline diagnostics: scans=%d ts=%d", gated.Scans, gated.TS)
+	}
 }
 
 // The tag SET changing is the one thing a delta cannot express, so it
@@ -266,15 +298,10 @@ func TestDeltaIsPerClient(t *testing.T) {
 	a := openStream(t, rt, "?delta=1")
 	a.next()
 
-	// A moves ahead by one change while B is not yet connected.
-	rt.Tags().SetReal("SP", 71)
-	a.tick()
-	if d := a.next(); len(d.Tags) != 1 {
-		t.Fatalf("A's delta = %v", d.Tags)
-	}
-
-	// B connects to the SAME server and gets a full frame including that
-	// change; then one more change must reach both, and only that one.
+	// A has NOT been ticked since its first frame, so it is a change behind
+	// when B connects: B's full frame includes Level:41, A has never seen
+	// it. A single shared generation could not serve both.
+	rt.Tags().SetReal("Level", 41)
 	srv := a.srv
 	resp, err := a.ts.Client().Get(a.ts.URL + "/api/stream?delta=1")
 	if err != nil {
@@ -284,7 +311,7 @@ func TestDeltaIsPerClient(t *testing.T) {
 	b := &streamFixture{t: t, srv: srv, rt: rt, ts: a.ts, resp: resp,
 		sc: bufio.NewScanner(resp.Body)}
 	b.sc.Buffer(make([]byte, 1<<20), 1<<24)
-	if first := b.next(); !first.Full || first.Tags["SP"] != 71.0 {
+	if first := b.next(); !first.Full || first.Tags["Level"] != 41.0 {
 		t.Fatalf("B's first frame = full:%v %v", first.Full, first.Tags)
 	}
 
@@ -304,11 +331,14 @@ func TestDeltaIsPerClient(t *testing.T) {
 	}
 	rt.Tags().SetReal("SP", 72)
 	srv.broadcast()
-	for _, f := range []*streamFixture{a, b} {
-		d := f.next()
-		if len(d.Tags) != 1 || d.Tags["SP"] != 72.0 {
-			t.Errorf("delta = %v, want just SP:72", d.Tags)
-		}
+
+	// B has seen Level:41, so it gets only SP.
+	if d := b.next(); len(d.Tags) != 1 || d.Tags["SP"] != 72.0 {
+		t.Errorf("B's delta = %v, want just SP:72", d.Tags)
+	}
+	// A is behind: it is owed the change it missed AND the new one.
+	if d := a.next(); len(d.Tags) != 2 || d.Tags["Level"] != 41.0 || d.Tags["SP"] != 72.0 {
+		t.Errorf("A's delta = %v, want Level:41 and SP:72", d.Tags)
 	}
 }
 
@@ -507,15 +537,40 @@ func TestFrameCarriesQuality(t *testing.T) {
 func TestQualityIsFiltered(t *testing.T) {
 	srv, rt, drv := newQualityServer(t)
 	drv.SetQuality("Level", nio.Stale)
+	drv.SetQuality("Ghost", nio.NotConnected)
 	rt.Scan()
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/state?tags=SP", nil))
-	var f Frame
-	if err := json.Unmarshal(rec.Body.Bytes(), &f); err != nil {
-		t.Fatal(err)
+	get := func(query string) Frame {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/state"+query, nil))
+		var f Frame
+		if err := json.Unmarshal(rec.Body.Bytes(), &f); err != nil {
+			t.Fatal(err)
+		}
+		return f
 	}
-	if len(f.Quality) != 0 {
+	// A filter that excludes both tags drops both.
+	if f := get("?tags=SP"); len(f.Quality) != 0 {
 		t.Errorf("quality survived a filter that excluded its tag: %v", f.Quality)
+	}
+	// A filter that keeps one tag keeps that tag's quality and only that.
+	f := get("?tags=Level")
+	if len(f.Quality) != 1 || f.Quality["Level"] != "stale" {
+		t.Errorf("tags=Level quality = %v, want just Level:stale", f.Quality)
+	}
+	f = get("?tags=Ghost")
+	if len(f.Quality) != 1 || f.Quality["Ghost"] != "notConnected" {
+		t.Errorf("tags=Ghost quality = %v, want just Ghost:notConnected", f.Quality)
+	}
+
+	// The same holds on the live stream, which is built by a different path.
+	st := openStream(t, rt, "?tags=Level")
+	if first := st.next(); len(first.Quality) != 1 || first.Quality["Level"] != "stale" {
+		t.Errorf("stream tags=Level quality = %v, want just Level:stale", first.Quality)
+	}
+	st.tick()
+	if again := st.next(); len(again.Quality) != 1 || again.Quality["Level"] != "stale" {
+		t.Errorf("stream tick tags=Level quality = %v, want just Level:stale", again.Quality)
 	}
 }
 
@@ -545,6 +600,13 @@ func TestDeltaFrameCarriesQuality(t *testing.T) {
 	if d.Quality["Level"] != "bad" {
 		t.Errorf("delta frame quality = %v", d.Quality)
 	}
+	// Not gated: the quality has not changed, and the next delta frame
+	// still names it — a client replaces the map, so omission would mean
+	// "went back to Good".
+	f.tick()
+	if again := f.next(); again.Quality["Level"] != "bad" {
+		t.Errorf("an unchanged Bad quality was gated off the next delta frame: %v", again.Quality)
+	}
 	// It clears the same way — the map is replaced, never merged.
 	drv.SetQuality("Level", nio.Good)
 	f.tick()
@@ -566,6 +628,24 @@ func TestMetaAdvertisesQualityAndDeltas(t *testing.T) {
 	}
 	if !m.Deltas {
 		t.Error("meta.deltas = false")
+	}
+
+	// A controller with no driver and no inputs cannot report quality, and
+	// meta must say so rather than hard-code true.
+	rt, err := runtime.New(runtime.Options{Program: testProgram,
+		Seed: nio.Values{"Level": 40.0, "SP": 65.0, "Out": 0.0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Scan()
+	rec = httptest.NewRecorder()
+	New(rt).Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/meta", nil))
+	var off metaResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &off); err != nil {
+		t.Fatal(err)
+	}
+	if off.Quality {
+		t.Error("meta.quality = true on a driverless controller with no inputs")
 	}
 }
 
