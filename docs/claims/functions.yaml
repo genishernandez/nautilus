@@ -270,10 +270,13 @@ claims:
       - go ./lang/conformance TestConformance/ld-coils/FB-only rung (no coil) still runs, its outputs read elsewhere
     partial: true
     note: >-
-      A rung reading cnt.Q from another rung of the same program is asserted.
-      No test reads one task's instance output from another task, and a
-      non-BOOL pin (inst.ET) used as a contact argument is untested.
-      TestFBOnlyRung was removed: it checks lowering text only.
+      A rung reading cnt.Q from another rung of the same program is asserted;
+      a non-BOOL pin (inst.ET) used as a contact argument is untested.
+      Disagreement: "from another task's FBD/ST program" does not hold. An
+      instance is a program local, and a second task's ST program reading
+      t1.Q (or A.t1.Q) of task A's `t1 : TON` fails naut check with
+      'undeclared identifier "t1"' (checked 2026-10-13); the page and the
+      code need reconciling before this clause can be tested.
 
   # ── SFC qualifiers and step supervision ─────────────────────────────
   - id: FN-022
