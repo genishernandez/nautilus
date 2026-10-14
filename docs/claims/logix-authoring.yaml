@@ -22,6 +22,12 @@ claims:
       - go ./logix/writer TestImplicitTagsBecomeControllerTags
       - go ./logix/writer TestImplicitTagsInST
       - go ./logix/writer TestImplicitTagsLadderMembersAndLiterals
+    partial: true
+    note: >-
+      The writer is tested with the tag types handed to it directly. How
+      `naut logix deploy` and `naut logix write` derive a tag's type from
+      nautilus.yaml (logixTagTypes: `type:`, else the type `init:` implies)
+      has no test.
 
   - id: LGA-003
     claim: >-
@@ -263,8 +269,9 @@ claims:
 
   - id: LGA-026
     claim: >-
-      On a corpus of 52 real production exports, 97.2% of rungs import and
-      most complete routines write back identically or equivalently.
+      On a corpus of 52 real production exports, 97.9% of rungs import, 81%
+      of ladder routines import whole, and most complete routines write back
+      identically or equivalently.
     source: "#bringing-an-existing-program-in"
     tests:
       - go ./logix/importer TestCorpus
@@ -386,6 +393,12 @@ claims:
     tests:
       - go ./logix/writer TestRejections
       - go ./logix/writer TestStructuredTextRejections
+    partial: true
+    note: >-
+      The rejection tests cover the subset's rules case by case, but not
+      every rule (see LGA-017: trailing-underscore names and an AOI with an
+      array parameter have no case), and the multi-task and SFC refusals
+      (LGA-005) have no test, so "anything" is not asserted.
 
   - id: LGA-037
     claim: >-

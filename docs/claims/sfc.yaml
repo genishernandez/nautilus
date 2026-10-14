@@ -20,6 +20,7 @@ claims:
       - go ./lang/sfc TestCheckMissingInitialStep
       - go ./lang/sfc TestCheckMultipleInitialSteps
       - go ./lang/conformance TestConformance/sfc-sim-div-conv/the initial token waits in Idle
+      - go ./lang/conformance TestConformance/sfc-sim-div-conv/divergence activates every target in the same scan and clears the source
 
   - id: SFC-003
     claim: >-
@@ -125,7 +126,6 @@ claims:
     source: "#how-a-chart-executes"
     tests:
       - go ./lang/conformance TestConformance/sfc-sim-div-conv
-      - go ./lang/sfc TestParseSimultaneousDivergenceConvergence
 
   - id: SFC-013
     claim: >-
@@ -186,6 +186,8 @@ claims:
       duration and ends when the step is left.
     source: "#action-qualifiers"
     tests:
+      - go ./lang/conformance TestConformance/sfc-timed-qualifiers/the activation scan — L and SL on, the delayed ones not yet
+      - go ./lang/conformance TestConformance/sfc-timed-qualifiers/the scan before PT — nothing has changed
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/the scan at PT — L and SL drop, D SD DS rise, the L body runs its final scan
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/leaving before PT — L is cut short, D and DS never come on, SD and SL run on stored
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/after the step leaves — D drops, the stored SD and DS hold
@@ -198,6 +200,8 @@ claims:
       after the step is left; all three end at an R on the same target.
     source: "#action-qualifiers"
     tests:
+      - go ./lang/conformance TestConformance/sfc-timed-qualifiers/the scan before PT — nothing has changed
+      - go ./lang/conformance TestConformance/sfc-timed-qualifiers/the scan at PT — L and SL drop, D SD DS rise, the L body runs its final scan
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/leaving before PT — L is cut short, D and DS never come on, SD and SL run on stored
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/R resets the stored qualifiers
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/R before PT cuts SL short and stops SD from ever coming on
@@ -254,6 +258,14 @@ claims:
       - go ./lang/sfc TestResetActsOnceThenActionMaySet
       - go ./lang/sfc TestNDrivesOnlyWhileActive
       - go ./acceptance TestSFCResetOnInactiveStepKeepsActionWrite
+    partial: true
+    note: >-
+      The association winning over an ACTION body's write in the same scan
+      is asserted only for N (TestNDrivesOnlyWhileActive); no test has an
+      ACTION write the target on the activation scan of an S or R, the scan
+      of a pulse, or inside a timed qualifier's window. The ACTION owning the
+      variable the rest of the time, and R-on-abort coexisting with an
+      ACTION set, are asserted.
 
   - id: SFC-024
     claim: >-
@@ -280,6 +292,12 @@ claims:
       - go ./lang/conformance TestConformance/sfc-final-scan
       - go ./lang/sfc TestFinalScanResetsTON
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/the scan at PT — L and SL drop, D SD DS rise, the L body runs its final scan
+    partial: true
+    note: >-
+      The final scan is asserted for an N body (sfc-final-scan,
+      TestFinalScanResetsTON) and an L body (sfc-timed-qualifiers), and its
+      absence for a P1 body; no test runs an ACTION body under S, D, SD, DS
+      or SL and checks its final scan.
 
   - id: SFC-026
     claim: >-
@@ -300,7 +318,7 @@ claims:
 
   - id: SFC-028
     claim: >-
-      A step supervised with (MAXTIME := T#..) sets its retained Step.ERR one
+      A step supervised with (MAXTIME := T#..) sets its Step.ERR flag one
       scan after Step.T reaches the limit (active longer than MAXTIME); within
       the limit nothing is flagged.
     source: "#step-supervision"
@@ -330,6 +348,7 @@ claims:
       an alarm definition bound to that tag annunciates the overrun.
     source: "#step-supervision"
     tests:
+      - go ./lang/conformance TestConformance/sfc-step-maxtime/the scan the step overruns sets the flag; the abort fires the scan after
       - go ./lang/conformance TestConformance/sfc-step-maxtime/the flag holds after the step is left, until Fill runs again
       - go ./lang/conformance TestConformance/sfc-step-maxtime/leaving in time never sets the flag
     note: The sfc-step-maxtime fixture asserts the mirrored tag and the FillOverrun alarm lifecycle (active, unack-rtn, ack).
@@ -357,6 +376,11 @@ claims:
       - go ./lang/sfc TestCheckMultipleInitialSteps
       - go ./lang/sfc TestCheckUnknownFromTo
       - go ./lang/sfc TestCheckEmptyCondition
+    partial: true
+    note: >-
+      The tests call the chart checker naut check runs (sfc.Check); no test
+      runs naut check or naut sfc check on a chart with these errors and checks
+      the CLI reports it.
 
   - id: SFC-033
     claim: >-
@@ -380,6 +404,11 @@ claims:
       - go ./lang/sfc TestCheckUnsupportedQualifier
       - go ./lang/sfc TestCheckQualifierDiagnostics
       - go ./lang/sfc TestCheckTimeArgumentOnUntimedQualifierIsAnError
+    partial: true
+    note: >-
+      The tests call the chart checker naut check runs (sfc.Check); no test
+      runs naut check or naut sfc check on a chart with these errors and checks
+      the CLI reports it.
 
   - id: SFC-035
     claim: >-
@@ -389,6 +418,11 @@ claims:
     tests:
       - go ./lang/sfc TestCheckUnreachableStepWarns
       - go ./lang/sfc TestCheckDeadEndStepWarns
+    partial: true
+    note: >-
+      The tests call the chart checker naut check runs (sfc.Check); no test
+      runs naut check or naut sfc check on a chart with these warnings and checks
+      the CLI reports it.
 
   - id: SFC-036
     claim: >-
@@ -398,6 +432,11 @@ claims:
     tests:
       - go ./lang/sfc TestCheckConvergenceUnreachableWarns
       - go ./lang/sfc TestCheckConvergenceReachableIsClean
+    partial: true
+    note: >-
+      The tests call the chart checker naut check runs (sfc.Check); no test
+      runs naut check or naut sfc check on a chart with this warning and checks
+      the CLI reports it.
 
   - id: SFC-037
     claim: >-
