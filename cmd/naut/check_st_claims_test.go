@@ -1,16 +1,13 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
-// ST-050: the dereference operator (^) is not supported, so naut check should
-// refuse a program that uses it, as it refuses a REF_TO declaration.
-//
-// Today the ST lexer skips characters it does not know ("Skip unknown
-// characters"), so `r^` reads as `r` and the program is accepted. The test
-// skips on that bug rather than assert the wrong behaviour; when ^ is
-// rejected the skip turns into a failure telling you to drop it.
+// ST-050: the dereference operator (^) is not supported, so naut check
+// refuses a program that uses it, as it refuses a REF_TO declaration. (The
+// ST lexer used to drop the character, so `r^` read as `r` and exit was 0.)
 func TestCheckRejectsDereference(t *testing.T) {
 	// The control: the same program without the ^ is accepted, so any
 	// rejection below is the ^ and nothing else.
@@ -24,11 +21,11 @@ func TestCheckRejectsDereference(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, code := checkIn(t, map[string]string{"p.st": head + body + "END_PROGRAM\n"})
-			if code == 0 {
-				t.Skip("bug: naut check accepts the dereference operator; the lexer drops the unknown character ^ (exit 0)")
-			}
 			if code != 1 {
-				t.Fatalf("exit = %d, want 1\n%s", code, out)
+				t.Fatalf("exit = %d, want 1 (rejected)\n%s", code, out)
+			}
+			if !strings.Contains(out, "the ^ dereference operator is not supported") {
+				t.Errorf("check output does not name the dereference operator:\n%s", out)
 			}
 		})
 	}

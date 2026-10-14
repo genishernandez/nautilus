@@ -554,14 +554,8 @@ claims:
     source: "#not-supported"
     tests:
       - go ./cmd/naut TestCheckRejects/REF_TO
-    partial: true
-    note: >-
-      A REF_TO declaration is refused by naut check. The dereference operator
-      (^) is accepted today: the ST lexer drops characters it does not know, so
-      r^ reads as r and a program using it exits 0. cmd/naut
-      TestCheckRejectsDereference asserts the page and skips on that bug until
-      ^ is rejected; it is not listed, because its parent passes while the
-      subtests that matter skip.
+      - go ./cmd/naut TestCheckRejectsDereference/read
+      - go ./cmd/naut TestCheckRejectsDereference/write
 
   - id: ST-051
     claim: >-
