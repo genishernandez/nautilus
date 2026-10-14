@@ -1,6 +1,6 @@
 PROGRAM SfcTimedQualifiers
 VAR_EXTERNAL
-    Go : BOOL;  Next : BOOL;  Back : BOOL;  Rst : BOOL;
+    Go : BOOL;  Fork : BOOL;  Next : BOOL;  Back : BOOL;  Rst : BOOL;
     sfc_L : BOOL;  sfc_D : BOOL;  sfc_SD : BOOL;  sfc_DS : BOOL;  sfc_SL : BOOL;
     sfc_CntL : INT;
 END_VAR
@@ -24,6 +24,11 @@ SFC
   STEP B:
   END_STEP
 
+  (* active alongside A (a fork): its R acts on its activation scan only *)
+  STEP Hold:
+    R sfc_DS;
+  END_STEP
+
   STEP Clear:
     R sfc_SD;
     R sfc_DS;
@@ -31,6 +36,10 @@ SFC
   END_STEP
 
   TRANSITION t_go    FROM Idle  TO A     := Go;
+  END_TRANSITION
+  TRANSITION t_fork  FROM Idle  TO (A, Hold) := Fork;
+  END_TRANSITION
+  TRANSITION t_hold  FROM Hold  TO Hold  := FALSE;
   END_TRANSITION
   TRANSITION t_next  FROM A     TO B     := Next;
   END_TRANSITION
