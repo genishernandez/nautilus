@@ -49,10 +49,7 @@ claims:
     tests:
       - go ./lang/ld TestLineMap
       - go ./lang/fbd TestTranspileLineMap
-    partial: true
-    note: >-
-      LD and FBD line maps are tested; no test for SFC step/transition line
-      mapping of a compile error.
+      - go ./cmd/naut TestCheckLandsDiagramErrorsOnSourceLine
 
   - id: LANG-005
     claim: >-
@@ -64,8 +61,13 @@ claims:
       - go ./runtime TestLibrariesUserFBFromFBD
       - go ./lang/ld TestLadderFunctionBlockFromST
       - go ./lang/fbd TestSharedTypes
+      - go ./runtime TestLibrariesUserFBFromSFCAction
     partial: true
-    note: Ladder and FBD consumers are tested; no SFC action calling a library block.
+    note: >-
+      Ladder, FBD and SFC consumers of library blocks are tested (an SFC action
+      calling a library block keeps its instance state). Arrays and structs, and
+      the built-in functions, are not asserted in SFC, and no library block is
+      called from every language side by side.
 
   - id: LANG-006
     claim: >-
@@ -77,11 +79,7 @@ claims:
       - go ./cmd/naut TestScaffoldedManifestProjectsPass/minimal-fbd
       - go ./cmd/naut TestScaffoldVariants/minimal manifest project
       - go ./cmd/naut TestScaffoldVariants/sdk, ladder program
-    partial: true
-    note: >-
-      The ld and fbd scaffolds are generated, loaded, compiled and their
-      tests pass; no test scaffolds an sfc project. The old refs (editor
-      blank-file seeding in lang/sfc, lang/fbd, lang/ld) did not test naut new.
+      - go ./cmd/naut TestScaffoldedManifestProjectsPass/minimal-sfc
   - id: LANG-007
     claim: >-
       Tasks are declared in nautilus.yaml, one program file each, at their own

@@ -41,9 +41,7 @@ claims:
       - go ./lang/ld TestNegatedFunctionContact
       - go ./lang/ld TestFunctionContactExpressionArgs
       - go ./lang/conformance TestConformance/ld-coils/negated function contact passes power when the call returns FALSE
-    partial: true
-    note: >-
-      The plain function contact is matched only by a substring that the negated form also contains, so a regression negating it would pass.
+      - go ./lang/ld TestFunctionContactPassesPowerWhenTrue
 
   - id: LD-005
     claim: >-
@@ -133,14 +131,8 @@ claims:
       Several coils on one rung share one condition, evaluated once and
       fanned out.
     source: "#how-a-rung-evaluates"
-    tests: []
-    note: >-
-      Not covered, and not true as built. TestTranspileRungs (dropped) only
-      shows the FBD wire w_annunciate feeding both coils; FBD inlines a wire
-      at every read, so the ST evaluates the condition once per coil. A rung
-      /Lamp ( Lamp ) ( Horn ) lowers to Lamp := NOT (Lamp); Horn := NOT (Lamp);
-      so Horn sees the Lamp the first coil just wrote, not the shared
-      condition.
+    tests:
+      - go ./lang/conformance TestConformance/ld-coil-fanout
   - id: LD-013
     claim: A rung with only a coil is driven by the rail, so ( AlwaysOn ) assigns TRUE.
     source: "#how-a-rung-evaluates"
@@ -154,10 +146,7 @@ claims:
     source: "#how-a-rung-evaluates"
     tests:
       - go ./lang/conformance TestConformance/ld-coils/S coil latches, R coil unlatches, R wins a same-scan tie
-    partial: true
-    note: >-
-      The R-after-S tie shows later rungs win, but no test reads a coil as a
-      contact on a following rung as its subject.
+      - go ./lang/ld TestCoilReadsBackOnNextRungSameScan
 
   - id: LD-015
     claim: >-
@@ -167,11 +156,7 @@ claims:
     source: "#how-a-rung-evaluates"
     tests:
       - go ./cmd/naut TestCheckRejects/numeric function contact
-    partial: true
-    note: >-
-      A numeric function used as a contact (ADD(T, 0.0)) is a compile error.
-      The six comparisons working as contacts is not asserted as such: no test
-      runs each of them as a contact.
+      - go ./lang/ld TestSixComparisonsAsContacts
 
   - id: LD-016
     claim: >-
@@ -209,8 +194,7 @@ claims:
     tests:
       - go ./lang/ld TestLadderOutputBinding
       - go ./lang/conformance TestConformance/ld-coils/FB-only rung (no coil) still runs, its outputs read elsewhere
-    partial: true
-    note: The binding is tested (a counter's CV is run); no test asserts that a coil on a non-BOOL target is rejected.
+      - go ./lang/ld TestCoilOnNonBoolTargetRefused
   - id: LD-019
     claim: >-
       Any instance output is readable as inst.Pin anywhere, including as a
@@ -228,8 +212,7 @@ claims:
     source: "#how-a-rung-evaluates"
     tests:
       - go ./lang/ld TestEdgeTrigNamesMatchTheCompiler
-    partial: true
-    note: Names are asserted; survival across an online edit is not.
+      - go ./runtime TestSwapWarmLadderKeepsEdgeContactMemory
 
   - id: LD-021
     claim: >-
@@ -254,13 +237,7 @@ claims:
       - go ./lang/ld TestLadderFunctionBlockPowerPins
       - go ./internal/project TestLadderLibraryProjectRuns
       - go ./lang/ld TestLadderFunctionBlockPowerOutOfENO
-    partial: true
-    note: >-
-      Power onto EN and out of ENO is run
-      (TestLadderFunctionBlockPowerOutOfENO, where only the ENO path can drop
-      the coil); onto the first BOOL input and out of the first BOOL output is
-      asserted. Skipping a first BOOL input bound by name to land on the next
-      one is not tested.
+      - go ./lang/ld TestLadderPowerSkipsBoundBoolInput
   - id: LD-023
     claim: >-
       Instance state persists across scans, and an online edit carries it by
@@ -296,11 +273,7 @@ claims:
     source: "#tooling"
     tests:
       - go ./lang/ld TestLineMap
-    partial: true
-    note: >-
-      The line map is tested at the transpile level; no end-to-end check that
-      naut check prints the RUNG line for a type error. TestRungErrors
-      (dropped) covers structural rung errors, not mapped type errors.
+      - go ./cmd/naut TestCheckLandsDiagramErrorsOnSourceLine
   - id: LD-026
     claim: >-
       Online edits treat .ld as the program source; download, diff against the
@@ -308,11 +281,7 @@ claims:
     source: "#tooling"
     tests:
       - go ./runtime TestSwapWarmLadderCarriesRetainedState
-    partial: true
-    note: >-
-      A warm swap keeps the .ld text as the program of record. Download over
-      the controller API, diff against the controller and naut pull moving
-      ladder text are not tested.
+      - go ./cmd/naut TestPullMovesLadderText
 
   - id: LD-027
     claim: Jumps and labels (JMP, JMPC, LBL, RET) are not supported.
@@ -342,10 +311,7 @@ claims:
     source: "#not-supported"
     tests:
       - go ./lang/ld TestRungErrors
-    partial: true
-    note: >-
-      Covers a coil mid-rung ahead of a contact ("right end"); coil inside a
-      branch and coil ahead of a block are not separately asserted.
+      - go ./lang/ld TestCoilZoneIsContiguousAtRightEnd
 
   - id: LD-031
     claim: >-
