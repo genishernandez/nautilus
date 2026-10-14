@@ -2,8 +2,10 @@ package lsp
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -287,5 +289,176 @@ func TestRenameQuotedManifestScalarKeepsQuotes(t *testing.T) {
 	got := applyEdits(m, edits[mpath])
 	if !strings.Contains(got, `name: "HiTempTrip"`) {
 		t.Fatalf("quoted scalar edit:\n%s", got)
+	}
+}
+
+// #195: rename edits only identifiers that resolve to the symbol. The Q of
+// t1.Q is TON's output, not the local Q, and IN/PT before := in t1's call
+// are its formals.
+func TestRenameSkipsMembersAndFormals(t *testing.T) {
+	src := "PROGRAM P\nVAR\n Q : BOOL;\n t1 : TON;\n d : TIME;\nEND_VAR\nt1(IN := TRUE, PT := T#2s);\nQ := t1.Q;\nEND_PROGRAM\n"
+	an := analyze(src, "", 0)
+	got := applyEdits(src, renameInDocument(src, &an, an.lookup("Q", 3), "Out"))
+	if !strings.Contains(got, " Out : BOOL;") || !strings.Contains(got, "Out := t1.Q;") {
+		t.Fatalf("rename Q → Out:\n%s", got)
+	}
+}
+
+// #195: the T of T#2s is a literal prefix, never the local T.
+func TestRenameSkipsLiteralPrefixes(t *testing.T) {
+	src := "PROGRAM P\nVAR\n T : BOOL;\n d : TIME;\nEND_VAR\nd := T#2s;\nT := NOT T;\nEND_PROGRAM\n"
+	an := analyze(src, "", 0)
+	got := applyEdits(src, renameInDocument(src, &an, an.lookup("T", 3), "Flag"))
+	for _, want := range []string{" Flag : BOOL;", "d := T#2s;", "Flag := NOT Flag;"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rename T → Flag: missing %q in\n%s", want, got)
+		}
+	}
+}
+
+// #195: a local is renamed only inside the POU that declares it. Beta's own
+// n is a different symbol, and the program's undeclared n is nobody's —
+// lookup() would fall back to Alpha's for it.
+func TestRenameStaysInItsPOU(t *testing.T) {
+	src := "FUNCTION_BLOCK Alpha\nVAR\n n : INT;\nEND_VAR\nn := n + 1;\nEND_FUNCTION_BLOCK\n\n" +
+		"FUNCTION_BLOCK Beta\nVAR\n n : INT;\nEND_VAR\nn := 2;\nEND_FUNCTION_BLOCK\n\n" +
+		"PROGRAM P\nVAR\n x : INT;\nEND_VAR\nx := n;\nEND_PROGRAM\n"
+	an := analyze(src, "", 0)
+	got := applyEdits(src, renameInDocument(src, &an, an.lookup("n", 3), "count"))
+	want := "FUNCTION_BLOCK Alpha\nVAR\n count : INT;\nEND_VAR\ncount := count + 1;\nEND_FUNCTION_BLOCK\n\n" +
+		"FUNCTION_BLOCK Beta\nVAR\n n : INT;\nEND_VAR\nn := 2;\nEND_FUNCTION_BLOCK\n\n" +
+		"PROGRAM P\nVAR\n x : INT;\nEND_VAR\nx := n;\nEND_PROGRAM\n"
+	if got != want {
+		t.Fatalf("rename Alpha's n:\n%s", got)
+	}
+}
+
+// Renaming a FUNCTION_BLOCK's variable also renames it where an instance of
+// that FB uses it — p1.Run and p1(Run := …) — but not another FB's
+// same-named member or a same-named local, and asking at any of those
+// sites gives the same edit.
+const renameFBParamSrc = `FUNCTION_BLOCK Pump
+VAR_INPUT
+    Run : BOOL;
+END_VAR
+VAR_OUTPUT
+    On : BOOL;
+END_VAR
+On := Run;
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK Fan
+VAR_INPUT
+    Run : BOOL;
+END_VAR
+END_FUNCTION_BLOCK
+
+PROGRAM P
+VAR
+    p1 : Pump;
+    f1 : Fan;
+    Run : BOOL;
+END_VAR
+p1(Run := Run);
+f1(Run := p1.Run);
+END_PROGRAM
+`
+
+func TestRenameFBVariableFollowsInstances(t *testing.T) {
+	s := startSession(t)
+	s.recvResponse(s.send("initialize", map[string]any{}, true))
+	const uri = "file:///fb.st"
+	s.refOpen(uri, renameFBParamSrc)
+	want := strings.NewReplacer(
+		"    Run : BOOL;\nEND_VAR\nVAR_OUTPUT", "    Enable : BOOL;\nEND_VAR\nVAR_OUTPUT",
+		"On := Run;", "On := Enable;",
+		"p1(Run := Run);", "p1(Enable := Run);",
+		"f1(Run := p1.Run);", "f1(Run := p1.Enable);",
+	).Replace(renameFBParamSrc)
+	for _, at := range []Position{
+		{Line: 2, Character: 5},   // the declaration
+		{Line: 22, Character: 4},  // the formal in p1's call
+		{Line: 23, Character: 14}, // the member p1.Run
+	} {
+		id := s.send("textDocument/rename", RenameParams{
+			TextDocument: TextDocumentIdentifier{URI: uri}, Position: at, NewName: "Enable",
+		}, true)
+		var we WorkspaceEdit
+		if err := json.Unmarshal(s.recvResponse(id), &we); err != nil {
+			t.Fatal(err)
+		}
+		if got := applyEdits(renameFBParamSrc, we.Changes[uri]); got != want {
+			t.Fatalf("rename from %+v:\n%s", at, got)
+		}
+	}
+	// Find All References on the declaration reports the same four sites.
+	refSameLines(t, refLines(t, s.refsAt(uri, 2, 5, true), "Run", map[string]string{uri: renameFBParamSrc}),
+		"fb.st:3", "fb.st:8", "fb.st:23", "fb.st:24")
+}
+
+// Rename edits exactly the sites Find All References reports, diagrams
+// included: a tag from an ST program and from inside an FBD.
+func TestRenameEditsWhatReferencesFind(t *testing.T) {
+	files := map[string]string{
+		"nautilus.yaml": diagManifest,
+		"main.st":       diagMain,
+		"level.fbd":     diagFBD,
+		"perms.ld":      diagLD,
+	}
+	_, paths := refProject(t, files)
+	s := startSession(t)
+	s.recvResponse(s.send("initialize", map[string]any{}, true))
+	for _, at := range []struct {
+		file      string
+		line, col int
+	}{{"main.st", 4, 0}, {"level.fbd", 10, 3}} {
+		uri := pathToURI(paths[at.file])
+		s.refOpen(uri, files[at.file])
+		want := map[string][]Range{}
+		for _, l := range s.refsAt(uri, at.line, at.col, true) {
+			want[l.URI] = append(want[l.URI], l.Range)
+		}
+		id := s.send("textDocument/rename", RenameParams{
+			TextDocument: TextDocumentIdentifier{URI: uri},
+			Position:     Position{Line: at.line, Character: at.col},
+			NewName:      "Renamed",
+		}, true)
+		var we WorkspaceEdit
+		if err := json.Unmarshal(s.recvResponse(id), &we); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string][]Range{}
+		for u, edits := range we.Changes {
+			for _, e := range edits {
+				got[u] = append(got[u], e.Range)
+			}
+			sort.Slice(got[u], func(i, j int) bool { return posLess(got[u][i].Start, got[u][j].Start) })
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("%s: rename edits\n %v\nreferences\n %v", at.file, got, want)
+		}
+	}
+}
+
+// A builtin FB's member and a literal prefix have no declaration in the
+// file to rename: prepareRename refuses rather than offering a same-named
+// local.
+func TestPrepareRenameRefusesWhatIsNotTheSymbol(t *testing.T) {
+	src := "PROGRAM P\nVAR\n Q : BOOL;\n T : BOOL;\n IN : BOOL;\n t1 : TON;\nEND_VAR\nt1(IN := T, PT := T#2s);\nQ := t1.Q;\nEND_PROGRAM\n"
+	s := startSession(t)
+	s.recvResponse(s.send("initialize", map[string]any{}, true))
+	const uri = "file:///p.st"
+	s.refOpen(uri, src)
+	for _, at := range []Position{
+		{Line: 8, Character: 8},  // the Q of t1.Q
+		{Line: 7, Character: 18}, // the T of T#2s
+		{Line: 7, Character: 3},  // TON's IN
+	} {
+		id := s.send("textDocument/prepareRename", TextDocumentPositionParams{
+			TextDocument: TextDocumentIdentifier{URI: uri}, Position: at,
+		}, true)
+		if m := s.recvErrorOrResult(id); len(m.Error) == 0 {
+			t.Fatalf("prepareRename at %+v should be refused, got %s", at, m.Result)
+		}
 	}
 }

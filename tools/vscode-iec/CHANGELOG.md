@@ -91,6 +91,15 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   after upgrading.** Rungs without the pattern are unchanged. Comes from the
   runtime and `naut lsp`, so it needs a `naut` newer than 0.16.1. (#258)
 
+- **Rename only renames the symbol.** Renaming a local `Q` also rewrote
+  the member in `t1.Q`, renaming a local `T` turned `T#2s` into `Flag#2s`,
+  and a name used undeclared in another POU of the file was renamed along
+  with the local it is not. Rename now edits exactly what Find All
+  References finds. Renaming a FUNCTION_BLOCK's variable, from its
+  declaration or from `p1.Run` / `p1(Run := …)`, also renames it where
+  instances of that FB in the same file use it; a builtin's member such as
+  `t1.Q` cannot be renamed. Needs a `naut` newer than 0.16.2. (#195)
+
 ## [0.15.0] - 2026-10-12
 
 The pre-release line after the stable release 0.14.0. Same contents as

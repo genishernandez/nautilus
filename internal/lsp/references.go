@@ -15,12 +15,13 @@ import (
 )
 
 // Find all references: the cross-reference every vendor IDE answers on day
-// one ("where is this tag used?"). It is rename's machinery read-only —
-// the same scan for identifiers, the same lookup() deciding whether each
-// one resolves to the symbol under the cursor — so the two can never
-// disagree about what "this symbol" means. The scope rules are rename's:
+// one ("where is this tag used?"). Rename edits exactly what this finds —
+// both go through refFile.find — so the two can never disagree about what
+// "this symbol" means. The scope rules:
 //
-//   - a POU-local variable is found only inside its POU;
+//   - a POU-local variable is found only inside its POU, plus, for a
+//     FUNCTION_BLOCK's or FUNCTION's variable, where an instance or a call
+//     of that POU in the same file names it (p1.Run, p1(Run := …));
 //   - a VAR_EXTERNAL name is a project tag: every program that binds it
 //     (.st, and the .fbd/.ld/.sfc programs, reported on the diagram
 //     file's own lines), plus where the manifest names it — tags[].name
@@ -29,11 +30,10 @@ import (
 //   - a member (t1.Q, Tank.Level) is found as that member OF THAT
 //     instance — t1.Q and t1(Q => …), never another TON's Q or a local Q.
 //
-// Two places the scan is stricter than rename's: an identifier after a dot
-// is a member, not the name being searched for, and one before := / =>
-// inside a call's parentheses is a formal parameter (IN, PT), not a
-// variable. And an identifier the lexer did not produce as an identifier —
-// the T of T#2s — is not one either.
+// An identifier after a dot is a member, not the variable of that name,
+// and one before := / => inside a call's parentheses is a formal parameter
+// (IN, PT), not a variable. And an identifier the lexer did not produce as
+// an identifier — the T of T#2s — is not one at all.
 
 // ReferenceParams is the textDocument/references request.
 type ReferenceParams struct {
@@ -387,10 +387,16 @@ func (f *refFile) find(t refTarget) []refHit {
 		}
 		line := r.Start.Line + 1
 		if len(t.path) == 0 {
-			if c.member || c.formal {
-				continue
-			}
-			if f.resolves(t.root.Name, line, t.root) {
+			switch {
+			case c.member:
+				if f.memberOf(r, line, t.root) {
+					hits = append(hits, refHit{r: r})
+				}
+			case c.formal:
+				if f.formalOf(c.callee, line, t.root) {
+					hits = append(hits, refHit{r: r})
+				}
+			case f.resolves(t.root.Name, line, t.root):
 				hits = append(hits, refHit{r: r, decl: hasDecl && r.Start == decl})
 			}
 			continue
@@ -437,6 +443,87 @@ func (f *refFile) resolves(name string, line int, sym *Symbol) bool {
 		return false
 	}
 	return isPOUSymbol(sym) || strings.EqualFold(f.an.containerAt(line), sym.Container)
+}
+
+// memberOf reports whether the member access ending at r (p1.Run) names
+// sym, a variable of a POU in this file: the value before the dot is an
+// instance of that POU. A program's variables are nobody's members.
+func (f *refFile) memberOf(r Range, line int, sym *Symbol) bool {
+	if sym.Container == "" {
+		return false
+	}
+	base, path, ok := memberContext(lineText(f.text, line), r.End.Character)
+	if !ok {
+		return false
+	}
+	typ, ok := f.an.resolveChain(base, path, line)
+	return ok && strings.EqualFold(baseTypeName(typ), sym.Container)
+}
+
+// formalOf reports whether a formal parameter in a call of callee (Run in
+// p1(Run := …), a in Scale(a := …)) names sym: callee is an instance of
+// sym's FUNCTION_BLOCK, or is sym's FUNCTION.
+func (f *refFile) formalOf(callee string, line int, sym *Symbol) bool {
+	if sym.Container == "" {
+		return false
+	}
+	c := f.an.lookup(callee, line)
+	if c == nil {
+		return false
+	}
+	if c.BlockKind == "FUNCTION" {
+		return strings.EqualFold(c.Name, sym.Container)
+	}
+	return !isPOUSymbol(c) && strings.EqualFold(baseTypeName(c.Datatype), sym.Container)
+}
+
+// declarationAt is the symbol a rename at the identifier under the cursor
+// edits. A member or formal of an instance of a POU in this file is that
+// POU's variable (p1.Run is Pump's Run); a builtin's (t1.Q) or a struct
+// field has no declaration here to rename. Nil for anything that is not
+// an identifier resolving in its own POU — the T of T#2s, an undeclared
+// name.
+func (f *refFile) declarationAt(word string, wr Range) *Symbol {
+	line := wr.Start.Line + 1
+	c, isIdent := f.ctx[wr.Start]
+	if !isIdent {
+		return nil
+	}
+	owner := ""
+	switch {
+	case c.member:
+		base, path, ok := memberContext(lineText(f.text, line), wr.End.Character)
+		if !ok {
+			return nil
+		}
+		typ, ok := f.an.resolveChain(base, path, line)
+		if !ok {
+			return nil
+		}
+		owner = baseTypeName(typ)
+	case c.formal:
+		callee := f.an.lookup(c.callee, line)
+		if callee == nil {
+			return nil
+		}
+		owner = baseTypeName(callee.Datatype)
+		if callee.BlockKind == "FUNCTION" {
+			owner = callee.Name
+		}
+	default:
+		sym := f.an.lookup(word, line)
+		if sym == nil || !f.resolves(word, line, sym) {
+			return nil
+		}
+		return sym
+	}
+	for i := range f.an.Symbols {
+		s := &f.an.Symbols[i]
+		if s.Container != "" && strings.EqualFold(s.Container, owner) && strings.EqualFold(s.Name, word) {
+			return s
+		}
+	}
+	return nil
 }
 
 // identCtx is the lexical context of one identifier token.
