@@ -78,19 +78,23 @@ type Node struct {
 	// every wait under pubMu is bounded by tokenTimeout or the lost signal.
 	pubMu sync.Mutex
 
-	mu           sync.Mutex
-	bdSeq        uint64
-	seq          uint64
-	born         bool
-	bornMs       int64  // epoch ms of the last NBIRTH
-	msgs         uint64 // DATA messages published (NDATA + DDATA)
-	lastPubMs    int64  // epoch ms of the last DATA publish
-	rbeState     map[string]*rbeState
-	known        map[string]bool // metric names present in the last birth
-	devHealth    map[string]bool
-	hostOnline   bool
-	hostTS       int64 // last STATE timestamp seen (monotonic guard)
-	rebirthTimer *time.Timer
+	mu        sync.Mutex
+	bdSeq     uint64
+	seq       uint64
+	born      bool
+	bornMs    int64  // epoch ms of the last NBIRTH
+	msgs      uint64 // DATA messages published (NDATA + DDATA)
+	lastPubMs int64  // epoch ms of the last DATA publish
+	rbeState  map[string]*rbeState
+	known     map[string]bool // metric names present in the last birth
+	devHealth map[string]bool
+	// devPartialSince: when each healthy device with only some of its tags
+	// in the store started waiting for the rest (deviceReadyLocked).
+	devPartialSince map[string]time.Time
+	birthWait       time.Duration // deviceBirthWait when 0; tests shorten it
+	hostOnline      bool
+	hostTS          int64 // last STATE timestamp seen (monotonic guard)
+	rebirthTimer    *time.Timer
 	// cmdWarned dedupes the log-once diagnostics handleCommand emits (a
 	// template command for an unknown tag, an unknown member), keyed by an
 	// opaque reason string.
@@ -192,14 +196,15 @@ func New(rt *runtime.Runtime, cfg Config, opts ...Option) (*Node, error) {
 		cfg.Log = slog.Default()
 	}
 	n := &Node{
-		cfg:       cfg,
-		rt:        rt,
-		log:       cfg.Log,
-		classRBE:  map[string]RBE{DefaultClass: {}},
-		rbeState:  map[string]*rbeState{},
-		known:     map[string]bool{},
-		devHealth: map[string]bool{},
-		tagOwner:  map[string]string{},
+		cfg:             cfg,
+		rt:              rt,
+		log:             cfg.Log,
+		classRBE:        map[string]RBE{DefaultClass: {}},
+		rbeState:        map[string]*rbeState{},
+		known:           map[string]bool{},
+		devHealth:       map[string]bool{},
+		devPartialSince: map[string]time.Time{},
+		tagOwner:        map[string]string{},
 
 		tokenTimeout: tokenTimeout,
 		lost:         make(chan struct{}),
