@@ -59,15 +59,15 @@ func spBroker(t *testing.T) string {
 	return "tcp://" + tcp.Address()
 }
 
-// simulatedEdge is Plant/Edge1: it publishes NDATA until it is asked to
+// simulatedEdge is Plant/<node>: it publishes NDATA until it is asked to
 // rebirth, then publishes its NBIRTH once. asked closes when the request lands.
-func simulatedEdge(t *testing.T, url string) (asked <-chan struct{}) {
+func simulatedEdge(t *testing.T, url, node string) (asked <-chan struct{}) {
 	t.Helper()
 	ch := make(chan struct{})
 	var once sync.Once
 	stop := make(chan struct{})
 	var cli mqtt.Client
-	opts := mqtt.NewClientOptions().AddBroker(url).SetClientID("edge1-sim").SetCleanSession(true).SetOrderMatters(true)
+	opts := mqtt.NewClientOptions().AddBroker(url).SetClientID(strings.ToLower(node) + "-sim").SetCleanSession(true).SetOrderMatters(true)
 	cli = mqtt.NewClient(opts)
 	if tok := cli.Connect(); !tok.WaitTimeout(5*time.Second) || tok.Error() != nil {
 		t.Fatalf("edge connect: %v", tok.Error())
@@ -81,7 +81,7 @@ func simulatedEdge(t *testing.T, url string) (asked <-chan struct{}) {
 		cli.Publish(topic, 0, false, b)
 	}
 	level := sparkplug.Metric{Name: "Zone1/FIT_001", Datatype: spb.DataType_Double, Value: 4.5}
-	tok := cli.Subscribe("spBv1.0/Plant/NCMD/Edge1", 1, func(_ mqtt.Client, m mqtt.Message) {
+	tok := cli.Subscribe("spBv1.0/Plant/NCMD/"+node, 1, func(_ mqtt.Client, m mqtt.Message) {
 		p, err := sparkplug.DecodePayload(m.Payload())
 		if err != nil {
 			return
@@ -90,7 +90,7 @@ func simulatedEdge(t *testing.T, url string) (asked <-chan struct{}) {
 			if mt.Name == "Node Control/Rebirth" && mt.Value == true {
 				once.Do(func() {
 					close(stop)
-					publish("spBv1.0/Plant/NBIRTH/Edge1", sparkplug.Payload{
+					publish("spBv1.0/Plant/NBIRTH/"+node, sparkplug.Payload{
 						Timestamp: uint64(time.Now().UnixMilli()),
 						Metrics: []sparkplug.Metric{
 							{Name: "bdSeq", Datatype: spb.DataType_Int64, Value: int64(1)},
@@ -114,7 +114,7 @@ func simulatedEdge(t *testing.T, url string) (asked <-chan struct{}) {
 				return
 			case <-time.After(50 * time.Millisecond):
 				seq = (seq + 1) % 256
-				publish("spBv1.0/Plant/NDATA/Edge1", sparkplug.Payload{
+				publish("spBv1.0/Plant/NDATA/"+node, sparkplug.Payload{
 					Timestamp: uint64(time.Now().UnixMilli()), Seq: seq,
 					Metrics: []sparkplug.Metric{level},
 				})
@@ -128,12 +128,16 @@ func simulatedEdge(t *testing.T, url string) (asked <-chan struct{}) {
 	return ch
 }
 
-// SPH-008: a live import asks the node it heard from to rebirth (the birth is
-// not retained, so it would otherwise never arrive) and generates from what
-// birthed.
+// SPH-008: a live import asks every node it heard from to rebirth (the birth
+// is not retained, so it would otherwise never arrive) and generates from
+// what birthed. Two nodes, so asking only the first is caught.
 func TestSparkplugImportFromBrokerAsksForRebirth(t *testing.T) {
 	url := spBroker(t)
-	asked := simulatedEdge(t, url)
+	nodes := []string{"Edge1", "Edge2"}
+	asked := map[string]<-chan struct{}{}
+	for _, n := range nodes {
+		asked[n] = simulatedEdge(t, url, n)
+	}
 	dir := t.TempDir()
 	code := 0
 	captureStdout(t, func() int {
@@ -143,27 +147,34 @@ func TestSparkplugImportFromBrokerAsksForRebirth(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("import failed (%d)", code)
 	}
-	select {
-	case <-asked:
-	default:
-		t.Fatal("the import never asked the node to rebirth")
-	}
-	manifest := read(t, filepath.Join(dir, "sparkplug_manifest.yaml"))
-	for _, want := range []string{"group: Plant", "edgenode: Edge1", "metric: Zone1/FIT_001"} {
-		if !strings.Contains(manifest, want) {
-			t.Errorf("manifest generated from the birth is missing %q:\n%s", want, manifest)
+	for _, n := range nodes {
+		select {
+		case <-asked[n]:
+		default:
+			t.Errorf("the import never asked %s to rebirth", n)
 		}
 	}
+	manifest := read(t, filepath.Join(dir, "sparkplug_manifest.yaml"))
 	tags := read(t, filepath.Join(dir, "tags", "sparkplug.yaml"))
-	if !strings.Contains(tags, "Edge1_Zone1_FIT_001") {
-		t.Errorf("tag file missing the birthed metric:\n%s", tags)
+	for _, want := range []string{"group: Plant", "metric: Zone1/FIT_001"} {
+		if !strings.Contains(manifest, want) {
+			t.Errorf("manifest generated from the births is missing %q:\n%s", want, manifest)
+		}
+	}
+	for _, n := range nodes {
+		if !strings.Contains(manifest, "edgenode: "+n) {
+			t.Errorf("manifest generated from the births is missing node %s:\n%s", n, manifest)
+		}
+		if !strings.Contains(tags, n+"_Zone1_FIT_001") {
+			t.Errorf("tag file missing %s's birthed metric:\n%s", n, tags)
+		}
 	}
 }
 
 // SPH-012: browse prints what is on the wire and generates nothing.
 func TestSparkplugBrowsePrintsWithoutGenerating(t *testing.T) {
 	url := spBroker(t)
-	asked := simulatedEdge(t, url)
+	asked := simulatedEdge(t, url, "Edge1")
 	dir := t.TempDir()
 	t.Chdir(dir)
 	code := 0

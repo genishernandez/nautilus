@@ -162,9 +162,11 @@ var (
 )
 
 // tlsFixture makes one self-signed certificate for 127.0.0.1 per test process
-// and points SSL_CERT_FILE at it, so the node's default verification (system
-// roots; the node has no TLS options) trusts it. Go reads the roots once per
-// process, hence once.
+// and points SSL_CERT_FILE at a copy of it in the test's own temp dir, so the
+// node's default verification (system roots; the node has no TLS options)
+// trusts it. Go reads the roots once per process, on first use, so the same
+// certificate is reused across -count runs; the file is removed with the
+// temp dir and the variable restored when the test ends.
 func tlsFixture(t *testing.T) *tls.Config {
 	t.Helper()
 	tlsOnce.Do(func() {
@@ -188,16 +190,16 @@ func tlsFixture(t *testing.T) *tls.Config {
 			t.Fatal(err)
 		}
 		tlsCert = tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
-		f, err := os.CreateTemp("", "nautilus-test-ca-*.pem")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
-			t.Fatal(err)
-		}
-		f.Close()
-		os.Setenv("SSL_CERT_FILE", f.Name())
 	})
+	if len(tlsCert.Certificate) == 0 {
+		t.Fatal("no test certificate")
+	}
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsCert.Certificate[0]})
+	if err := os.WriteFile(ca, pemBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSL_CERT_FILE", ca)
 	return &tls.Config{Certificates: []tls.Certificate{tlsCert}}
 }
 

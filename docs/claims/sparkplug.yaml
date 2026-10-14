@@ -125,6 +125,15 @@ claims:
       - go ./sparkplug TestMetricsSplitBetweenDevicesAndTheNode
       - go ./internal/project TestSparkplugDevicePerConnection
       - go ./internal/project TestSparkplugMemoryMakesNoDevice
+    partial: true
+    note: >-
+      One device per connection carrying its inputs and `__Online`, the
+      memory loopback making none, and tags outside a device's list riding
+      the NBIRTH are asserted. That outputs publish at node level is not, and
+      the code disagrees for modbus: a writable binding that is also polled
+      (not `writeonly`) is listed in its source's Connections() inputs, so
+      that output rides the device. TestMetricsSplitBetweenDevicesAndTheNode
+      only shows the node honouring the device lists it is handed.
   - id: SPB-016
     claim: >-
       A device's DBIRTH/DDEATH follow its connection's health: when one

@@ -280,7 +280,8 @@ func TestMqttQueueOverflowIsCountedAsWriteDrops(t *testing.T) {
 	srv, addr := startBroker(t, "")
 	t.Cleanup(func() { _ = closeBroker(srv) })
 
-	const tags = maxQueuedPerNode + 44
+	const bound = 256 // the page's number, not the constant: a changed bound must fail here
+	const tags = bound + 44
 	d, err := New(bigManifest(tags), testConfig(addr, "h-drops"), WithLogger(quietLogger()))
 	if err != nil {
 		t.Fatal(err)
@@ -302,43 +303,62 @@ func TestMqttQueueOverflowIsCountedAsWriteDrops(t *testing.T) {
 	}
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
-		if st := d.Status(); st.WriteDrops == 44 && st.QueuedWrites == maxQueuedPerNode {
-			if st.WriteQueued != maxQueuedPerNode {
-				t.Errorf("WriteQueued = %d, want %d", st.WriteQueued, maxQueuedPerNode)
+		if st := d.Status(); st.WriteDrops == 44 && st.QueuedWrites == bound {
+			if st.WriteQueued != bound {
+				t.Errorf("WriteQueued = %d, want %d", st.WriteQueued, bound)
 			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	st := d.Status()
-	t.Fatalf("WriteDrops = %d, QueuedWrites = %d; want 44 dropped past the %d-tag bound", st.WriteDrops, st.QueuedWrites, maxQueuedPerNode)
+	t.Fatalf("WriteDrops = %d, QueuedWrites = %d; want 44 dropped past the %d-tag bound", st.WriteDrops, st.QueuedWrites, bound)
 }
 
 func TestMqttQueuedWritesAreCountedPerSite(t *testing.T) {
 	srv, addr := startBroker(t, "")
 	t.Cleanup(func() { _ = closeBroker(srv) })
 
-	d := startDriver(t, testConfig(addr, "h-persite"))
-	waitConnected(t, d)
-	edge := edgePublisher(t, addr, "edge-persite")
-	publishPayload(t, edge, "spBv1.0/G/NBIRTH/W6", sparkplug.Payload{
-		Timestamp: uint64(time.Now().UnixMilli()),
-		Metrics:   []sparkplug.Metric{bdSeq(1)},
-	})
-	waitForValue(t, d, "W6__Online", func(v any) bool { return v == true })
-	publishPayload(t, edge, "spBv1.0/G/NDEATH/W6", sparkplug.Payload{
-		Timestamp: uint64(time.Now().UnixMilli()), OmitSeq: true,
-		Metrics: []sparkplug.Metric{bdSeq(1)},
-	})
-	waitForValue(t, d, "W6__Online", func(v any) bool { return v == false })
-	baselineScan(t, d)
-
-	if err := d.WriteOutputs(map[string]any{"W6_PLC1_Pump_SpeedSP": 7.0}); err != nil {
+	// Two dark sites with different depths, so a per-site row that showed
+	// the fleet total (or another site's depth) is caught.
+	m := Manifest{Group: "G", Nodes: []Node{{EdgeNode: "W6", Prefix: "W6"}, {EdgeNode: "W7", Prefix: "W7"}}}
+	for _, b := range []struct{ name, node string }{{"W6_A", "W6"}, {"W6_B", "W6"}, {"W7_A", "W7"}} {
+		m.Tags = append(m.Tags, Binding{Name: b.name, Node: b.node, Metric: b.name[3:],
+			Type: "Double", Writable: true, Init: 0.0})
+	}
+	d, err := New(m, testConfig(addr, "h-persite"), WithLogger(quietLogger()))
+	if err != nil {
 		t.Fatal(err)
 	}
-	st := waitQueued(t, d, 1)
-	if len(st.Nodes) != 1 || st.Nodes[0].EdgeNode != "W6" || st.Nodes[0].QueuedWrites != 1 {
-		t.Fatalf("Status.Nodes = %+v, want W6 carrying QueuedWrites 1", st.Nodes)
+	d.Start(t.Context())
+	t.Cleanup(d.Stop)
+	waitConnected(t, d)
+	edge := edgePublisher(t, addr, "edge-persite")
+	for _, site := range []string{"W6", "W7"} {
+		publishPayload(t, edge, "spBv1.0/G/NBIRTH/"+site, sparkplug.Payload{
+			Timestamp: uint64(time.Now().UnixMilli()),
+			Metrics:   []sparkplug.Metric{bdSeq(1)},
+		})
+		waitForValue(t, d, site+"__Online", func(v any) bool { return v == true })
+		publishPayload(t, edge, "spBv1.0/G/NDEATH/"+site, sparkplug.Payload{
+			Timestamp: uint64(time.Now().UnixMilli()), OmitSeq: true,
+			Metrics: []sparkplug.Metric{bdSeq(1)},
+		})
+		waitForValue(t, d, site+"__Online", func(v any) bool { return v == false })
+	}
+	if err := d.WriteOutputs(map[string]any{"W6_A": 0.0, "W6_B": 0.0, "W7_A": 0.0}); err != nil { // baseline
+		t.Fatal(err)
+	}
+	if err := d.WriteOutputs(map[string]any{"W6_A": 1.0, "W6_B": 2.0, "W7_A": 3.0}); err != nil {
+		t.Fatal(err)
+	}
+	st := waitQueued(t, d, 3)
+	per := map[string]int{}
+	for _, n := range st.Nodes {
+		per[n.EdgeNode] = n.QueuedWrites
+	}
+	if len(st.Nodes) != 2 || per["W6"] != 2 || per["W7"] != 1 {
+		t.Fatalf("Status.Nodes = %+v, want W6 carrying QueuedWrites 2 and W7 carrying 1", st.Nodes)
 	}
 }
 
