@@ -45,6 +45,10 @@ claims:
       - go ./lang/fbd TestTranspileMultipleBlocks
       - go ./lang/conformance TestConformance/fb-ton
       - go ./lang/fbd TestSplitDeclareThenCall
+      - go ./lang/fbd TestInlineInstanceNotHiddenByLibraryBlockVar
+    note: >-
+      The one-statement form declares the instance even when another block
+      in the same file has a local of that name (#332).
 
   - id: FBD-004
     claim: >-

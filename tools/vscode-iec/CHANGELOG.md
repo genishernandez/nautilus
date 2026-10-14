@@ -55,6 +55,13 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   diagnostic naming the literal, as `DATE#` and `DT#` were. Needs a `naut`
   newer than 0.16.2.
 
+- **An inline FBD or ladder instance is declared whatever another block
+  calls its locals.** With a function block earlier in the same `.fbd` or
+  `.ld` file declaring `VAR t1`, a program's inline `t1 : TON(...)` (or
+  rung `t1:TON(...)`) was not declared, and the file showed `undeclared
+  identifier "t1"`. Only the POU's own header now counts. (#332) Needs a
+  `naut` newer than 0.16.2.
+
 - **Text after `END_PROGRAM` is an error, not silently ignored.** A
   `FUNCTION_BLOCK` (or anything else) placed after `END_PROGRAM` was never
   compiled, yet the file showed no diagnostics and `naut check` passed it.

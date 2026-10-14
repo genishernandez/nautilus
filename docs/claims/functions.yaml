@@ -2050,10 +2050,13 @@ claims:
     tests:
       - go ./lang/ld TestLadderFunctionBlockNested
       - go ./lang/ld TestLadderFunctionBlockLowers
+      - go ./lang/ld TestLadderInlineInstanceNotHiddenByLibraryBlockVar
     note: >-
       TestLadderFunctionBlockNested runs an inline d1:Debounce() with no VAR
       entry; TestLadderFunctionBlockLowers asserts a header-declared t1 is
-      declared once and compiles. Removed: TestInlineRungBody (a one-line
+      declared once and compiles. Only the POU's own header counts: an inline
+      t1:TON still runs with an ST block's VAR t1 earlier in the file
+      (TestLadderInlineInstanceNotHiddenByLibraryBlockVar, #332). Removed: TestInlineRungBody (a one-line
       rung, not an inline instance), TestInsertReusesHeaderDeclaredInstance
       (an editor insert) and the FBD TestInstanceDeclaredInHeaderIsNotRedeclared
       (not ladder).

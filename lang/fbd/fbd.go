@@ -101,7 +101,10 @@ func TranspileWithLines(src string) (string, []int, error) {
 		// a declared instance, not a second declaration of it. (Without
 		// this, writing both — which reads naturally, and is how a block's
 		// retained timers are usually spelled out — is a duplicate slot.)
-		declared := declaredNames(strings.Join(lines[prev:blk.start], "\n"))
+		// Only that header counts: the text since the previous block can
+		// also hold whole ST blocks ahead of this POU, whose locals are
+		// their own scope (#332).
+		declared := declaredNames(strings.Join(lines[pouStart(lines, prev, blk.start):blk.start], "\n"))
 		var fresh []fbDecl
 		for _, d := range fbDecls {
 			if !declared[strings.ToLower(d.name)] {
@@ -150,6 +153,21 @@ func functionHeader(before []string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// pouStart is the 0-based line of the header that opens the POU an FBD
+// block starting at line start sits in: the last POU header in
+// lines[from:start], read on comment-stripped text so a commented-out
+// header doesn't count. With none there (a block not inside a POU), it is
+// from.
+func pouStart(lines []string, from, start int) int {
+	region := strings.Split(stripComments(strings.Join(lines[from:start], "\n")), "\n")
+	for i := len(region) - 1; i >= 0; i-- {
+		if pouHeaderRe.MatchString(region[i]) {
+			return from + i
+		}
+	}
+	return from
 }
 
 // block is one FBD … END_FBD netlist body, by 0-based line index.
