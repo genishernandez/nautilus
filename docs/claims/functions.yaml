@@ -12,14 +12,12 @@ claims:
     tests:
       - go ./runtime TestLadderProgram
       - go ./lang/fbd TestSealInLatch
-      - go ./lang/fbd TestArrayElementFeedback
-    partial: true
+      - go ./lang/conformance TestConformance/ld-scan-order
     note: >-
-      The seal-in is proven end to end (TestLadderProgram, and FBD's
-      TestSealInLatch across scans with nothing re-seeded). Visible below in
-      the same scan is asserted for FBD statements (a[2] := a[1] in
-      TestArrayElementFeedback); a coil read as a contact on a following rung
-      in the same scan is not (see LD-014).
+      ld-scan-order runs the same four assignments in ST, LD and FBD: a coil
+      written by one rung is read as a contact by the next rung in the same
+      scan, and a coil written below its reader is seen by it one scan later.
+      The seal-in is run end to end by TestLadderProgram and TestSealInLatch.
 
   - id: FN-002
     claim: >-
@@ -73,14 +71,13 @@ claims:
     source: "#fbd-networks"
     tests:
       - go ./lang/fbd TestNetworksParseModelAndOrder
-      - go ./lang/fbd TestNetworkParseEdges
-    partial: true
+      - go ./lang/fbd TestBodyWithoutNetworkLinesIsOneNetwork
     note: >-
-      The implicit untitled first network is asserted. For a body with no
-      NETWORK line the test only checks that no networks are reported and
-      that `Network := A` is not read as a NETWORK line; nothing runs the
-      body and compares it with the same body before networks existed, so
-      "exactly the program it always was" (same execution) is not asserted.
+      The implicit untitled first network is asserted
+      (TestNetworksParseModelAndOrder). A body with no NETWORK line reports no
+      networks, transpiles to the same ST as the same statements under one
+      NETWORK line, and runs as one network (the FB call sorted ahead of its
+      reader, unlike the two-network control).
 
   - id: FN-006
     claim: >-
@@ -98,15 +95,12 @@ claims:
       as a line across bands.
     source: "#fbd-networks"
     tests:
+      - go ./lang/fbd TestCrossNetworkReadsDrawAsBoxesInTheReadingNetwork
       - go ./lang/fbd TestNetworksParseModelAndOrder
-    partial: true
     note: >-
-      Only the FB-output case is asserted: network 3's read of c1.Q gets a
-      variable box (v:c1.Q). The test does not check which network the box
-      is in or that no edge crosses bands, and has no wire read from another
-      network. TestGraphNetworksSplitInputChips and
-      TestGraphCrossNetworkCoilReadBecomesChip were removed: they have no
-      NETWORK lines and test the connectivity-derived chip convention.
+      A named wire and an FB instance output read from another network are
+      each a variable box in the reading network, and no edge joins nodes of
+      two networks; the same wire read inside its own network stays a line.
 
   # ── Ladder power flow ───────────────────────────────────────────────
   - id: FN-008
@@ -206,8 +200,7 @@ claims:
     source: "#ladder-power-flow"
     tests:
       - go ./lang/ld TestRungErrors
-    partial: true
-    note: Asserts the "right end" error for a mid-rung coil; the coil-before-FB case is not separate.
+      - go ./lang/ld TestCoilBeforeFunctionBlockRefused
 
   - id: FN-017
     claim: >-
@@ -217,11 +210,12 @@ claims:
       not a pass-through.
     source: "#ladder-power-flow"
     tests:
+      - go ./lang/ld TestNumericFunctionContactIsACompileError
       - go ./lang/ld TestFunctionContactExpressionArgs
-    partial: true
     note: >-
-      Comparison contacts compile. No test feeds a numeric function to a
-      contact and asserts the error text.
+      ADD(TempC, 0.0) as a contact fails with the page's two messages
+      ("operator AND on BOOL and REAL" in series, "cannot assign REAL to BOOL"
+      alone), and all six comparisons are run as contacts.
 
   - id: FN-018
     claim: >-
@@ -231,10 +225,12 @@ claims:
     source: "#ladder-power-flow"
     tests:
       - go ./lang/ld TestAssignmentElement
-    partial: true
+      - go ./lang/conformance TestConformance/ld-assign
     note: >-
-      Asserts the lowering (SEL on the rung condition) and that it compiles;
-      no test runs the rung and watches the value hold when unpowered.
+      ld-assign runs two chained assignments behind a contact: made every
+      powered scan, held while unpowered, and power passes through to the coil
+      after a second contact (A AND B). TestAssignmentElement asserts the SEL
+      lowering.
 
   - id: FN-019
     claim: >-
@@ -242,8 +238,13 @@ claims:
       (compiled as a SEL), so an array index in it must stay valid while the
       rung is false.
     source: "#ladder-power-flow"
-    tests: []
-    note: Gap. The SEL lowering is shown in FN-018 but nothing tests the out-of-range-index consequence.
+    tests:
+      - go ./lang/conformance TestLadderAssignmentIndexEvaluatedWhileRungFalse
+      - go ./lang/ld TestAssignmentElement
+    note: >-
+      With the rung FALSE, { Out := Arr[I] } faults the scan when I is out of
+      bounds and leaves Out alone when it is in range; TestAssignmentElement
+      asserts the SEL lowering.
 
   - id: FN-020
     claim: >-
@@ -1316,11 +1317,12 @@ claims:
       CTU counts rising CU edges, Q is TRUE when CV reaches PV, and R resets.
     source: "#standard-function-blocks"
     tests:
+      - go ./lang/conformance TestConformance/fb-ctu
       - go ./lang/st TestFBCTUCountsAndResets
-    partial: true
     note: >-
-      No conformance feature (ST/LD/FBD) exists for CTU as for the other
-      counters; edge-only counting and R dominance are not separately pinned.
+      fb-ctu (ST, LD, FBD) pins counting on rising edges only (held CU and its
+      fall do not count), Q on the scan CV reaches PV and staying TRUE past
+      it, R resetting CV and Q, and R dominating a same-scan CU edge.
 
   - id: FN-105
     claim: >-
@@ -1343,10 +1345,11 @@ claims:
       R_TRIG's Q is TRUE for exactly one scan on CLK's rising edge.
     source: "#standard-function-blocks"
     tests:
+      - go ./lang/conformance TestConformance/fb-r-trig
       - go ./lang/st TestFBRTrigDetectsRisingEdge
-      - go ./lang/conformance TestConformance/ld-coils/P coil is TRUE for exactly one scan on the rising edge
-    partial: true
-    note: There is no fb-r-trig conformance feature; the ST test is a single sequence and the ladder P coil uses the implicit R_TRIG.
+    note: >-
+      fb-r-trig (ST, LD, FBD) pins one scan on the rise, nothing while held or
+      on the fall, first scan with CLK TRUE, and a toggling CLK.
 
   - id: FN-108
     claim: >-
@@ -1373,10 +1376,12 @@ claims:
       outputs read as inst.Pin from any language.
     source: "#standard-function-blocks"
     tests:
-      - go ./lang/st TestUserFB_RetainsState
+      - go ./lang/conformance TestConformance/fb-instances
       - go ./lang/conformance TestConformance/fb-ton
-    partial: true
-    note: Per-instance independence for the built-in blocks is not separately asserted.
+    note: >-
+      fb-instances runs two CTU instances in ST, LD, FBD and SFC: each count
+      carries across idle scans, edges on one never move the other, and Q
+      (BOOL) and CV (INT) are read as inst.Pin in all four languages.
 
   # ── EN / ENO ────────────────────────────────────────────────────────
   - id: FN-112
@@ -1483,12 +1488,19 @@ claims:
       its power-out pin (Q, or Q1 for SR/RS).
     source: "#power-pins-in-ladder"
     tests:
-      - go ./lang/ld TestTranspileRungs
+      - go ./lang/conformance TestConformance/fb-ton
+      - go ./lang/conformance TestConformance/fb-tof
+      - go ./lang/conformance TestConformance/fb-tp
+      - go ./lang/conformance TestConformance/fb-ctu
+      - go ./lang/conformance TestConformance/fb-ctd
+      - go ./lang/conformance TestConformance/fb-r-trig
+      - go ./lang/conformance TestConformance/fb-f-trig
       - go ./lang/conformance TestConformance/fb-sr
       - go ./lang/conformance TestConformance/fb-rs
-      - go ./lang/conformance TestConformance/fb-ctd
-    partial: true
-    note: The ld column of the FB features covers TON/TOF/TP/CTD/CTUD/SR/RS/F_TRIG; CTU and R_TRIG power pins are not pinned.
+    note: >-
+      The ld column of each feature puts the block in a rung with power on its
+      power-in pin (IN, CU, CD, CLK, S1, S) and its coil after the block, so
+      the power-out pin (Q, Q1) is asserted against ST and FBD.
 
   - id: FN-120
     claim: >-
@@ -1498,12 +1510,13 @@ claims:
     source: "#power-pins-in-ladder"
     tests:
       - go ./lang/ld TestLadderFunctionBlockPowerPins
-    partial: true
+      - go ./lang/ld TestLadderFunctionBlockPowerOutOfENO
+      - go ./lang/ld TestLadderFunctionBlockPowerPinPreference
     note: >-
-      Power on the first BOOL input and out of the first BOOL output is
-      asserted. Not asserted: preferring a declared EN / ENO over the first
-      BOOL pin, and skipping an earlier BOOL input that the call binds by
-      name (in every fixture the first BOOL input is the unbound one).
+      First free BOOL input and first BOOL output (PowerPins); a declared EN
+      taking power over an earlier free BOOL input, ENO over the first BOOL
+      output, and an earlier BOOL input bound by name being skipped
+      (PowerPinPreference, run).
 
   - id: FN-121
     claim: >-
@@ -1522,12 +1535,13 @@ claims:
     source: "#power-pins-in-ladder"
     tests:
       - go ./lang/ld TestLadderFunctionBlockPowerPins
+      - go ./lang/ld TestLadderFunctionBlockWithNoBoolInputs
       - go ./lang/ld TestLadderFunctionBlockInOutStructPin
-    partial: true
     note: >-
-      Only the "every BOOL input bound by name" shape is asserted (refused
-      behind a contact, accepted and run on a rail-driven rung). A block
-      with no BOOL inputs at all ("or none") is not exercised.
+      Both shapes: every BOOL input bound by name (refused behind a contact,
+      run on a rail-driven rung) and a block with no BOOL input at all
+      (refused with the message behind a contact, called on every scan on the
+      rail).
 
   - id: FN-123
     claim: >-
@@ -1544,15 +1558,15 @@ claims:
       in the compile declares falls back to IN/Q.
     source: "#power-pins-in-ladder"
     tests:
+      - go ./lang/ld TestLadderFunctionBlockLowers
       - go ./lang/ld TestLadderFunctionBlockNested
       - go ./internal/project TestLadderLibraryProjectRuns
-    partial: true
+      - go ./lang/ld TestLadderUndeclaredBlockFallsBackToINQ
     note: >-
-      Power pins resolved from another file (Debounce's IN/OUT) and from
-      project libraries (PumpSeq, Scale) are asserted. The IN/Q fallback for
-      an undeclared type has no test. TestLadderLibraryComposes and
-      TestLadderFunctionBlockFromST were replaced: they test composition and
-      an ST call, not pin resolution.
+      Pins resolved from this file (PumpSeq's Start in
+      TestLadderFunctionBlockLowers), another file (Debounce's IN/OUT) and
+      project libraries; an undeclared type takes power on IN and passes it on
+      from Q.
 
   # ── PID ─────────────────────────────────────────────────────────────
   - id: FN-125
@@ -1694,14 +1708,13 @@ claims:
     source: "#arrays-of-instances"
     tests:
       - go ./lang/st TestFBInstanceArray
+      - go ./lang/st TestFBInstanceArrayVariableIndexRuns
       - go ./lang/ld TestFBInstanceArrayInLadder
-    partial: true
+      - go ./lang/ld TestFBInstanceArrayVariableIndexInLadderRuns
     note: >-
-      In ST two elements behave as separate instances in one scan
-      (Timers[0] done, Timers[1] not); a rung lowers to an indexed call and
-      compiles. Not asserted: an element's state carried across scans, and a
-      variable index at run time. TestArrayCompilesEndToEnd was removed: it
-      is about arrays of REAL, not of instances.
+      In ST and in a rung, a TON element called by a variable index keeps its
+      own elapsed time across scans in which the index points elsewhere, and
+      elements never called stay idle.
 
   - id: FN-137
     claim: >-
@@ -1890,12 +1903,11 @@ claims:
     tests:
       - go ./lang/ld TestLadderFunctionBlockRuns
       - go ./lang/ld TestLadderFunctionBlockLowers
-    partial: true
+      - go ./lang/ld TestLadderFunctionBlockTwoInstancesIndependent
     note: >-
-      A ladder block lowers to a FUNCTION_BLOCK and one instance keeps its
-      seal-in and its TON across scans. Two instances of one block running
-      independently are not tested. TestLadderFunctionBlockNested was
-      removed from this claim: nesting is not what the page promises here.
+      Two PumpSeq instances in one program each hold their own seal-in and
+      their own t1, started three seconds apart and finishing three seconds
+      apart.
 
   - id: FN-154
     claim: >-
@@ -1913,11 +1925,10 @@ claims:
     tests:
       - go ./lang/ld TestLadderFunctionBlockRuns
       - go ./lang/ld TestLadderFunctionBlockFromST
-    partial: true
+      - go ./internal/project TestLadderAndFBDLibrariesCalledFromEveryLanguage
     note: >-
-      Ladder (power on Start, Run => PumpRun) and ST calls are run and
-      asserted; an FBD call of a ladder block is not. TestLadderOutputBinding
-      was removed: it binds a TON's ET, not a ladder block's output.
+      Ladder (power on Start, Run => PumpRun), ST and FBD programs each call
+      the ladder block and run its seal-in.
 
   - id: FN-156
     claim: >-
@@ -1945,8 +1956,11 @@ claims:
     tests:
       - go ./internal/project TestLadderLibraryComposes
       - go ./internal/project TestLadderLibraryProjectRuns
-    partial: true
-    note: .ld is covered; an .fbd library is not.
+      - go ./internal/project TestLadderAndFBDLibrariesCalledFromEveryLanguage
+    note: >-
+      A PROGRAM-less .ld and a PROGRAM-less .fbd library are both composed,
+      and ST, LD, FBD and SFC tasks of one project each call both libraries'
+      blocks.
 
   - id: FN-158
     claim: >-

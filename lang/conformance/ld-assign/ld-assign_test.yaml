@@ -1,0 +1,42 @@
+# The assignment element. Y := X and N := N + 1 are made on every scan the
+# rung has power at that point (A), and hold their values while it has
+# not; power passes through unchanged, so the coil after B is A AND B.
+# Every step asserts st_ and ld_ together.
+tests:
+  - name: unpowered, the assignments are not made
+    given: { X: 7 }
+    steps:
+      - scans: 3
+        expect: { st_Y: 0, ld_Y: 0, st_N: 0, ld_N: 0, st_P: false, ld_P: false }
+
+  - name: powered, both chained assignments are made every scan
+    given: { X: 7 }
+    steps:
+      - given: { A: true }
+        scans: 1
+        expect: { st_Y: 7, ld_Y: 7, st_N: 1, ld_N: 1 }
+      - given: { X: 9 }
+        scans: 2
+        expect: { st_Y: 9, ld_Y: 9, st_N: 3, ld_N: 3 }
+
+  - name: once power is gone the assigned values hold
+    given: { X: 7 }
+    steps:
+      - given: { A: true }
+        scans: 2
+        expect: { st_Y: 7, ld_Y: 7, st_N: 2, ld_N: 2 }
+      - given: { A: false, X: 42 }
+        scans: 3
+        expect: { st_Y: 7, ld_Y: 7, st_N: 2, ld_N: 2 }
+
+  - name: power passes through the assignment unchanged to the coil
+    steps:
+      - given: { A: true, B: false }
+        scans: 1
+        expect: { st_P: false, ld_P: false, st_N: 1, ld_N: 1 }
+      - given: { B: true }
+        scans: 1
+        expect: { st_P: true, ld_P: true, st_N: 2, ld_N: 2 }
+      - given: { A: false }
+        scans: 1
+        expect: { st_P: false, ld_P: false, st_N: 2, ld_N: 2 }
