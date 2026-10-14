@@ -39,9 +39,7 @@ claims:
     tests:
       - go ./internal/project TestManifestTagsAreImplicit
       - go ./lang/st TestLowerImplicitGlobals
-    partial: true
-    note: >-
-      Typing from type: is asserted; typing from init: is not (the result does not depend on the init-derived type).
+      - go ./internal/project TestInitTypesAnImplicitTag
 
   - id: ST-004
     claim: >-
@@ -53,10 +51,7 @@ claims:
       - go ./lang/st TestTagTypesAndUntypedTags
     partial: true
     note: >-
-      Agreement with a tag's type: is asserted. For a tag typed only by its
-      init:, which the page also covers, no test asserts agreement;
-      TestTagTypesAndUntypedTags asserts the opposite (an init-inferred type
-      never overrides a VAR_EXTERNAL declaration).
+      Agreement with a tag's type: is asserted. For a tag typed only by its init:, which the page also covers, the page and the code disagree: a number init types the tag REAL but a VAR_EXTERNAL of an integer kind is accepted (guides/tag-model documents this), so only a BOOL-vs-number mismatch is refused. TestTagTypesAndUntypedTags asserts the opposite of the page (an init-inferred type never overrides a VAR_EXTERNAL declaration).
 
   - id: ST-005
     claim: >-
@@ -100,8 +95,7 @@ claims:
     source: "#declarations"
     tests:
       - go ./lang/st TestLowerGlobalVar
-    partial: true
-    note: Only VAR_GLOBAL-as-tag is exercised; no test compares the two forms.
+      - go ./lang/st TestVarGlobalAndVarExternalResolveIdentically
 
   - id: ST-009
     claim: >-
@@ -174,11 +168,7 @@ claims:
     tests:
       - go ./lang/st TestFileScopeVarGlobalAheadOfProgram
       - go ./internal/project TestGVLComposesIntoEveryProgram
-    partial: true
-    note: >-
-      TestGVLComposesIntoEveryProgram asserts two programs share the GVL
-      globals through the tag store and that an undeclared one starts at
-      zero; the created tag's role being state is not asserted.
+      - go ./internal/project TestGVLUndeclaredGlobalBecomesAStateTag
 
   - id: ST-015
     claim: >-
@@ -188,8 +178,7 @@ claims:
     tests:
       - go ./lang/st TestKeywordAndTypeNames
       - go ./lang/st TestResolveTypeName
-    partial: true
-    note: Names are listed and resolved; WSTRING/CHAR/WCHAR runtime behaviour is untested.
+      - go ./lang/st TestWideAndCharTypesAreAcceptedAsString
 
   - id: ST-016
     claim: >-
@@ -230,11 +219,7 @@ claims:
     tests:
       - go ./lang/st TestConstantInBoundsAndInitialValues
       - go ./lang/conformance TestConformance/st-global-constants/an INT constant from a constant expression sizes an array and bounds a loop
-    partial: true
-    note: >-
-      Literal and named-constant bounds are asserted (the constant itself
-      defined by arithmetic); arithmetic written in the bound itself
-      (ARRAY[1..N*2]) is not.
+      - go ./lang/st TestArrayBoundArithmeticInTheBound
 
   - id: ST-020
     claim: >-
@@ -248,8 +233,7 @@ claims:
       - go ./lang/st TestEnumAmbiguousMemberResolvedByContext
       - go ./lang/conformance TestConformance/st-enum
       - go ./runtime TestEnumTagsRenderByName
-    partial: true
-    note: Struct and enum are covered; no test for a TYPE alias of another type.
+      - go ./lang/st TestTypeAliasOfAnotherType
 
   - id: ST-021
     claim: >-
@@ -260,13 +244,7 @@ claims:
     tests:
       - go ./lang/st TestExternalStructFieldAssignment
       - go ./lang/st TestVarInOutExternalStructField
-    partial: true
-    note: >-
-      Field assignment to a VAR_EXTERNAL struct is asserted against a fake
-      host; a whole-struct write to the tag and the member-write path into
-      the runtime tag store are not. (TestLowerNestedAggregateAssign, a local
-      array, and runtime TestSetPathNestedMember, the SetPath API rather than
-      an ST write, were dropped as not about this claim.)
+      - go ./runtime TestStructTagWrittenFieldwiseAndWhole
 
   - id: ST-022
     claim: >-
@@ -280,8 +258,7 @@ claims:
       - go ./lang/st TestParseTimeLiterals
       - go ./lang/st TestLowerBasedLiteral
       - go ./lang/ir TestParseDuration
-    partial: true
-    note: No test for the exponent literal form (1.5e3).
+      - go ./lang/st TestExponentLiteral
 
   - id: ST-023
     claim: Block comments (* ... *) nest, and // comments to end of line.
@@ -298,8 +275,7 @@ claims:
     source: "#declarations"
     tests:
       - go ./lang/st TestParseVarRetainConstant
-    partial: true
-    note: Parsing only; "changes nothing at runtime" is not asserted.
+      - go ./lang/st TestRetainChangesNothingAtRuntime
 
   - id: ST-025
     claim: >-
@@ -327,10 +303,7 @@ claims:
       - go ./lang/st TestLowerContinueSkipsEven
       - go ./lang/st TestLowerRepeatUntil
       - go ./lang/ir TestReturnEarly
-    partial: true
-    note: >-
-      No test runs a FOR loop with a BY step; RETURN is tested only on
-      hand-built IR, never from an ST program.
+      - go ./lang/st TestForByStepAndReturnFromST
 
   - id: ST-027
     claim: >-
@@ -361,8 +334,7 @@ claims:
     tests:
       - go ./lang/st TestLowerScalarAssign
       - go ./lang/st TestLowerIfElsif
-    partial: true
-    note: Exercised incidentally; no dedicated test for the = and <> operators.
+      - go ./lang/st TestEqualityAndInequalityOperators
 
   - id: ST-030
     claim: >-
@@ -385,21 +357,15 @@ claims:
       Operator precedence, tightest first: unary NOT and -; * / MOD; + -;
       the comparisons; AND; XOR; OR.
     source: "#statements-and-expressions"
-    tests: []
-    note: >-
-      The ST parser has no precedence test; the only precedence tests are the
-      ladder expression parser's (a different grammar).
+    tests:
+      - go ./lang/st TestOperatorPrecedence
 
   - id: ST-032
     claim: An INT widens to REAL where one is expected.
     source: "#statements-and-expressions"
     tests:
       - go ./lang/st TestLowerIntToRealPromotion
-    partial: true
-    note: >-
-      Only an INT in REAL arithmetic assigned to a REAL is asserted; an INT
-      passed to a REAL parameter is not. (ir TestSeedFromInitAcceptsIntForReal
-      was dropped: it is about manifest init seeding, not ST.)
+      - go ./lang/st TestIntWidensToRealParameter
 
   - id: ST-033
     claim: >-
@@ -408,11 +374,7 @@ claims:
     source: "#statements-and-expressions"
     tests:
       - go ./lang/st TestConversionCompileErrors
-    partial: true
-    note: >-
-      Only passing a REAL to an INT parameter ("cannot pass REAL as INT") is
-      asserted; no test assigns a REAL expression directly to an INT
-      variable. (TestLowerAssignRealToBool, REAL into BOOL, was dropped.)
+      - go ./lang/st TestRealIntoIntAssignmentIsACompileError
 
   - id: ST-034
     claim: >-
@@ -432,12 +394,7 @@ claims:
       - go ./lang/ir TestConversionMatrixShape
       - go ./lang/st TestConversionMatrixThroughST
       - go ./lang/conformance TestConformance/st-conversions-matrix
-    partial: true
-    note: >-
-      Claim text updated to the page, which now limits the matrix to BOOL,
-      the integer kinds, REAL, LREAL, TIME, LTIME and STRING; coverage was
-      not re-audited. The absence of WSTRING_TO_, CHAR_TO_ and WCHAR_TO_ is
-      not asserted.
+      - go ./lang/st TestNoWideOrCharConversionFunctions
 
   - id: ST-036
     claim: >-
@@ -496,11 +453,7 @@ claims:
       - go ./lang/st TestUserFunc_NoState
       - go ./lang/st TestUserFB_DeclareAndCall
       - go ./lang/st TestUserFB_RetainsState
-    partial: true
-    note: >-
-      "Each instance owns its slots" is not asserted: every user-FB test uses
-      a single instance. (TestUserFunc_NamedArgs was dropped as not about
-      this claim.)
+      - go ./lang/st TestUserFBInstancesOwnTheirSlots
 
   - id: ST-042
     claim: >-
@@ -510,10 +463,7 @@ claims:
       - go ./lang/st TestFBStructPins
       - go ./lang/st TestFBStructPinFromLibraryFile
       - go ./lang/st TestEnumInStructsPinsArrays
-    partial: true
-    note: >-
-      Elementary, STRUCT and enumeration pins are asserted; no test uses an
-      ARRAY or a TYPE alias as a pin.
+      - go ./lang/st TestFBArrayAndAliasPins
 
   - id: ST-043
     claim: >-
@@ -533,11 +483,7 @@ claims:
     tests:
       - go ./runtime TestVarInOutStructTagRoundTrip
       - go ./lang/st TestVarInOutExternalStructTag
-    partial: true
-    note: >-
-      The round trip is asserted (the block sees its own write-back next
-      scan); that it lands as one whole-struct write rather than per-field
-      writes is not observed by either test.
+      - go ./lang/st TestVarInOutExternalStructWritesBackAsOneWholeStruct
 
   - id: ST-045
     claim: >-
@@ -561,8 +507,7 @@ claims:
       - go ./lang/st TestFBStructPinFromLibraryFile
       - go ./lang/ld TestLadderFunctionBlockFromST
       - go ./lang/st TestGlobalConstantsLibraryAlone
-    partial: true
-    note: Composition order (ST libraries first) is not asserted on its own.
+      - go ./internal/stproject TestLibrariesComposeSTFirstThenGraphical
 
   - id: ST-047
     claim: >-
@@ -570,12 +515,9 @@ claims:
       exits non-zero when it finds any.
     source: "#tooling"
     tests:
+      - go ./cmd/naut TestCheckReportsIdentifierColumn
       - go ./lang/st TestParseErrorPos
       - go ./lang/st TestLowerErrorPinsOffendingName
-    partial: true
-    note: >-
-      Positions are tested at the compiler level; the CLI's output format and
-      exit code are not asserted from this page.
 
   - id: ST-048
     claim: >-
@@ -587,12 +529,7 @@ claims:
       - go ./runtime TestSwapWarmCarriesRetainedState
       - go ./runtime TestSwapWarmCompileErrorLeavesRunning
       - go ./server TestProgramOnlineEditFlow
-    partial: true
-    note: >-
-      A failed download leaving the running program is asserted through PUT
-      /api/program, and SwapWarm carrying VAR state is asserted on the
-      runtime; no test downloads through the endpoint and checks that state
-      carried.
+      - go ./server TestProgramDownloadCarriesStateAndFailedDownloadChangesNothing
 
   - id: ST-049
     claim: >-
@@ -611,10 +548,10 @@ claims:
     source: "#not-supported"
     tests:
       - go ./cmd/naut TestCheckRejects/REF_TO
+      - go ./cmd/naut TestCheckRejectsDereference
     partial: true
     note: >-
-      A REF_TO declaration is refused by naut check. The dereference operator
-      (^) is never tried, so its rejection is not asserted.
+      A REF_TO declaration is refused by naut check. The dereference operator (^) is accepted today: the ST lexer drops characters it does not know, so r^ reads as r and a program using it exits 0. TestCheckRejectsDereference asserts the page and skips on that bug until ^ is rejected.
 
   - id: ST-051
     claim: >-
