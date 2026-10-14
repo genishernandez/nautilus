@@ -323,6 +323,12 @@ func (m Manifest) Validate() error {
 				errs = append(errs, fmt.Errorf("tag %s: %w", t.Name, err))
 				continue
 			}
+			if b, isBool := mb.Eq.(bool); isBool {
+				// SNMP has no boolean type: an unquoted YAML true compares
+				// as "true", which no INTEGER ever reads as.
+				errs = append(errs, fmt.Errorf("tag %s: member %s: eq: %t is a YAML bool, and SNMP has no booleans — an INTEGER never matches it; write the number (TruthValue true is eq: 1), or quote it (eq: \"%t\") for a STRING", t.Name, mname, b, b))
+				continue
+			}
 			switch {
 			case mb.IsStatic() && mb.OID != "":
 				errs = append(errs, fmt.Errorf("tag %s: member %s: oid: with const/derived — a static member polls nothing", t.Name, mname))

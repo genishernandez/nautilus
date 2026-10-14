@@ -129,4 +129,12 @@ func TestPollReconnectResetsRateCounters(t *testing.T) {
 			t.Fatalf("%s = %v after reconnect: not computed from post-outage samples alone", member, r)
 		}
 	}
+
+	// A park is no failed fetch, so wasDown never sees it: the source
+	// loop's OnReconnect is what restarts the rates on the way back.
+	fs.bump(1e9)
+	d.onReconnect("NODE1")
+	if got := step(false); len(got) != 0 {
+		t.Fatalf("first scrape after a park must be a warm-up, got %v — a rate spanning the park", got)
+	}
 }

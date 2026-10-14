@@ -167,6 +167,9 @@ func New(m Manifest, opts ...Option) (*Driver, error) {
 		Assignments: d.assignments,
 		Log:         d.log,
 		Poll:        d.poll,
+		// Back from a park (or an outage): every rate restarts, none is
+		// computed across a gap the driver never saw.
+		OnReconnect: d.onReconnect,
 		// Write stays nil: scraping is one-way (docs/design/it-drivers.md
 		// §7 is generic across the three drivers, but Prometheus has no
 		// wire path to write anything down). hw.NewBase already refuses a

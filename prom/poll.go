@@ -324,6 +324,21 @@ func aggregate(agg string, matches []Sample) (float64, error) {
 
 // ── per-source runtime state ────────────────────────────────────────────
 
+// onReconnect is hw.Config.OnReconnect: a source back from a park — which
+// wasDown never sees, since a parked source is not polled — or an outage
+// forgets every counter's last sample.
+func (d *Driver) onReconnect(sourceID string) {
+	sr := d.sources[sourceID]
+	if sr == nil {
+		return
+	}
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	for _, c := range sr.counters {
+		c.Reset()
+	}
+}
+
 // counterFor returns key's counter, creating it on first use.
 func (sr *sourceRuntime) counterFor(key string) *hw.Counter {
 	sr.mu.Lock()

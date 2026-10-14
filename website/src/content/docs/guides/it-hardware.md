@@ -73,7 +73,8 @@ be on; MD5 and DES are accepted with a warning.
 ## Quality, rates and companions
 
 - **`<id>__Online`** is true while the source answered within
-  `stale-after` (default three intervals). A device that stops answering
+  `stale-after` (default three intervals of the fastest scan class it
+  polls). A device that stops answering
   keeps its last values, marked Stale — never a silent zero — so interlock
   on `__Online` before trusting a device's tags, and use it as the alarm
   rules' `enable:` so a dark device's alarms are Suppressed instead of

@@ -116,6 +116,20 @@ func TestBindingErrors(t *testing.T) {
 			t.Errorf("case %d validated; want an error", i)
 		}
 	}
+	// Combinations Apply cannot honour say which keys clash.
+	clash := []struct {
+		b    Binding
+		f    Field
+		want string
+	}{
+		{Binding{Rate: true, Map: map[string]any{"1": 1.0}}, field("X", ir.TypeReal), "rate: and map:"},
+		{Binding{Rate: true, Eq: 1}, field("X", ir.TypeBool), "eq: and rate:"},
+	}
+	for _, c := range clash {
+		if err := c.b.Validate(c.f); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: err = %v, want it to name %q", c.b, err, c.want)
+		}
+	}
 	if !(Binding{Const: 1}).IsStatic() || !(Binding{Derived: "A"}).IsStatic() || (Binding{}).IsStatic() {
 		t.Error("IsStatic")
 	}

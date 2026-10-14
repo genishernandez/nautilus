@@ -10,6 +10,7 @@
 //	OBJECT IDENTIFIER                → RawString "1.3.6.1.4.1.9" (no leading dot,
 //	                                   the manifest's own OID spelling)
 //	IpAddress                        → RawString "192.0.2.1"
+//	Opaque Float/Double (net-snmp)   → RawFloat
 //
 // noSuchObject / noSuchInstance / endOfMibView are not values: the caller
 // marks the tag Bad.
@@ -32,6 +33,9 @@ func RawOf(v walk.Varbind) (raw hw.Raw, ok bool, err error) {
 	case walk.Counter32, walk.Gauge32, walk.TimeTicks, walk.Counter64:
 		return hw.RawUintVal(v.Uint), true, nil
 	case walk.OctetString, walk.Opaque:
+		if f, _, isFloat := walk.OpaqueFloat(v.Bytes); isFloat && v.Type == walk.Opaque {
+			return hw.RawFloatVal(f), true, nil
+		}
 		if walk.Printable(v.Bytes) {
 			return hw.RawStringVal(string(bytes.TrimRight(v.Bytes, "\x00"))), true, nil
 		}

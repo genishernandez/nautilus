@@ -75,6 +75,8 @@ func TestDecodeGoldenResponse(t *testing.T) {
 		vb("1.3.6.1.2.1.2.2.1.6.1", tlv(0x04, []byte{0x00, 0x00, 0x5e, 0x00, 0x53, 0x01})),                       // a MAC
 		vb("1.3.6.1.2.1.1.2.0", tlv(0x06, oidBytes("1.3.6.1.4.1.32473.1.28"))),                                   // OID
 		vb("1.3.6.1.2.1.4.20.1.1.192.0.2.1", []byte{0x40, 0x04, 192, 0, 2, 1}),                                   // IpAddress
+		vb("1.3.6.1.4.1.2021.10.1.6.1", tlv(0x44, []byte{0x9f, 0x78, 0x04, 0x3f, 0xc0, 0x00, 0x00})),             // net-snmp Opaque Float 1.5
+		vb("1.3.6.1.4.1.2021.10.1.6.2", tlv(0x44, []byte{0x9f, 0x79, 0x08, 0x3f, 0xd0, 0, 0, 0, 0, 0, 0})),       // net-snmp Opaque Double 0.25
 		vb("1.3.6.1.2.1.2.2.1.8.99", []byte{0x81, 0x00}),                                                         // noSuchInstance
 		vb("1.3.6.1.2.1.99", []byte{0x82, 0x00}),                                                                 // endOfMibView
 	}
@@ -103,6 +105,8 @@ func TestDecodeGoldenResponse(t *testing.T) {
 		{hw.RawStringVal("00:00:5E:00:53:01"), true},
 		{hw.RawStringVal("1.3.6.1.4.1.32473.1.28"), true},
 		{hw.RawStringVal("192.0.2.1"), true},
+		{hw.RawFloatVal(1.5), true},
+		{hw.RawFloatVal(0.25), true},
 		{hw.Raw{}, false},
 		{hw.Raw{}, false},
 	}

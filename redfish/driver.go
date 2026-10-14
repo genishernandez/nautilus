@@ -164,6 +164,7 @@ func New(m Manifest, opts ...Option) (*Driver, error) {
 		Assignments: d.assign,
 		Poll:        d.poll,
 		Log:         d.log,
+		OnReconnect: d.onReconnect,
 	}
 	for _, s := range m.Sources {
 		cfg.Sources = append(cfg.Sources, hw.SourceConfig{
@@ -360,6 +361,15 @@ func (d *Driver) transport(s *source) (Fetcher, error) {
 	}
 	s.fetcher = f
 	return f, nil
+}
+
+// onReconnect is hw.Config.OnReconnect: a source back from a park (or an
+// outage) must not compute a rate across the gap it never observed. It runs
+// on the source's loop goroutine, as poll does, so reset needs no lock.
+func (d *Driver) onReconnect(sourceID string) {
+	if s := d.srcs[sourceID]; s != nil {
+		s.reset = true
+	}
 }
 
 // poll is the hw.PollFunc: fetch each resource of (source, class) once and

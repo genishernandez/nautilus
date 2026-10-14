@@ -404,7 +404,7 @@ parked ──(Enable tag true / none)──▶ connecting ──first full poll 
   and counts an error; three consecutive failed polls → `error` state →
   backoff, tags **Stale**, values hold. Unreachable at start → tags
   **NotConnected** until the first delivery.
-- **`stale-after`** (default 3× the interval): a source whose last complete
+- **`stale-after`** (default 3× the fastest polled class): a source whose last complete
   poll is older than this reports Stale even while "connected" — a hung
   agent that accepts the socket and never answers is the Modbus lesson
   ("connected" and "heard from" are different facts).
