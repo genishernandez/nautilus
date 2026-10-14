@@ -55,6 +55,12 @@ type Type struct {
 	// still a DINT in a diagnostic and has 32 bits to address (#222). Empty
 	// for the canonical singletons. Equal ignores it.
 	Name string
+	// Computed, on a named TypeInt, marks the result of integer arithmetic
+	// (DINT + DINT is a computed DINT, #326) rather than a declared
+	// variable. Arithmetic never wraps, so the value may hold more bits than
+	// the name has; a conversion reads it as LINT and keeps them all, where
+	// a declared DINT is read as a DINT. Equal ignores it.
+	Computed bool
 	// Enum, on a TypeInt, makes this an enumerated type (#238): the value
 	// is the member's integer, and the type carries the member names. Two
 	// enum types are Equal only when they are the same declaration.
@@ -125,6 +131,16 @@ var intTypes = func() map[string]*Type {
 	return m
 }()
 
+// exprIntTypes are intTypes' computed twins: the type of an arithmetic
+// result, one singleton per width.
+var exprIntTypes = func() map[string]*Type {
+	m := map[string]*Type{}
+	for n := range intTypes {
+		m[n] = &Type{Kind: TypeInt, Name: n, Computed: true}
+	}
+	return m
+}()
+
 // IntNamed is the integer type declared as name (DINT, WORD, ...); nil
 // when name is not an IEC integer type. Every one is TypeInt at run time.
 func IntNamed(name string) *Type { return intTypes[name] }
@@ -146,6 +162,108 @@ func (t *Type) BitWidth() int {
 		return 32
 	}
 	return 64
+}
+
+// intClass sorts the declared integer names into the three families the
+// common-type rule ranks within: signed (SINT..LINT), unsigned
+// (USINT..ULINT) and bit strings (BYTE..LWORD).
+func intClass(name string) (class byte, width int) {
+	switch name {
+	case "SINT":
+		return 's', 8
+	case "INT":
+		return 's', 16
+	case "DINT":
+		return 's', 32
+	case "LINT":
+		return 's', 64
+	case "USINT":
+		return 'u', 8
+	case "UINT":
+		return 'u', 16
+	case "UDINT":
+		return 'u', 32
+	case "ULINT":
+		return 'u', 64
+	case "BYTE":
+		return 'b', 8
+	case "WORD":
+		return 'b', 16
+	case "DWORD":
+		return 'b', 32
+	case "LWORD":
+		return 'b', 64
+	}
+	return 0, 0
+}
+
+var intByClass = map[byte]map[int]string{
+	's': {8: "SINT", 16: "INT", 32: "DINT", 64: "LINT"},
+	'u': {8: "USINT", 16: "UINT", 32: "UDINT", 64: "ULINT"},
+	'b': {8: "BYTE", 16: "WORD", 32: "DWORD", 64: "LWORD"},
+}
+
+// CommonInt is the type of integer arithmetic (+ - * / MOD, and the ADD,
+// SUB, MUL, DIV and MOD blocks) on two integer operands: the narrowest type
+// both widen to without loss, IEC 61131-3's implicit widening (#326).
+//
+//   - The same type gives that type: DINT + DINT is DINT.
+//   - An operand with no declared width (a literal, or the result of a
+//     function that has none) takes the other's type: DINT + 1 is DINT.
+//   - Two signed, two unsigned or two bit-string types give the wider:
+//     INT + DINT is DINT, BYTE * WORD is WORD.
+//   - Signed with unsigned gives the narrowest signed type that holds both:
+//     INT + USINT is INT, INT + UINT is DINT, DINT + UDINT is LINT. A ULINT
+//     with a signed type has no such type; it gives LINT.
+//   - A bit string with a number counts as the unsigned type of its width
+//     (WORD + INT is DINT, as UINT + INT is).
+//
+// Neither operand an integer, or both undeclared, gives the canonical IntT.
+// The result is Computed: its value is never wrapped to the width, so a
+// conversion of it keeps every bit (TO_DINT(x + x) with INT x = 30000 is
+// 60000), as a conversion of an undeclared-width expression always has.
+func CommonInt(lt, rt *Type) *Type {
+	if !lt.IsInteger() || !rt.IsInteger() {
+		return IntT
+	}
+	switch {
+	case lt.Name == "" && rt.Name == "":
+		return IntT
+	case lt.Name == "":
+		return exprIntTypes[rt.Name]
+	case rt.Name == "" || lt.Name == rt.Name:
+		return exprIntTypes[lt.Name]
+	}
+	lc, lw := intClass(lt.Name)
+	rc, rw := intClass(rt.Name)
+	if lc == 0 || rc == 0 {
+		return IntT
+	}
+	if lc != rc {
+		// A bit string mixed with a number reads as its unsigned width.
+		if lc == 'b' {
+			lc = 'u'
+		}
+		if rc == 'b' {
+			rc = 'u'
+		}
+	}
+	name := "LINT"
+	switch {
+	case lc == rc:
+		name = intByClass[lc][max(lw, rw)]
+	default:
+		sw, uw := lw, rw
+		if lc == 'u' {
+			sw, uw = rw, lw
+		}
+		if sw > uw {
+			name = intByClass['s'][sw]
+		} else if uw < 64 {
+			name = intByClass['s'][2*uw]
+		}
+	}
+	return exprIntTypes[name]
 }
 
 // Singleton scalar types. Use these instead of allocating new *Type for every reference.

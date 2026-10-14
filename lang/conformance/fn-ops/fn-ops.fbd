@@ -6,10 +6,15 @@ VAR_EXTERNAL
     R, RX, RY : REAL;
     T1, T2 : TIME;
     S : STRING;
+    D1, D2 : DINT;
     fbd_AND, fbd_OR, fbd_XOR, fbd_NOT, fbd_AND3, fbd_OR3, fbd_XOR3, fbd_MOVEB, fbd_GT, fbd_GE, fbd_LT, fbd_LE, fbd_EQ, fbd_NE, fbd_RGT, fbd_RGE, fbd_RLT, fbd_RLE, fbd_REQ, fbd_RNE, fbd_TGT, fbd_TGE, fbd_TLT, fbd_TLE, fbd_TEQ, fbd_TNE : BOOL;
     fbd_ADD3, fbd_MUL3, fbd_SUB, fbd_DIV, fbd_MOD, fbd_MOVEI : INT;
     fbd_ADDR, fbd_MULR, fbd_SUBR, fbd_MOVER : REAL;
     fbd_MOVES : STRING;
+    fbd_ADDD : DINT;
+    fbd_ADDDEQ : BOOL;
+    fbd_ADDDINT : INT;
+    fbd_ADDDLINT : LINT;
 END_VAR
 FBD
   fbd_AND  := AND(A, B)
@@ -49,5 +54,9 @@ FBD
   fbd_TLE := LE(T1, T2)
   fbd_TEQ := EQ(T1, T2)
   fbd_TNE := NE(T1, T2)
+  fbd_ADDD     := ADD(D1, D2)
+  fbd_ADDDEQ   := EQ(ADD(D1, D2), 80000)
+  fbd_ADDDINT  := TO_INT(ADD(D1, D2))
+  fbd_ADDDLINT := TO_LINT(ADD(D1, D2))
 END_FBD
 END_PROGRAM

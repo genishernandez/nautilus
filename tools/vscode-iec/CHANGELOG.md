@@ -82,6 +82,13 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   stray top-level tag. It is now a 400 that names the tag. Needs a `naut`
   newer than 0.16.2.
 
+- **Integer arithmetic has the operands' width in diagnostics.** `d1 + d2`
+  on two DINTs was reported as an INT ("cannot assign INT to STRING"); it
+  is now a DINT, and `INT + DINT` a DINT, `INT + UINT` a DINT, `DINT + 1`
+  a DINT, the same for the ADD, SUB, MUL, DIV and MOD blocks. Only the type
+  a diagnostic names changes: what compiles, and every value, is as
+  before. (#326) Needs a `naut` newer than 0.16.2.
+
 - **Text after `END_PROGRAM` is an error, not silently ignored.** A
   `FUNCTION_BLOCK` (or anything else) placed after `END_PROGRAM` was never
   compiled, yet the file showed no diagnostics and `naut check` passed it.

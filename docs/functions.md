@@ -405,10 +405,31 @@ means the block accepts 2+ inputs (the `+` pin in the FBD editor).
 | `SUB` | 2 numeric | common type | difference |
 | `MUL` | n-ary numeric | common type | product |
 | `DIV` | 2 numeric | common type | quotient; integer and REAL ÷0 yield 0 and the scan keeps running. This is a deliberate deviation (the standard calls it an error; Codesys and TIA yield IEEE ±Inf) so a bad divisor cannot propagate Inf/NaN through a control loop — and because every seam on the tag bus (`/api/state`, the SSE stream, retained state, `*_test.yaml`) is JSON, which cannot carry Inf or NaN. The fault is not silent: every ÷0 bumps the program's **`divZero`** counter in the scan stats (`/api/state` → `stats.divZero`, controller-wide, counted since start), the way Logix raises `S:V` and keeps running |
-| `MOD` | 2 INT | INT | remainder; ÷0 yields 0 and counts in `divZero` |
+| `MOD` | 2 integers | common type | remainder; ÷0 yields 0 and counts in `divZero` |
 | `MOVE` | 1 any | same | pass-through assignment (FBD wiring aid) |
 | `GT`, `GE`, `LT`, `LE` | 2 comparable | **BOOL** | ordering (numeric or TIME) |
 | `EQ`, `NE` | 2 comparable | **BOOL** | equality |
+
+**The common type** of integers (for `ADD`, `SUB`, `MUL`, `DIV`, `MOD` and
+the ST operators `+ - * / MOD`) is the narrowest type both arguments widen
+to without loss, the standard's implicit widening:
+
+- the same type gives that type: `DINT + DINT` is a `DINT`;
+- a literal takes the other argument's type: `d + 1` is a `DINT` (two
+  literals give the generic integer);
+- two signed, two unsigned or two bit-string types give the wider:
+  `INT + DINT` is a `DINT`, `USINT + UINT` a `UINT`, `BYTE + WORD` a `WORD`;
+- signed with unsigned gives the narrowest signed type that holds both:
+  `INT + USINT` is an `INT`, `INT + UINT` a `DINT`, `DINT + UDINT` a
+  `LINT`; a `ULINT` with a signed type has none, and gives `LINT`;
+- a bit string with a number counts as the unsigned type of its width:
+  `WORD + INT` is a `DINT`, as `UINT + INT` is.
+
+The type is what a diagnostic names (`s := d1 + d2` into a STRING says
+"cannot assign DINT to STRING"). It does not cut the value: arithmetic
+never wraps (see [Types](#types)), and `TO_<type>` of an expression reads
+every bit, so `TO_INT(d1 + d2)` with both at 40000 is 14464, the same as
+`DINT_TO_INT(80000)`. An integer with a REAL is a REAL.
 
 The comparison row is the ladder-relevant one: those six are the
 functions that can gate power directly.

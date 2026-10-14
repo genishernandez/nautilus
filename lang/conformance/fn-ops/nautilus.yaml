@@ -29,6 +29,8 @@ tags:
   - { name: T1, role: state, init: 0 }
   - { name: T2, role: state, init: 0 }
   - { name: S, role: state, init: '' }
+  - { name: D1, role: state, init: 0, desc: "DINT" }
+  - { name: D2, role: state, init: 0, desc: "DINT" }
 
   # Outputs, one set per language.
   - { name: st_AND, role: state, init: false }
@@ -68,6 +70,10 @@ tags:
   - { name: st_TLE, role: state, init: false }
   - { name: st_TEQ, role: state, init: false }
   - { name: st_TNE, role: state, init: false }
+  - { name: st_ADDD, role: state, init: 0, desc: "D1 + D2, a DINT" }
+  - { name: st_ADDDEQ, role: state, init: false, desc: "D1 + D2 = 80000" }
+  - { name: st_ADDDINT, role: state, init: 0, desc: "TO_INT(D1 + D2)" }
+  - { name: st_ADDDLINT, role: state, init: 0, desc: "TO_LINT(D1 + D2)" }
   - { name: fbd_AND, role: state, init: false }
   - { name: fbd_OR, role: state, init: false }
   - { name: fbd_XOR, role: state, init: false }
@@ -105,6 +111,10 @@ tags:
   - { name: fbd_TLE, role: state, init: false }
   - { name: fbd_TEQ, role: state, init: false }
   - { name: fbd_TNE, role: state, init: false }
+  - { name: fbd_ADDD, role: state, init: 0, desc: "D1 + D2, a DINT" }
+  - { name: fbd_ADDDEQ, role: state, init: false, desc: "D1 + D2 = 80000" }
+  - { name: fbd_ADDDINT, role: state, init: 0, desc: "TO_INT(D1 + D2)" }
+  - { name: fbd_ADDDLINT, role: state, init: 0, desc: "TO_LINT(D1 + D2)" }
 
 driver:
   type: memory

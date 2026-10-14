@@ -895,23 +895,37 @@ claims:
   - id: FN-066
     claim: >-
       ADD and MUL are n-ary, SUB is binary, and the result has the common
-      type of the arguments.
+      type of the arguments: for integers, the narrowest type both widen to
+      (DINT + DINT is DINT, a literal takes the other argument's type, the
+      wider of two signed, unsigned or bit-string types, signed with
+      unsigned the narrowest signed type holding both, a bit string with a
+      number as its unsigned width); an integer with a REAL is a REAL. The
+      type does not cut the value: TO_INT(d1 + d2) with both at 40000 is
+      14464.
     source: "#operators"
     tests:
       - go ./lang/st TestLowerRealArithmetic
       - go ./lang/conformance TestConformance/fn-ops/ADD and MUL are n-ary - the third input counts; SUB is the binary difference
       - go ./lang/conformance TestConformance/fn-ops/an INT combined with a REAL gives a REAL - the common type, nothing truncated
+      - go ./lang/conformance TestConformance/fn-ops/DINT + DINT keeps its value past INT's range; a conversion of it wraps only to the target
+      - go ./lang/conformance TestArithmeticTakesTheCommonWidth
+      - go ./lang/conformance TestArithmeticLiteralTakesTheOperandWidth
+      - go ./lang/conformance TestArithmeticBlocksTakeTheCommonWidth
+      - go ./lang/ir TestCommonIntEveryPair
       - go ./lang/fbd TestB1OperatorArityAndTypes
-    partial: true
     note: >-
-      Asserted: three-input ADD and MUL (the third input counts), SUB as the
-      binary difference (a three-input SUB is refused), and the common type
-      across kinds: INT with INT is an integer (drives an INT coil), INT
-      with REAL is a REAL (1 + 0.5 = 1.5; it may not drive an INT coil). Not
-      asserted, and the code disagrees: the common type across integer
-      widths. DINT + DINT is typed as the generic INT, not DINT (assigning
-      it to a STRING says "cannot assign INT to STRING"), where IEC's common
-      type is DINT. Values are unaffected (every integer is 64-bit here).
+      Three-input ADD and MUL (the third input counts), SUB as the binary
+      difference (a three-input SUB is refused), INT with REAL is a REAL
+      (1 + 0.5 = 1.5; it may not drive an INT coil). The integer widths
+      (#326): TestArithmeticTakesTheCommonWidth reads the type of a op b out
+      of the checker's diagnostic (assigned to a STRING) for 23 width pairs
+      and every operator (+ - * / MOD), TestArithmeticLiteralTakesTheOperandWidth
+      the literal and chained cases, TestArithmeticBlocksTakeTheCommonWidth
+      the FBD ADD/SUB/MUL/DIV/MOD blocks, and TestCommonIntEveryPair all 144
+      pairs (order-independent, never narrower than an operand, Equal to
+      INT so assignability is unchanged, converted as LINT). The fn-ops case
+      pins the values: 40000 + 40000 = 80000 as a DINT, TO_INT of it 14464,
+      TO_LINT of 2000000000 + 2000000000 all 4000000000 (ST and FBD).
 
   - id: FN-067
     claim: DIV gives the quotient and MOD the remainder of two integers.
