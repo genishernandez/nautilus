@@ -60,11 +60,21 @@ func TestTCKConformance(t *testing.T) {
 	// Start the TCK harness (embedded broker + edge-node profile).
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	harness := exec.CommandContext(ctx, "go", "run",
-		"github.com/joyautomation/sparkplug-tck-go/cmd/sparkplug-tck@"+tckVersion,
+	// Build the harness first, then start it: under `go run` the download
+	// and compile counted against the 15 s bind wait below, and on a runner
+	// with a cold module cache that alone ran past it ("never came up", the
+	// broker binding some 45 s later).
+	bin := t.TempDir()
+	install := exec.CommandContext(ctx, "go", "install",
+		"github.com/joyautomation/sparkplug-tck-go/cmd/sparkplug-tck@"+tckVersion)
+	install.Env = append(os.Environ(), "GOBIN="+bin, "GOFLAGS=-mod=mod")
+	install.Stderr = testWriter{t}
+	if err := install.Run(); err != nil {
+		t.Fatalf("build TCK harness: %v", err)
+	}
+	harness := exec.CommandContext(ctx, filepath.Join(bin, "sparkplug-tck"),
 		"-harness", "-profile", "edge-node", "-listen", listen,
 		"-duration", "24s", "-json")
-	harness.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
 	outFile, err := os.Create(out)
 	if err != nil {
 		t.Fatal(err)
