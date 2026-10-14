@@ -212,7 +212,7 @@ is full.
 ## Writing template members
 
 Most of the controls on a water-utility HMI live *inside* a UDT —
-`Motor1.START`, `AnalogInput.HSP`, `LevelControl.CTL1HSP`. A Template
+`Motor1.START`, `AnalogInput.HSP`, `LevelControl.LSP`. A Template
 metric binds to one struct tag, and writing that struct back as a whole
 would clobber every member the site's own logic is driving. So a UDT is
 **never writable as a whole** — a `--writable` glob that matches a
@@ -253,7 +253,7 @@ naut sparkplug import --broker tcp://mqtt:1883 --group Plant \
 Each match generates its own tag, named `<prefix>_<metric>_<member path>`
 — `Motor1.START` at site `W6` becomes `W6_Motor1_START : BOOL`. Offline,
 a `--sites` file says the same thing with a list instead of `true`:
-`{name: Motor1, type: Motor, writable: [START, LVL.CTL1HSP]}`.
+`{name: Motor1, type: Motor, writable: [START, LVL.HSP]}`.
 
 ### Outputs are commands: the baseline rule
 

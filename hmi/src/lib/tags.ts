@@ -2,7 +2,7 @@
 //
 // A nautilus frame carries `tags` as a nested object — a UDT tag lands as a
 // struct, and its members are addressed the way Sparkplug and the write path
-// address them, `AI_001.LVL.CTL1HSP`. These helpers resolve that, and they all
+// address them, `AI_001.LVL.HSP`. These helpers resolve that, and they all
 // return `undefined` rather than a default when any hop is missing: a screen
 // bound to a tag the runtime does not publish must show "—", never a confident
 // zero.
@@ -12,7 +12,7 @@ export type TagTree = Record<string, unknown>;
 
 /**
  * Resolve a dotted struct path against a tag tree.
- * `tagAt(tags, 'WEL15_SUP_015.LVL.OUT')` walks the nested structs.
+ * `tagAt(tags, 'ZONE15_PMP_015.LVL.OUT')` walks the nested structs.
  * Returns `undefined` when any hop is missing.
  */
 export function tagAt(tags: TagTree | undefined, path: string): unknown {
@@ -63,7 +63,7 @@ export interface NumericLeaf {
  *
  * ```ts
  * const leaves = $derived(numericLeaves(rt.tags));
- * // → [{ path: 'WEL15_FIT_001.VALUE', root: 'WEL15_FIT_001', value: 1886.05 }, …]
+ * // → [{ path: 'ZONE15_FIT_001.VALUE', root: 'ZONE15_FIT_001', value: 1886.05 }, …]
  * ```
  */
 export function numericLeaves(tags: TagTree | undefined, opts: { maxDepth?: number } = {}): NumericLeaf[] {
@@ -99,7 +99,7 @@ export function numericLeaves(tags: TagTree | undefined, opts: { maxDepth?: numb
 // SUPERSET of the names asked for. A pattern set that drops a tag does not
 // error: it leaves one value on the screen reading "—" forever, which looks
 // exactly like a dead instrument. Every merge below therefore widens, never
-// narrows, and `packTagPatterns` is tested for that on real fleet names.
+// narrows, and `packTagPatterns` is tested for that on a fleet-sized name set.
 
 /**
  * How many `?tags=` patterns one stream connection accepts — the
@@ -128,8 +128,8 @@ export const NO_TAGS = '__no_tags__';
  * Two shapes, and the choice between them is the whole art:
  *
  *  - **same length, neither wildcarded across characters** — replace the
- *    positions that differ with `?`. `RTU9_WEL15_FIT_001` +
- *    `RTU9_WEL15_FIT_002` → `RTU9_WEL15_FIT_00?`. A `?` matches exactly one
+ *    positions that differ with `?`. `RTU9_ZONE15_FIT_001` +
+ *    `RTU9_ZONE15_FIT_002` → `RTU9_ZONE15_FIT_00?`. A `?` matches exactly one
  *    character, so the widening is bounded and stays legible.
  *  - **otherwise** — the common literal prefix plus `*`. This is the blunt
  *    one: `*` spans the whole rest of the name (a nautilus tag contains no
@@ -189,15 +189,15 @@ function mergeCost(a: string, b: string): number {
  * Pack a screen's tag list into at most `max` glob patterns, widening as
  * little as possible.
  *
- * Give it TOP-LEVEL tag names (the frame's own keys — `RTU9_WEL15_FIT_001`,
- * not `RTU9_WEL15_FIT_001.VALUE`): the controller matches `?tags=` against
+ * Give it TOP-LEVEL tag names (the frame's own keys — `RTU9_ZONE15_FIT_001`,
+ * not `RTU9_ZONE15_FIT_001.VALUE`): the controller matches `?tags=` against
  * those, and a UDT's members ride along with their root. Fewer names than
  * `max` are returned verbatim, so the common case subscribes to exact names
  * and pulls exactly them.
  *
  * ```ts
- * packTagPatterns(['RTU9_WEL15_FIT_001', 'RTU9_WEL15_FIT_002', …], { max: 2 })
- * // → ['RTU9_WEL15_FIT_00?', …]
+ * packTagPatterns(['RTU9_ZONE15_FIT_001', 'RTU9_ZONE15_FIT_002', …], { max: 2 })
+ * // → ['RTU9_ZONE15_FIT_00?', …]
  * ```
  *
  * **The result always matches every name given.** Merges only ever widen

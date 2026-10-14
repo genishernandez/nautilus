@@ -58,7 +58,7 @@ func TestSampleOfFlattensStructTag(t *testing.T) {
 		// An AnalogInput-shaped UDT tag: scalar reading at .VALUE, a
 		// boolean alarm member, a string name member (skip), a nested
 		// struct member, and an array member.
-		"RTU9_WEL15_FIT_001": map[string]any{
+		"RTU9_ZONE15_FIT_001": map[string]any{
 			"VALUE": 42.5,
 			"HH":    true,
 			"NAME":  "flow transmitter",
@@ -70,13 +70,13 @@ func TestSampleOfFlattensStructTag(t *testing.T) {
 	}
 	got := sampleOf(tags, []string{"*"}, nil)
 	want := map[string]float64{
-		"RTU9_WEL15_FIT_001.VALUE":      42.5,
-		"RTU9_WEL15_FIT_001.HH":         1,
-		"RTU9_WEL15_FIT_001.RAW.COUNTS": 12345,
-		"RTU9_WEL15_FIT_001.LOG[0]":     1,
-		"RTU9_WEL15_FIT_001.LOG[1]":     2,
-		"RTU9_WEL15_FIT_001.LOG[2]":     3,
-		"RTU9_WellFlowGpm":              123.4,
+		"RTU9_ZONE15_FIT_001.VALUE":      42.5,
+		"RTU9_ZONE15_FIT_001.HH":         1,
+		"RTU9_ZONE15_FIT_001.RAW.COUNTS": 12345,
+		"RTU9_ZONE15_FIT_001.LOG[0]":     1,
+		"RTU9_ZONE15_FIT_001.LOG[1]":     2,
+		"RTU9_ZONE15_FIT_001.LOG[2]":     3,
+		"RTU9_WellFlowGpm":               123.4,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("sampleOf(struct tag) = %v, want %v", got, want)
@@ -117,7 +117,7 @@ func TestSampleOfMultiplePatterns(t *testing.T) {
 // member), not just the top-level tag.
 func TestSampleOfDottedPatternMatchesNestedMember(t *testing.T) {
 	tags := map[string]any{
-		"RTU9_WEL15_FIT_001": map[string]any{
+		"RTU9_ZONE15_FIT_001": map[string]any{
 			"VALUE": 42.5,
 			"HH":    true,
 		},
@@ -125,15 +125,15 @@ func TestSampleOfDottedPatternMatchesNestedMember(t *testing.T) {
 	}
 
 	got := sampleOf(tags, []string{"*.VALUE"}, nil)
-	want := map[string]float64{"RTU9_WEL15_FIT_001.VALUE": 42.5}
+	want := map[string]float64{"RTU9_ZONE15_FIT_001.VALUE": 42.5}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("sampleOf with *.VALUE = %v, want %v", got, want)
 	}
 
 	got = sampleOf(tags, []string{"*_FIT_*"}, nil)
 	want = map[string]float64{
-		"RTU9_WEL15_FIT_001.VALUE": 42.5,
-		"RTU9_WEL15_FIT_001.HH":    1,
+		"RTU9_ZONE15_FIT_001.VALUE": 42.5,
+		"RTU9_ZONE15_FIT_001.HH":    1,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("sampleOf with *_FIT_* = %v, want %v", got, want)

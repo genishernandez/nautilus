@@ -46,7 +46,7 @@ against the **full dotted leaf name** — `*` matches `.` too, since
 - `*.VALUE` matches the `VALUE` member of every struct tag, regardless of
   prefix or depth.
 - `*_FIT_*` matches the whole dotted leaf name, so it picks up both
-  `RTU9_WEL15_FIT_001.VALUE` and `RTU9_WEL15_FIT_001.HH` — every leaf
+  `RTU9_ZONE15_FIT_001.VALUE` and `RTU9_ZONE15_FIT_001.HH` — every leaf
   under a tag whose name contains `_FIT_`, not just one member.
 
 For a UDT-heavy fleet where every instrument is a struct, a good starting
@@ -95,7 +95,7 @@ The daemon answers:
 
 `tags` is a CSV of exact archived leaf names — the same dotted strings
 `-tags` matched at collection time, e.g.
-`?tags=RTU9_WEL15_FIT_001.VALUE`. There's no globbing at query time, and a
+`?tags=RTU9_ZONE15_FIT_001.VALUE`. There's no globbing at query time, and a
 dot isn't special here: samples are stored and queried as plain tag
 strings, so a struct member's dotted name works exactly like any other tag.
 
@@ -155,7 +155,7 @@ GET /history/agg?tags=RES2A.LIT&from=<6am_ms>&to=<next_6am_ms>&fn=max
 collector — see [Struct (UDT) tags](#struct-udt-tags)):
 
 ```
-GET /history/agg?tags=WEL15.RUNST&from=<6am_ms>&to=<next_6am_ms>&fn=ontime
+GET /history/agg?tags=ZONE15.RUNST&from=<6am_ms>&to=<next_6am_ms>&fn=ontime
 ```
 
 divide the returned `value` by 3600 for hours, matching Ignition's
@@ -165,7 +165,7 @@ divide the returned `value` by 3600 for hours, matching Ignition's
 index tag that only ever increases:
 
 ```
-GET /history/agg?tags=WEL15.FIT_001.PREV&from=<6am_ms>&to=<next_6am_ms>&fn=delta
+GET /history/agg?tags=ZONE15.FIT_001.PREV&from=<6am_ms>&to=<next_6am_ms>&fn=delta
 ```
 
 `delta` (last-first) matches `UpdateReportFlowTotals`'s sum-of-deltas
@@ -197,7 +197,7 @@ than over HTTP) can call the same aggregation directly:
 
 ```go
 rows, err := store.Aggregate(ctx, hist.AggQuery{
-    Tags:   []string{"WEL15.RUNST"},
+    Tags:   []string{"ZONE15.RUNST"},
     From:   dayStart, To: dayEnd,
     Fn:     "ontime",
 })

@@ -733,11 +733,11 @@ that for you — `name` takes a dotted member path, to any depth:
 
 ```sh
 curl -X POST localhost:8080/api/tags -d '{"name": "P101.START", "value": true}'
-curl -X POST localhost:8080/api/tags -d '{"name": "P101.LVL.CTL1HSP", "value": 60}'
+curl -X POST localhost:8080/api/tags -d '{"name": "P101.LVL.HSP", "value": 60}'
 ```
 
 `value` may also be an **object**, to set several members of one tag at
-once: `{"name": "P101", "value": {"START": true, "LVL": {"CTL1HSP": 60}}}`.
+once: `{"name": "P101", "value": {"START": true, "LVL": {"HSP": 60}}}`.
 That is a **merge** — members the object doesn't name keep their current
 values. (Deliberately unlike `init:` seeding, which zero-fills what its
 mapping omits: seeding builds a value from nothing, a write edits one the

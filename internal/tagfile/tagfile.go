@@ -89,7 +89,7 @@ func Render(header []string, tags []Tag) ([]byte, error) {
 // renderInit renders a tag's init value: a scalar as before, or — for a
 // struct-typed tag's per-member seed (internal/project's `init:` mapping) —
 // a flow-style YAML mapping, recursively for a nested struct member. This is
-// what lets a generator emit `init: { RAWMIN: 6553.0, LVL: { CTL1HSP: 85.0 } }`
+// what lets a generator emit `init: { RAWMIN: 6553.0, LVL: { HSP: 85.0 } }`
 // instead of only ever seeding zero-of-type, and it is the same shape the
 // loader (`ir.SeedFromInit`) accepts back — round-tripping a manifest tag
 // through `naut eip tags` / `naut tags import-csv` and back.

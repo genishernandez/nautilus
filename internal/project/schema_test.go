@@ -499,8 +499,8 @@ func TestSchemaAlarmKeysAreAccepted(t *testing.T) {
 	// A value of the right YAML shape for each key the schema declares.
 	sample := map[string]string{
 		"id": "A", "tag": "T.HH", "name": "High High", "priority": "high",
-		"class": "process", "site": "RTU9", "area": "WEL15",
-		"display": "Wells/15", "notes": "n", "on-delay": "5m",
+		"class": "process", "site": "RTU9", "area": "ZONE15",
+		"display": "Zones/15", "notes": "n", "on-delay": "5m",
 		"off-delay": "2s", "ack-required": "false", "auto-clear": "false",
 		"shelve": "false", "enable": "RTU9__Online",
 	}

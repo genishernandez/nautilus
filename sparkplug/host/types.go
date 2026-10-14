@@ -156,7 +156,7 @@ type Binding struct {
 	// Metric is the verbatim Sparkplug metric name.
 	Metric string
 	// Member is a dotted path to ONE member inside a Template metric
-	// ("START", "LVL.CTL1HSP"), or "" for the metric as a whole.
+	// ("START", "LVL.HSP"), or "" for the metric as a whole.
 	//
 	// A member binding is how an operator commands one control of a site's
 	// UDT without touching its siblings. It is a SCALAR nautilus tag carrying

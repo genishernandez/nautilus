@@ -12,10 +12,10 @@ func levelStructDef() *StructDef {
 	sd := &StructDef{
 		Name: "Level",
 		Fields: []StructField{
-			{Name: "CTL1HSP", Type: RealT},
-			{Name: "CTL1LSP", Type: RealT},
+			{Name: "HSP", Type: RealT},
+			{Name: "LSP", Type: RealT},
 		},
-		FieldIndex: map[string]int{"CTL1HSP": 0, "CTL1LSP": 1},
+		FieldIndex: map[string]int{"HSP": 0, "LSP": 1},
 	}
 	return sd
 }
@@ -57,8 +57,8 @@ func TestSeedFromInitSetsGivenMembersOnly(t *testing.T) {
 	init := map[string]any{
 		"STRTTMRSP": 30,
 		"LVL": map[string]any{
-			"CTL1HSP": 60.0,
-			"CTL1LSP": 40.0,
+			"HSP": 60.0,
+			"LSP": 40.0,
 		},
 	}
 	v, err := SeedFromInit(mt, init)
@@ -79,10 +79,10 @@ func TestSeedFromInitSetsGivenMembersOnly(t *testing.T) {
 		t.Fatalf("LVL did not seed as a struct: %+v", lvl)
 	}
 	if got := lvl.Fld[0].F; got != 60.0 {
-		t.Errorf("LVL.CTL1HSP = %v, want 60", got)
+		t.Errorf("LVL.HSP = %v, want 60", got)
 	}
 	if got := lvl.Fld[1].F; got != 40.0 {
-		t.Errorf("LVL.CTL1LSP = %v, want 40", got)
+		t.Errorf("LVL.LSP = %v, want 40", got)
 	}
 }
 
@@ -117,11 +117,11 @@ func TestSeedFromInitUnknownMemberIsAnError(t *testing.T) {
 
 func TestSeedFromInitUnknownNestedMemberNamesThePath(t *testing.T) {
 	mt := motorType()
-	_, err := SeedFromInit(mt, map[string]any{"LVL": map[string]any{"CTL1HP": 1.0}})
+	_, err := SeedFromInit(mt, map[string]any{"LVL": map[string]any{"HP": 1.0}})
 	if err == nil {
 		t.Fatal("an unknown nested member was accepted")
 	}
-	const want = "init.LVL: unknown member CTL1HP (did you mean CTL1HSP?)"
+	const want = "init.LVL: unknown member HP (did you mean HSP?)"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}

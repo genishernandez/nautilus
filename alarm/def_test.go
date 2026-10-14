@@ -263,13 +263,13 @@ func TestExpandRequiresATag(t *testing.T) {
 }
 
 const alarmFile = `
-- id: RTU9_WEL15_INT_001_YA
-  tag: RTU9_WEL15_INT_001_YA
-  name: RTU 9 Well 15 Intrusion
+- id: RTU9_ZONE15_INT_001_YA
+  tag: RTU9_ZONE15_INT_001_YA
+  name: RTU 9 Zone 15 Intrusion
   priority: critical
   class: security
   site: RTU9
-  area: WEL15
+  area: ZONE15
   on-delay: 5m
   enable: RTU9__Online
 - tag: RTU9_ANNUNCIATE_ONLY

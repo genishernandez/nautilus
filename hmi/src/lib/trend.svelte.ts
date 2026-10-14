@@ -42,7 +42,7 @@ export interface UseTrendOptions<F> {
 	/** Where the history routes live (base URL, token, bucket count). */
 	historyOptions?: HistoryOptions;
 	/** The name to ask the historian for, if it differs from `tag` (a site
-	 *  runtime serves `WEL15_FIT_001.VALUE` for `RTU9_WEL15_FIT_001.VALUE`). */
+	 *  runtime serves `ZONE15_FIT_001.VALUE` for `RTU9_ZONE15_FIT_001.VALUE`). */
 	historyTag?: string;
 	/** Also re-backfill on this interval, ms. 0 (default) = only on open. */
 	refreshMs?: number;
@@ -83,7 +83,7 @@ function defaultTs<F>(frame: F): number {
  *
  * ```svelte
  * <script>
- *   const flow = useTrend(rt.realtime, 'WEL15_FIT_001.VALUE', { history: true });
+ *   const flow = useTrend(rt.realtime, 'ZONE15_FIT_001.VALUE', { history: true });
  * </script>
  * <Sparkline values={flow.points.map((p) => p.v)} />
  * ```
