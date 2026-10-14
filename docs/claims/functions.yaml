@@ -1503,8 +1503,11 @@ claims:
     tests:
       - go ./lang/st TestPIDDefaultClampRange
       - go ./lang/st TestPIDAntiWindupStaysClamped
-    partial: true
-    note: The ceiling clamp and the 0..100 fallback are asserted; clamping at CV_MIN is not.
+      - go ./lang/st TestPIDClampsAtCVMin
+    note: >-
+      Both ends are asserted (CV_MIN 10 / CV_MAX 90 with the loop asking for
+      -1000, +1000 and 50 in TestPIDClampsAtCVMin), and the unbound pair
+      gives 0..100 (TestPIDDefaultClampRange).
 
   - id: FN-126
     claim: >-
@@ -1523,12 +1526,12 @@ claims:
     source: "#pid-closed-loop-control"
     tests:
       - go ./lang/st TestPIDManualToAutoBumpless
-    partial: true
+      - go ./lang/st TestPIDManualTracksMovingCVMan
     note: >-
-      CV equals CV_MAN in manual and does not jump on the switch to AUTO.
-      CV_MAN, PV and SP stay constant throughout, so neither "tracks" (CV
-      following a CV_MAN that moves) nor "back-solved every scan" (rather
-      than once on entering manual) is asserted.
+      TestPIDManualTracksMovingCVMan moves CV_MAN, PV and SP on every manual
+      scan: CV follows CV_MAN, P_TERM + I_TERM + D_TERM equals CV_MAN on each
+      scan (back-solved every scan, not once on entering MANUAL), and the
+      switch to AUTO continues from the last CV_MAN.
 
   - id: FN-128
     claim: >-
@@ -1539,8 +1542,10 @@ claims:
     source: "#pid-closed-loop-control"
     tests:
       - go ./lang/st TestPIDAntiWindupStaysClamped
-    partial: true
-    note: The high rail and SAT_HI are covered; SAT_LO and the low rail are not.
+      - go ./lang/st TestPIDAntiWindupLowRail
+    note: >-
+      Each rail is asserted: I_TERM frozen while clamped, SAT_HI / SAT_LO
+      set, and CV off the rail on the scan the error reverses.
 
   - id: FN-129
     claim: >-
@@ -1549,8 +1554,11 @@ claims:
     source: "#pid-closed-loop-control"
     tests:
       - go ./lang/st TestPIDDTZeroUsesScanDt
-    partial: true
-    note: The self-measured case is covered; a bound DT overriding it is not.
+      - go ./lang/st TestPIDBoundDTOverridesClock
+    note: >-
+      Unbound DT integrates over the host clock's 1 s scans; a bound DT of
+      0.5 s integrates 0.5 s per scan while the clock advances 1 s (and once
+      3 s).
 
   - id: FN-130
     claim: >-
@@ -1565,30 +1573,41 @@ claims:
       KP = 0 disables the whole controller, not just the P term; KI = 0
       disables integral action and KD = 0 derivative action.
     source: "#pid-closed-loop-control"
-    tests: []
-    note: Gap. No test sets a gain to zero and checks the output.
+    tests:
+      - go ./lang/st TestPIDZeroGainsDisable
+    note: >-
+      KP = 0 with KI and KD nonzero and PV moving keeps CV, P_TERM, I_TERM
+      and D_TERM at 0; KI = 0 keeps I_TERM at 0 under a held error (a KI > 0
+      control integrates); KD = 0 keeps D_TERM at 0 under a PV ramp.
 
   - id: FN-132
     claim: >-
       The derivative acts on PV, not on error (a setpoint step never kicks
       D_TERM), through a fixed first-order filter with time constant KD/10.
     source: "#pid-closed-loop-control"
-    tests: []
-    note: Gap. D_TERM and the filter are not asserted anywhere.
+    tests:
+      - go ./lang/st TestPIDDerivativeOnPVFiltered
+    note: >-
+      Setpoint steps with PV still leave D_TERM at 0; a PV step's D_TERM
+      decays with the filter weight DT/(KD/10 + DT), asserted at KD = 10 and
+      KD = 30.
 
   - id: FN-133
     claim: >-
       DB is a deadband on error: within +/-DB the P and I terms see zero
       error, while the D term still sees every PV move.
     source: "#pid-closed-loop-control"
-    tests: []
-    note: Gap. DB is wired in the harness but never driven.
+    tests:
+      - go ./lang/st TestPIDDeadband
+    note: >-
+      PV wandering inside ±DB leaves P_TERM and I_TERM at 0 while D_TERM
+      follows each move; outside the band the full error reaches P and I.
 
   - id: FN-134
     claim: RESET = TRUE zeroes the integral this scan.
     source: "#pid-closed-loop-control"
-    tests: []
-    note: Gap.
+    tests:
+      - go ./lang/st TestPIDResetZeroesIntegral
 
   - id: FN-135
     claim: >-
@@ -1596,8 +1615,14 @@ claims:
       before the deadband, and P_TERM, I_TERM, D_TERM are the three
       contributions to CV.
     source: "#pid-closed-loop-control"
-    tests: []
-    note: Gap. The terms are exposed in the harness but not asserted against the formula CV = KP*(error + KI*integral + KD*d(PV)/dt).
+    tests:
+      - go ./lang/st TestPIDDiagnosticTerms
+    note: >-
+      ERR, P_TERM, I_TERM, D_TERM and CV = P + I + D are asserted against
+      hand-computed values over four scans, reverse and direct acting, the
+      last scan inside the deadband (ERR raw, P_TERM 0). The block's first
+      AUTO scan does not integrate (the bumpless-transfer rule), so the
+      integral counts from the second scan.
 
   # ── Arrays of instances ─────────────────────────────────────────────
   - id: FN-136
