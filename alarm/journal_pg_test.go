@@ -92,8 +92,11 @@ func TestPGJournal(t *testing.T) {
 		t.Fatalf("Span = %v, %v, %d", first, last, count)
 	}
 
-	// Prune keeps the retention window, drops the rest.
-	if err := j.Prune(59 * time.Minute); err != nil {
+	// Prune keeps the retention window, drops the rest. The cutoff sits
+	// half-way between the first event (an hour old) and the second (59
+	// minutes old): at exactly 59 minutes the second event's survival
+	// depended on the milliseconds between Append and Prune.
+	if err := j.Prune(59*time.Minute + 30*time.Second); err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
 	after, err := j.Query(time.Time{}, time.Time{}, Filter{})
