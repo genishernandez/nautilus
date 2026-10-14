@@ -128,6 +128,7 @@ programs are not in the subset.
 | enumerations (`TYPE Mode : (Idle := 1, Run := 10);`) | `DINT` tags; a member (`Run`, `Mode#Run`) is its value, `10` — Logix has no enumerated type |
 | user FUNCTION_BLOCKs (ladder or ST) | Add-On Instructions |
 | ST: assignments, IF, CASE, FOR, WHILE, REPEAT, EXIT, operators, maths | Logix ST, close to as written |
+| ST conversions (`DINT_TO_INT`, `INT_TO_REAL`, `BOOL_TO_DINT`, `TRUNC_DINT`, …) | Logix that computes the same result: a narrowing wraps in integer arithmetic, an integer meets REAL as `(v * 1.0)` where it would otherwise divide as integers, a BOOL becomes a number through an `IF` |
 
 The language features in that table are documented with the rest of the
 language: [the assignment element, bit access, arrays of instances and
@@ -175,6 +176,7 @@ message:
 | `logix/member` | member access only into timers, counters, user blocks and STRUCTs |
 | `logix/st` | no `RETURN`, `CONTINUE`, `STRING`, `MIN`/`MAX`/`LIMIT`/`SEL`/`MUX`, `ATAN2`, user calls |
 | `logix/data-op` | an assignment Logix has a data instruction or a `CPT` for |
+| `logix/conversion` | a conversion the controller would compute differently: REAL to an integer (its rounding is not yet verified; `TRUNC_DINT` as a whole right-hand side works), unsigned, bit-string, `LINT`, `LTIME` and `STRING` conversions, a BOOL or `LREAL` conversion inside an expression, an integer *expression* converted to REAL |
 
 ## Vendor idioms: `dialect: logix`
 

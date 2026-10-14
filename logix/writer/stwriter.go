@@ -27,9 +27,12 @@ import (
 //	                         Reset, then CTUD(c)
 //	t.Q t.ET t.IN c.CV c.CU  t.DN t.ACC t.TimerEnable c.ACC c.CUEnable
 //	Q => y                   y := t.DN; after the call
-//	EXPT(a, b)               a ** b;   X_TO_Y(v), TO_Y(v) → v (Logix
-//	                         converts on assignment, rounding a REAL as
-//	                         IEC does)
+//	EXPT(a, b)               a ** b
+//	X_TO_Y(v), TO_Y(v)       Logix that computes the same, or refused
+//	                         (logix/conversion): narrowing as a wrap in
+//	                         integer arithmetic, int → REAL as v or
+//	                         (v * 1.0), BOOL → number as an IF; REAL →
+//	                         integer refused (convert.go)
 //	Run, Mode#Run            the enumeration member's value (enum.go)
 //
 // Refused by name: STRING and the string functions, MIN / MAX / LIMIT /
@@ -184,6 +187,15 @@ type stWriter struct {
 	lw    *lowered
 	lines []string
 	line  int // source line being rendered, for diagnostics
+	// rhs is the assignment's right-hand side being rendered and dest
+	// its target's type; realCtx marks an expression Logix may compute
+	// in REAL; beside an operand whose sibling is a REAL reference or
+	// literal; depth counts nested expr calls (convert.go).
+	rhs     st.Expression
+	dest    string
+	realCtx bool
+	beside  bool
+	depth   int
 }
 
 func (w *stWriter) emitf(depth int, format string, a ...any) {
@@ -210,7 +222,17 @@ func (w *stWriter) stmt(s st.Statement, depth int) {
 		} else {
 			lhs = w.ref(lhs)
 		}
-		w.emitf(depth, "%s := %s;", lhs, w.expr(v.Value))
+		if w.boolAssign(lhs, v.Value, depth) {
+			break
+		}
+		var target st.Expression = &st.IdentExpr{Name: v.Target}
+		if v.TargetExpr != nil {
+			target = v.TargetExpr
+		}
+		w.rhs, w.dest = v.Value, w.typeOf(target)
+		rhs := w.expr(v.Value)
+		w.rhs, w.dest = nil, ""
+		w.emitf(depth, "%s := %s;", lhs, rhs)
 	case *st.IfStmt:
 		w.line = v.Pos.Line
 		w.emitf(depth, "IF %s THEN", w.expr(v.Condition))
@@ -392,6 +414,15 @@ func (w *stWriter) ref(name string) string {
 // expr renders an expression. Every binary operation is parenthesized so
 // precedence never depends on the dialect.
 func (w *stWriter) expr(e st.Expression) string {
+	if w.depth == 0 {
+		// A statement's expression: REAL when it mixes one in, or when
+		// it is stored into one.
+		w.realCtx = w.numReal(e) || e == w.rhs && isRealType(w.dest)
+	}
+	w.depth++
+	defer func() { w.depth-- }()
+	beside := w.beside // for this node only
+	w.beside = false
 	switch v := e.(type) {
 	case *st.NumberLit:
 		return numberText(v)
@@ -438,12 +469,31 @@ func (w *stWriter) expr(e st.Expression) string {
 			w.diag(ruleArrayShape, w.line, "multi-dimensional arrays are not in the v1 subset; declare one array per dimension")
 			return "0"
 		}
-		return w.expr(v.Array) + "[" + w.expr(v.Indices[0]) + "]"
+		arr := w.expr(v.Array)
+		saved := w.realCtx
+		w.realCtx = w.numReal(v.Indices[0]) // an index is a computation of its own
+		idx := w.expr(v.Indices[0])
+		w.realCtx = saved
+		return arr + "[" + idx + "]"
 	case *st.BinaryExpr:
-		return "(" + w.expr(v.Left) + " " + v.Op + " " + w.expr(v.Right) + ")"
+		saved := w.realCtx
+		if isCompare(v.Op) {
+			// So are a comparison's operands.
+			w.realCtx = w.numReal(v.Left) || w.numReal(v.Right)
+		}
+		mixes := isCompare(v.Op) || v.Op == "+" || v.Op == "-" || v.Op == "*" || v.Op == "/"
+		w.beside = mixes && w.realLeaf(v.Right)
+		l := w.expr(v.Left)
+		w.beside = mixes && w.realLeaf(v.Left)
+		r := w.expr(v.Right)
+		w.realCtx = saved
+		return "(" + l + " " + v.Op + " " + r + ")"
 	case *st.UnaryExpr:
 		return v.Op + " (" + w.expr(v.Operand) + ")"
 	case *st.CallExpr:
+		if x, ok := w.conversion(v, beside); ok {
+			return x
+		}
 		return w.callExpr(v)
 	}
 	w.diag(ruleST, w.line, "expression %T is not in the Logix ST subset", e)
@@ -486,11 +536,10 @@ func (w *stWriter) callExpr(c *st.CallExpr) string {
 		return name + "(" + strings.Join(args, ", ") + ")"
 	case name == "EXPT" && len(args) == 2:
 		return "(" + args[0] + " ** " + args[1] + ")"
-	case (strings.Contains(name, "_TO_") || strings.HasPrefix(name, "TO_")) && len(args) == 1:
-		// X_TO_Y, and the overloaded TO_Y (TO_INT of an enumeration, TO_Mode
-		// of an integer): Logix converts on assignment.
-		return args[0]
 	}
+	// No conversion reaches here: Logix converts only as it stores a
+	// value or mixes types, by rules of its own, so expr writes each one
+	// as Logix that computes nautilus's result or refuses it (convert.go).
 	if why, bad := stRejected[name]; bad {
 		w.diag(ruleST, w.line, "%s(): no Logix ST equivalent — %s", c.Name, why)
 		return "0"

@@ -103,6 +103,7 @@ positions (`logix-target.md` §6.4).
 | global (`VAR_EXTERNAL`) | controller tag | |
 | a manifest tag a program names undeclared (#177/#210) | controller tag, typed from the manifest | ladder and ST (#248); uses resolved on the compiler's AST (`logix/writer/uses.go`) |
 | enumeration type and its members | `DINT`; a member is its value | Logix has no enumerated type; the names do not reach the controller, and an import brings the tag back as `DINT` (`logix/writer/enum.go`) |
+| `X_TO_Y` / `TO_Y` / `TRUNC_<int>` in ST | Logix that computes nautilus's result, or `logix/conversion` | narrowing as an integer-arithmetic wrap, int → REAL as `v` or `(v * 1.0)`, BOOL → number as an `IF`; REAL → integer rounding, unsigned, bit strings, LINT, LTIME and STRING refused (`logix/writer/convert.go`, #255) |
 | program-local `VAR` | program tag | |
 | one nautilus task + program | one Logix task + program + `MainRoutine` | a stated decision, not a derivation |
 
@@ -1328,6 +1329,49 @@ asks for a calendar, not the date. Echo itself needed attention first:
 after the VM rebooted, Tailscale wanted a desktop login (James), and the
 Echo service needed a restart to bind its controller to the address
 again, which emptied the controller.
+
+### Follow-up — conversions written exactly or refused (2026-10-13, #255)
+
+Phase D dropped every conversion ("Logix converts on assignment"), and
+that ran differently: `DINT_TO_INT(x)` of 70000 stayed 70000 (nautilus
+4464), `REAL_TO_DINT(r) + 1` was not rounded inside the expression,
+`DINT_TO_REAL(a) / 2` divided as integers, `DWORD_TO_DINT(REAL_TO_DWORD(r))`
+moved the number instead of the bits. Logix has no conversion functions;
+it converts as it stores a value or mixes operand types. So the ST writer
+(`logix/writer/convert.go`) now types each argument from the
+declarations and writes each conversion as Logix that computes the same,
+or refuses it with **`logix/conversion`**:
+
+| Conversion | Written as | Why it is exact |
+|---|---|---|
+| integer → narrower integer or TIME | `((((v MOD 65536) + 98304) MOD 65536) - 32768)` (INT), `… 256 … 384 … 128` (SINT); `v` when it already fits; a literal folded | the first `MOD` leaves a remainder of either sign, the offset makes it positive, so the result is the low bits read signed whichever sign rule `MOD` has; integer arithmetic only, no `AND`/`XOR` |
+| integer → wider integer, TIME ↔ DINT | `v` | a tag of that width holds only values that fit; Logix integers are 32 bits |
+| the argument wider than the source (`INT_TO_DINT(dint)`) | the wrap to the source width | nautilus reads the argument as the source type first |
+| integer → BOOL, REAL → BOOL | `(v <> 0)`, `((v MOD 65536) <> 0)`, `(v <> 0.0)` | nonzero, at the source width |
+| integer → REAL | `v` as the whole right-hand side or beside a REAL tag or literal, else `(v * 1.0)`; a tag or literal only | Logix converts the operand itself in each of those places; an integer *expression* is refused, since Logix may evaluate it in REAL once it meets one |
+| integer → LREAL, REAL ↔ LREAL | `v`, as the whole right-hand side only | the store converts; mixing inside an expression is unverified |
+| BOOL → number | `IF b THEN x := 1; ELSE x := 0; END_IF;`, whole right-hand side only | no arithmetic on a BOOL |
+| `TRUNC_<int>(r)` | `TRUNC(r)`, as the whole right-hand side of an integer assignment | the value stored is already whole, so no rounding rule applies |
+| REAL / LREAL → integer or TIME | refused | Logix rounds only as it stores, and that it rounds halves to even is not verified |
+| unsigned, BYTE…LWORD, LINT, LTIME, STRING | refused, the type named | no Logix type in the subset (the importer reads LINT and the unsigned types in brownfield declarations; the writer declares none) |
+
+A narrowing wrap is also refused inside an expression that mixes in a
+REAL (Logix might compute its `MOD`s in REAL); a comparison's operands and
+an array index count as computations of their own. Two divergences stay,
+as they do for every value: a REAL is 32 bits on the controller and 64 in
+nautilus, and a REAL with no value in the target faults the nautilus scan
+where the controller stores something and sets S:V. Ladder is unchanged:
+`{ y := X_TO_Y(v) }` was and is refused by `logix/data-op`
+(`logix/operand` in a compare).
+
+**To verify on Echo** (blocked; nothing above has run on a controller):
+that a REAL store rounds halves to even (2.5, 3.5, -2.5, -3.5, 0.5), which
+would let `REAL_TO_DINT` as a whole right-hand side be written as a store;
+that `MOD` on a negative DINT keeps a remainder within the divisor
+(-70000 to INT); that `(v * 1.0)` and a mixed comparison convert as
+documented; `TRUNC` of a REAL into a DINT; and, for a cheaper wrap
+(`((v AND 65535) XOR 32768) - 32768`), that `AND`/`XOR` are bitwise on a
+DINT.
 
 ## 8. The demo this enables
 

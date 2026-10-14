@@ -28,6 +28,20 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   a standard block does, not "unknown type". Needs a `naut` newer than
   0.17.0.
 
+### Fixed
+
+- **A Logix target no longer writes a conversion as a plain move.** In an
+  ST program with a `target: logix` section, `DINT_TO_INT(x)` went to the
+  controller as `x`, so it did not wrap (70000 stayed 70000, nautilus
+  gives 4464), and `REAL_TO_DINT(r) + 1` rounded differently. Each
+  conversion is now written so the controller computes nautilus's result
+  (narrowing as a wrap, integer to REAL as `(v * 1.0)` where it would
+  otherwise divide as integers, BOOL to a number as an `IF`), or it
+  squiggles with the new rule `logix/conversion` and says what to write
+  instead: REAL to an integer (until the controller's rounding is
+  verified; `TRUNC_DINT` works), unsigned and bit-string types, LINT,
+  LTIME and STRING. Needs a `naut` newer than 0.17.0. (#255)
+
 ## [0.17.0] - 2026-10-14
 
 The pre-release line after the stable release 0.16.0. Same contents as
