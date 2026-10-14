@@ -57,6 +57,30 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   completion list is now empty there; code right after a closed comment
   completes as before. Needs a `naut` newer than 0.16.2.
 
+- **The nearest port wins when two sit close together on a mimic.** Ports
+  about 16 px apart shared a hit area and the one earlier in the file took
+  the click; a pipe now snaps to whichever port is closest to the cursor.
+  (#95)
+
+- **Rollback and Download ask which program when the active tab names
+  none.** Right after closing a diff view they refused with "multiple
+  program files"; they now use the last program you had open, or offer a
+  picker. (#84)
+
+- **A retag editor near the pane's edge stays on screen.** The floating
+  editor on the ladder and other diagrams is kept 8 px inside the pane, and
+  its suggestion list shifts or flips when it would run off the edge. (#83)
+
+- **New input-reference chips no longer stack on the FBD canvas.** "+ add
+  → input reference" places the chip at the middle of the view, offset
+  from any chip already there, and a chip you wire is placed by
+  auto-layout with its network rather than staying at its drop spot. The
+  wiring part comes from `naut`'s edit operations, so it needs a `naut`
+  newer than 0.16.2. (#80, #81)
+
+- **The "?" shortcuts list says what `B` does to the new leg.** It arrives
+  with a `_` placeholder to retag. (#77)
+
 - **A rung's coils see one evaluation of its condition.** In a rung where
   a coil writes a tag the condition reads, such as `/Lamp ( Lamp ) ( Horn )`,
   later coils re-evaluated the condition after the earlier coil's write, so

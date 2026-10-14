@@ -95,6 +95,21 @@
 	// during mount: a `let` further down is still in its TDZ then, the
 	// ReferenceError aborts the mount before `ready` is posted, and a
 	// restored panel (Reload Webviews / Reload Window) stays blank forever.
+	// The visible pane's centre in canvas coordinates (FitController binds it).
+	let viewCentre = $state<(() => { x: number; y: number } | null) | undefined>();
+	// Where a new ghost chip lands: the middle of the view, nudged down-right
+	// past any ghost already there so chips never stack.
+	function ghostSpot(): { x: number; y: number } {
+		const c = viewCentre?.() ?? { x: 40, y: 40 };
+		const ghosts = nodes.filter((n) => (n.data as { n?: { ghost?: boolean } })?.n?.ghost);
+		let x = Math.round(c.x);
+		let y = Math.round(c.y);
+		while (ghosts.some((g) => Math.abs(g.position.x - x) < 24 && Math.abs(g.position.y - y) < 24)) {
+			x += 24;
+			y += 32;
+		}
+		return { x, y };
+	}
 	// Node positions as last rendered — arrow-key moves persist only the
 	// nodes that actually moved.
 	let placedAt = new Map<string, { x: number; y: number }>();
@@ -878,11 +893,11 @@
 			<Background />
 			<MiniMap pannable zoomable />
 			<Controls />
-			<FitController {structureKey} />
+			<FitController {structureKey} bind:centre={viewCentre} />
 		</SvelteFlow>
 	</div>
 	{/if}
-	<Palette bind:open={paletteOpen} vars={varList} tags={projectTags} {fbTypes} funcs={userFuncs} insts={fbInsts} taken={takenNames} net={mode === 'fbd' ? activeNet : undefined} />
+	<Palette bind:open={paletteOpen} vars={varList} tags={projectTags} {fbTypes} funcs={userFuncs} insts={fbInsts} taken={takenNames} {ghostSpot} net={mode === 'fbd' ? activeNet : undefined} />
 	<VarsPanel
 		bind:open={varsOpen}
 		vars={varList}
