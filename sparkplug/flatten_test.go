@@ -6,11 +6,13 @@ package sparkplug
 
 import (
 	"bytes"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
 
 	nio "github.com/joyautomation/nautilus/io"
+	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/runtime"
 	"github.com/joyautomation/nautilus/sparkplug/spb"
 )
@@ -257,4 +259,69 @@ func TestFlattenKeepsMemberProperties(t *testing.T) {
 		}
 	}
 	t.Fatalf("no Motor1/Speed in %v", metricNames(p.Metrics))
+}
+
+// TestFlattenArrayMembers — a UDT's array member flattens to one array metric
+// under the member's path (arrays are leaves, not expanded per element), in
+// the birth and in data when an element moves.
+func TestFlattenArrayMembers(t *testing.T) {
+	var buf bytes.Buffer
+	n, fc := newArrayNode(t, &buf, WithFlattenUDTs())
+	if err := n.birth(); err != nil {
+		t.Fatalf("birth: %v", err)
+	}
+	p := decodeLast(t, fc, "NBIRTH")
+	byName := map[string]Metric{}
+	for _, m := range p.Metrics {
+		if m.Datatype == spb.DataType_Template {
+			t.Errorf("Template metric %q in a flattened birth", m.Name)
+		}
+		byName[m.Name] = m
+	}
+	for _, name := range []string{"RTC/gettime", "FT1/gettime"} {
+		if m := byName[name]; m.Datatype != spb.DataType_Int64Array || !reflect.DeepEqual(m.Value, make([]int64, 7)) {
+			t.Errorf("%s = %v %#v, want a 7-element Int64Array (birth has %v)", name, m.Datatype, m.Value, metricNames(p.Metrics))
+		}
+	}
+	if m := byName["FT1/Total"]; m.Datatype != spb.DataType_Double {
+		t.Errorf("FT1/Total = %v, want Double (REAL, as in a Template)", m.Datatype)
+	}
+
+	cur := n.rt.Tags().Snapshot()["RTC"]
+	next := ir.CopyValue(cur)
+	next.Fld[next.Struct.FieldIndex["gettime"]].Arr[5] = ir.IntVal(42)
+	n.rt.Tags().Set("RTC", next)
+	tickWithin(t, n, 2*time.Second)
+	d := decodeLast(t, fc, "NDATA")
+	if len(d.Metrics) != 1 || d.Metrics[0].Name != "RTC/gettime" {
+		t.Fatalf("NDATA metrics %v, want RTC/gettime only", metricNames(d.Metrics))
+	}
+	if !reflect.DeepEqual(d.Metrics[0].Value, []int64{0, 0, 0, 0, 0, 42, 0}) {
+		t.Errorf("NDATA RTC/gettime = %#v", d.Metrics[0].Value)
+	}
+}
+
+// TestFlattenDeviceBirth — a UDT published on a device is flattened in that
+// device's DBIRTH, not the NBIRTH, with no Template definitions anywhere.
+func TestFlattenDeviceBirth(t *testing.T) {
+	_, fc := newFlatNode(t, WithDevice(Device{ID: "plc1", Tags: []string{"Motor1"}}))
+	nb := decodeLast(t, fc, "NBIRTH")
+	for _, m := range nb.Metrics {
+		if m.Datatype == spb.DataType_Template || len(m.Name) >= 6 && m.Name[:6] == "Motor1" {
+			t.Errorf("NBIRTH carries %q (%v), want it on plc1 flattened", m.Name, m.Datatype)
+		}
+	}
+	db := decodeLast(t, fc, "DBIRTH")
+	got := map[string]bool{}
+	for _, m := range db.Metrics {
+		if m.Datatype == spb.DataType_Template {
+			t.Errorf("Template metric %q in plc1's DBIRTH", m.Name)
+		}
+		got[m.Name] = true
+	}
+	for _, name := range []string{"Motor1/Speed", "Motor1/START", "Motor1/Drive/Torque", "Motor1/Drive/Fault"} {
+		if !got[name] {
+			t.Errorf("plc1 DBIRTH has no %s (got %v)", name, metricNames(db.Metrics))
+		}
+	}
 }

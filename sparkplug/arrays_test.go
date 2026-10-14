@@ -487,7 +487,7 @@ END_VAR
 END_PROGRAM
 `
 
-func newArrayNode(t *testing.T, buf *bytes.Buffer) (*Node, *fakeClient) {
+func newArrayNode(t *testing.T, buf *bytes.Buffer, opts ...Option) (*Node, *fakeClient) {
 	t.Helper()
 	list := func(n int, z any) []any {
 		out := make([]any, n)
@@ -513,7 +513,7 @@ func newArrayNode(t *testing.T, buf *bytes.Buffer) (*Node, *fakeClient) {
 		t.Fatalf("build runtime: %v", err)
 	}
 	log := slogTo(buf)
-	n, err := New(rt, Config{GroupID: "g", EdgeNode: "e", Log: log}, WithWritable("*"))
+	n, err := New(rt, Config{GroupID: "g", EdgeNode: "e", Log: log}, append([]Option{WithWritable("*")}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
