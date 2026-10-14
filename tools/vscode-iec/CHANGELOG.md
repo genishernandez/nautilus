@@ -5,6 +5,27 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-14
+
+The pre-release line after the stable release 0.16.0. Same contents as
+[0.16.0]; pre-release builds from `main` carry new work under
+`[Unreleased]` from here on. Requires naut 0.17.0 or later.
+
+## [0.16.0] - 2026-10-14
+
+The third stable release, for everyone on the stable channel since
+[0.14.0]. **Requires naut 0.17.0 or later.**
+
+Highlights: **a Logix project's target rules squiggle as you type**, with
+`FIRST_SCAN()` and `LOCAL_TIME` in completion and the palettes; the
+manifest schema's `sparkplug.writable` (an edge node is now read-only by
+default) and `sparkplug.flatten-udts`, and one Sparkplug device per field
+connection; and a set of correctness fixes: constructs the editor
+accepted but did not run as written (`^`, `TOD#`, text after
+`END_PROGRAM`, a write to an undeclared tag) are now errors, a rung's
+coils see one evaluation of its condition, and rename edits only the
+symbol.
+
 ### Added
 
 - **A Logix project's target rules squiggle as you type.** In a project
@@ -13,7 +34,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   an array that does not start at 0) is an error on its line while you
   type, with the rule ID (`logix/fb`) in the Problems panel. These are the
   diagnostics `naut check` already printed for such a project; they show
-  once the file compiles. Needs a `naut` newer than 0.16.1.
+  once the file compiles.
 
 - **`FIRST_SCAN()` and `LOCAL_TIME`** in completion, signature help and
   the diagram editors' palettes. `FIRST_SCAN()` is TRUE for a program's
@@ -21,17 +42,17 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   `IF FIRST_SCAN() THEN` in ST); `LOCAL_TIME` is a block whose outputs are
   the calendar now (`YEAR` … `MILLISECOND`), sitting on the rail in a rung.
   On a Logix target they are `S:FS` and `GSV(WallClockTime,,
-  LocalDateTime,…)`. Needs a `naut` newer than 0.16.1.
+  LocalDateTime,…)`.
 
 - **Manifest schema: `sparkplug.writable`.** Globs over tag names or UDT
   member paths (`Pump*.SpeedSP`) that an NCMD/DCMD may write. A Sparkplug
   edge node is now read-only by default: every other write is refused and
-  only `Node Control/Rebirth` is honoured. Needs a `naut` newer than 0.16.1.
+  only `Node Control/Rebirth` is honoured.
 
 - **`sparkplug.flatten-udts` in `nautilus.yaml`** — completion and
   validation for the new option that publishes each UDT member as a plain
   Sparkplug metric (`P101/Running`) instead of a Template, for hosts that
-  do not read Templates. Needs a `naut` newer than 0.16.1.
+  do not read Templates.
 
 ### Changed
 
@@ -40,67 +61,61 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   `Owner.t1.Q` through that program's name), was a bare "undeclared
   identifier". The squiggle now names the program that owns `t1` and says
   that tasks share only tags: publish the value to a tag there and read
-  the tag. Needs a `naut` newer than 0.16.2.
+  the tag.
 
 - **Manifest schema: `sparkplug.device` is removed** and squiggles with
   the reason. Each field connection is now its own Sparkplug device —
   named after its driver (`eip`, `sparkplug-host`) or its source id
   (`modbus`, `snmp`, `redfish`, `prometheus`) — with its own DBIRTH and
-  DDEATH, so one dead meter no longer takes every device offline. Needs a
-  `naut` newer than 0.16.1.
+  DDEATH, so one dead meter no longer takes every device offline.
 
 ### Fixed
 
 - **A pointer dereference (`x := p^;`) is now an error in ST.** `naut check`
   and the editor accepted `^` and read it as the bare name; it now says the
-  dereference operator is not supported, as `REF_TO` already was. Needs a
-  `naut` newer than 0.16.2.
+  dereference operator is not supported, as `REF_TO` already was.
 
 - **`TOD#`, `TIME_OF_DAY#`, `D#` and `DT#` literals are now errors in ST.**
   `TOD#12:00:00` and `D#20` compiled as plain integers while the page says
   date and time-of-day values do not evaluate. They are now refused with a
-  diagnostic naming the literal, as `DATE#` and `DT#` were. Needs a `naut`
-  newer than 0.16.2.
+  diagnostic naming the literal, as `DATE#` and `DT#` were.
 
 - **An inline FBD or ladder instance is declared whatever another block
   calls its locals.** With a function block earlier in the same `.fbd` or
   `.ld` file declaring `VAR t1`, a program's inline `t1 : TON(...)` (or
   rung `t1:TON(...)`) was not declared, and the file showed `undeclared
-  identifier "t1"`. Only the POU's own header now counts. (#332) Needs a
-  `naut` newer than 0.16.2.
+  identifier "t1"`. Only the POU's own header now counts. (#332)
 
 - **An FB instance named like a FUNCTION runs its block.** With
   `f : Counter;` declared and a library `FUNCTION F` in the project,
   `f(IN := 1);` called the function and the block never ran, with no
   diagnostic. The instance in scope now wins, and its declaration carries
   a warning (`instance f shadows FUNCTION F`); using the instance in an
-  expression is an error that names the function. (#336) Needs a `naut`
+  expression is an error that names the function. (#336)
 
 - **Writing an undeclared tag name is refused, not created.** A write to a
   name no tag declares (a typo, or a CONSTANT's name) through `POST /api/tags`,
   and so from an HMI, a faceplate or the dashboard, answered 204 and created a
-  stray top-level tag. It is now a 400 that names the tag. Needs a `naut`
-  newer than 0.16.2.
+  stray top-level tag. It is now a 400 that names the tag.
 
 - **Integer arithmetic has the operands' width in diagnostics.** `d1 + d2`
   on two DINTs was reported as an INT ("cannot assign INT to STRING"); it
   is now a DINT, and `INT + DINT` a DINT, `INT + UINT` a DINT, `DINT + 1`
   a DINT, the same for the ADD, SUB, MUL, DIV and MOD blocks. Only the type
   a diagnostic names changes: what compiles, and every value, is as
-  before. (#326) Needs a `naut` newer than 0.16.2.
+  before. (#326)
 
 - **Text after `END_PROGRAM` is an error, not silently ignored.** A
   `FUNCTION_BLOCK` (or anything else) placed after `END_PROGRAM` was never
   compiled, yet the file showed no diagnostics and `naut check` passed it.
   It is now an error on that line; declare function blocks and functions
   before `END_PROGRAM`. Comments and blank lines after it are still fine.
-  Needs a `naut` newer than 0.16.2.
 
 - **No completions inside comments or strings.** Typing prose in a
   `(* … *)` comment, a `//` comment or a `'string'` offered keywords, and a
   space after "while" or "real" turned it into `WHILE` or `REAL`. The
   completion list is now empty there; code right after a closed comment
-  completes as before. Needs a `naut` newer than 0.16.2.
+  completes as before.
 
 - **The nearest port wins when two sit close together on a mimic.** Ports
   about 16 px apart shared a hit area and the one earlier in the file took
@@ -119,9 +134,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 - **New input-reference chips no longer stack on the FBD canvas.** "+ add
   → input reference" places the chip at the middle of the view, offset
   from any chip already there, and a chip you wire is placed by
-  auto-layout with its network rather than staying at its drop spot. The
-  wiring part comes from `naut`'s edit operations, so it needs a `naut`
-  newer than 0.16.2. (#80, #81)
+  auto-layout with its network rather than staying at its drop spot. (#80, #81)
 
 - **The "?" shortcuts list says what `B` does to the new leg.** It arrives
   with a `_` placeholder to retag. (#77)
@@ -133,8 +146,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   evaluated once, as the ladder page says and as a controller does, and held
   in a generated BOOL, `<rung>__power`, which shows among the program's
   locals. **Programs with such a rung compute different (correct) values
-  after upgrading.** Rungs without the pattern are unchanged. Comes from the
-  runtime and `naut lsp`, so it needs a `naut` newer than 0.16.1. (#258)
+  after upgrading.** Rungs without the pattern are unchanged. (#258)
 
 - **Rename only renames the symbol.** Renaming a local `Q` also rewrote
   the member in `t1.Q`, renaming a local `T` turned `T#2s` into `Flag#2s`,
@@ -143,7 +155,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   References finds. Renaming a FUNCTION_BLOCK's variable, from its
   declaration or from `p1.Run` / `p1(Run := …)`, also renames it where
   instances of that FB in the same file use it; a builtin's member such as
-  `t1.Q` cannot be renamed. Needs a `naut` newer than 0.16.2. (#195)
+  `t1.Q` cannot be renamed. (#195)
 
 ## [0.15.0] - 2026-10-12
 
