@@ -76,7 +76,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   from any chip already there, and a chip you wire is placed by
   auto-layout with its network rather than staying at its drop spot. The
   wiring part comes from `naut`'s edit operations, so it needs a `naut`
-  newer than 0.16.1. (#80, #81)
+  newer than 0.16.2. (#80, #81)
 
 - **The "?" shortcuts list says what `B` does to the new leg.** It arrives
   with a `_` placeholder to retag. (#77)
