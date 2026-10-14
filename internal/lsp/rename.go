@@ -15,9 +15,11 @@ import (
 // Rename is "every occurrence that resolves to this declaration", which is
 // what makes it safe: a FUNCTION_BLOCK local that happens to share a tag's
 // name is a different symbol and is left alone. The symbol index knows
-// declarations, not references, so references are found by scanning the
-// text for identifiers — skipping comments and string literals — and
-// asking lookup() whether each one resolves to the symbol being renamed.
+// declarations, not references, so the occurrences are Find All
+// References' (refFile.find): identifiers in the text — not in comments,
+// strings or literal prefixes — that resolve to the symbol in their own
+// POU, never a same-named member (t1.Q) or formal (IN :=) of something
+// else (#195).
 //
 // A VAR_EXTERNAL name is a project tag, and a tag's identity is its name
 // everywhere: every program that binds it, the manifest that declares it,
@@ -29,7 +31,7 @@ import (
 const codeInvalidRequest = -32600
 
 func (s *Server) handlePrepareRename(m *message) {
-	doc, _, word, wr, pos, ok := s.positional(m)
+	doc, _, word, wr, _, ok := s.positional(m)
 	if !ok {
 		return
 	}
@@ -41,7 +43,7 @@ func (s *Server) handlePrepareRename(m *message) {
 		s.w.respondError(m.ID, codeInvalidRequest, fmt.Sprintf("%s is a keyword", word))
 		return
 	}
-	sym := doc.an.lookup(word, pos.Line+1)
+	sym := newRefFile("", doc.text, &doc.an, "").declarationAt(word, wr)
 	if sym == nil || (sym.Pos.Line == 0 && !sym.Implicit) {
 		s.w.respondError(m.ID, codeInvalidRequest, fmt.Sprintf("no declaration of %s in this file to rename", word))
 		return
@@ -60,7 +62,7 @@ func (s *Server) handleRename(m *message) {
 		s.w.respond(m.ID, nil)
 		return
 	}
-	word, _ := wordAt(doc.text, p.Position)
+	word, wr := wordAt(doc.text, p.Position)
 	if word == "" {
 		s.w.respond(m.ID, nil)
 		return
@@ -74,7 +76,7 @@ func (s *Server) handleRename(m *message) {
 		s.w.respondError(m.ID, codeInvalidRequest, fmt.Sprintf("%s is a keyword", newName))
 		return
 	}
-	sym := doc.an.lookup(word, p.Position.Line+1)
+	sym := newRefFile("", doc.text, &doc.an, "").declarationAt(word, wr)
 	if sym == nil || (sym.Pos.Line == 0 && !sym.Implicit) {
 		s.w.respondError(m.ID, codeInvalidRequest, fmt.Sprintf("no declaration of %s in this file to rename", word))
 		return
@@ -103,17 +105,15 @@ func (s *Server) handleRename(m *message) {
 	s.w.respond(m.ID, edits)
 }
 
-// renameInDocument returns the edits for every identifier in text that
-// resolves to sym. Occurrences are matched case-insensitively (IEC
-// identifiers are), and every one is rewritten to newName as typed.
+// renameInDocument returns the edits for every occurrence of sym in text —
+// what Find All References reports there. Occurrences are matched
+// case-insensitively (IEC identifiers are), and every one is rewritten to
+// newName as typed. The declaration is edited like any other occurrence,
+// so the scan needs no diagram line map (no file name, no prelude).
 func renameInDocument(text string, an *analysis, sym *Symbol, newName string) []TextEdit {
 	var edits []TextEdit
-	for _, r := range identOccurrences(text, sym.Name) {
-		got := an.lookup(sym.Name, r.Start.Line+1)
-		if got == nil || !sameSymbol(got, sym) {
-			continue
-		}
-		edits = append(edits, TextEdit{Range: r, NewText: newName})
+	for _, h := range newRefFile("", text, an, "").find(refTarget{root: sym}) {
+		edits = append(edits, TextEdit{Range: h.r, NewText: newName})
 	}
 	if edits == nil {
 		edits = []TextEdit{}
