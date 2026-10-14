@@ -5,6 +5,7 @@ import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
 import RunCard from '../../components/verified/RunCard.astro';
 import { SECTIONS, formatDate, isCovered, loadVerified, rowClip } from '../../lib/verified';
 import '../../styles/verified.css';
+import { RUNTIME_LISTED } from '../../lib/runtime-listed.mjs';
 
 const v = loadVerified();
 const anyRun = v.sets.nightly || v.sets.demo || v.sets.gestures;
@@ -51,6 +52,14 @@ const covered = stats.reduce((a, s) => a + s.covered, 0);
     <RunCard set="demo" blurb="The verb self-test at episode pace and frame — the clips guides embed." />
     <RunCard set="gestures" blurb="The webview gesture harness from CI (headless browser, no extension host)." />
   </div>
+
+  {RUNTIME_LISTED && (
+    <p>
+      The runtime, languages and drivers have their own page:
+      <a href="/verified/runtime/">every claim the documentation makes about them</a>, with the
+      tests that prove it in the last green CI run.
+    </p>
+  )}
 
   <h2>By editor</h2>
   <p>
