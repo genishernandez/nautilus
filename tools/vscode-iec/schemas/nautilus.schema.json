@@ -171,6 +171,10 @@
               "type": "string",
               "description": "Task the program is scheduled in (default MainTask)."
             },
+            "continuous": {
+              "type": "boolean",
+              "description": "Schedule the program in a CONTINUOUS Logix task, as the controller it was imported from did; the task's scan: is then only nautilus's own rate. Default false: a PERIODIC task at scan:."
+            },
             "side": {
               "type": [
                 "object",

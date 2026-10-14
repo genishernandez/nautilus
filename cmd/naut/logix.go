@@ -58,6 +58,10 @@ Usage:
                                        v1 subset is enforced; a construct it
                                        lacks is a diagnostic naming the
                                        alternative, and nothing is written.
+                                       A project's task program is written
+                                       as deploy would send it: target:
+                                       logix and the tags' seeds from
+                                       nautilus.yaml, flags overriding.
                                        "naut logix write -h" for the flags.
   naut logix emulate --l5x <file.L5X> [--listen 127.0.0.1:44818]
                    [--values seed.json] [--ramp] [--name <controller>]
@@ -142,6 +146,10 @@ Normalize flags:
                 imports, so it is for comparison, not round-tripping.
   --check       Compare against a second export and exit 1 if they differ
                 once normalized. Drift detection, in one command.
+  --logic       With --check: compare logic only — programs, routines,
+                rung text and comments, tag names, scopes and types, never
+                values — and list each difference. The comparison for a
+                write-back against the export it was imported from.
 `
 
 func runLogix(args []string) int {
@@ -444,11 +452,16 @@ func runLogixNormalize(args []string) int {
 	pinIDs := fs.Bool("pin-ids", false, "also pin DataExchangeId and ProjectSN")
 	dropL5K := fs.Bool("drop-l5k", false, "drop the redundant L5K copy of every value")
 	check := fs.String("check", "", "compare against this export and exit 1 if they differ")
+	logic := fs.Bool("logic", false, "with --check: compare logic only, and list each difference")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: naut logix normalize [flags] <file.L5X>")
+		return 2
+	}
+	if *logic && *check == "" {
+		fmt.Fprintln(os.Stderr, "naut logix normalize: --logic compares two exports; give the second with --check")
 		return 2
 	}
 	opts := l5x.NormalizeOptions{PinIDs: *pinIDs, DropL5K: *dropL5K}
@@ -462,6 +475,9 @@ func runLogixNormalize(args []string) int {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "naut logix normalize:", err)
 			return 1
+		}
+		if *logic {
+			return logicCheck(fs.Arg(0), raw, *check, other)
 		}
 		if l5x.Equivalent(raw, other, opts) {
 			fmt.Printf("%s and %s are the same project\n", fs.Arg(0), *check)
@@ -481,6 +497,35 @@ func runLogixNormalize(args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "wrote %s\n", *out)
 	return 0
+}
+
+// logicCheck is `normalize --check --logic`: drift --logic's comparison
+// between two exports on disk — programs, routines, every rung's text and
+// comment, every tag's name, scope and type; never a value — with each
+// difference listed. It is how a write-back is compared with the export
+// it was imported from, whose envelope (a full project against a lean
+// export, attribute order, the L5K copy of each value) always differs.
+func logicCheck(aPath string, a []byte, bPath string, b []byte) int {
+	fa, err := l5x.Parse(a)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut logix normalize:", aPath, err)
+		return 1
+	}
+	fb, err := l5x.Parse(b)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut logix normalize:", bPath, err)
+		return 1
+	}
+	diffs := l5x.LogicDiff(l5x.LogicOf(fa), l5x.LogicOf(fb))
+	if len(diffs) == 0 {
+		fmt.Printf("%s and %s have the same logic\n", aPath, bPath)
+		return 0
+	}
+	fmt.Printf("%d logic difference(s) between %s (first) and %s (second):\n", len(diffs), aPath, bPath)
+	for _, d := range diffs {
+		fmt.Println("  " + d)
+	}
+	return 1
 }
 
 func runLogixInfo(args []string) int {
@@ -543,6 +588,9 @@ func runLogixInfo(args []string) int {
 // runLogixWrite is the nautilus → Logix writer: one ladder program in,
 // one L5X controller project out. The flags are the project envelope the
 // program lands in; a hardware.L5X merge replaces them in a later phase.
+// For the task program of a project with target: logix the envelope and
+// the tags' seeds come from nautilus.yaml, as for a deploy, and a flag
+// given overrides one of them.
 func runLogixWrite(args []string) int {
 	fs := flag.NewFlagSet("logix write", flag.ContinueOnError)
 	out := fs.String("o", "", "write the L5X here (default: stdout)")
@@ -568,24 +616,48 @@ func runLogixWrite(args []string) int {
 		fmt.Fprintln(os.Stderr, "naut logix write:", err)
 		return 2
 	}
-	major, minor, _ := strings.Cut(*revision, ".")
 	_, libs, _ := stproject.PreludeSources(path, nil)
+	opts := writer.Options{
+		Controller: *controller, Program: *program, Routine: *routine, Task: *task,
+		PeriodMs: *period, ProcessorType: *processor,
+		SoftwareRevision: *software, ExportDate: *date, Libs: libs,
+	}
 	// In a project, the manifest's tags are controller tags the program may
 	// name without declaring them (#177/#210).
-	var tags map[string]string
 	if dir, ok := projectDirOf(path); ok {
 		if m, err := project.ReadManifest(os.DirFS(dir), ""); err == nil {
-			if tags, err = logixTagTypes(m); err != nil {
+			if opts.Tags, err = logixTagTypes(m); err != nil {
 				fmt.Fprintf(os.Stderr, "naut logix write: %s: %v\n", filepath.Join(dir, project.ManifestName), err)
 				return 2
 			}
 		}
+		// The project's deployed program: write what `naut logix deploy`
+		// would send — the target: logix envelope, the task's rate and the
+		// tags' seeds, descriptions and aliases — so an imported project
+		// writes back where it came from (#276). A flag given still wins.
+		if p, err := loadLogixProject(dir); err == nil && samePath(p.program, path) {
+			set := map[string]bool{}
+			fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+			from := func(name string, dst *string, v string) {
+				if !set[name] && v != "" {
+					*dst = v
+				}
+			}
+			t := p.target
+			from("controller", &opts.Controller, t.Controller)
+			from("program", &opts.Program, t.Program)
+			from("routine", &opts.Routine, t.Routine)
+			from("task", &opts.Task, t.Task)
+			from("processor", &opts.ProcessorType, t.Processor)
+			from("revision", revision, t.Revision)
+			if !set["period"] {
+				opts.PeriodMs = t.PeriodMs
+			}
+			opts.Inits, opts.Descs, opts.Aliases, opts.Side = t.Inits, t.Descs, t.Aliases, t.Side
+		}
 	}
-	doc, diags, err := writer.WriteProgram(path, string(raw), writer.Options{
-		Controller: *controller, Program: *program, Routine: *routine, Task: *task,
-		PeriodMs: *period, ProcessorType: *processor, MajorRev: major, MinorRev: minor,
-		SoftwareRevision: *software, ExportDate: *date, Libs: libs, Tags: tags,
-	})
+	opts.MajorRev, opts.MinorRev, _ = strings.Cut(*revision, ".")
+	doc, diags, err := writer.WriteProgram(path, string(raw), opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
 		return 2
@@ -607,6 +679,13 @@ func runLogixWrite(args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "wrote %s\n", *out)
 	return 0
+}
+
+// samePath reports whether two paths name the same file.
+func samePath(a, b string) bool {
+	x, err1 := filepath.Abs(a)
+	y, err2 := filepath.Abs(b)
+	return err1 == nil && err2 == nil && filepath.Clean(x) == filepath.Clean(y)
 }
 
 // projectDirOf is the directory holding the manifest that governs a source

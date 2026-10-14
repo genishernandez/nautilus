@@ -13,6 +13,10 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   the session and holds data back, and `disconnect` ends the session as
   Sparkplug 3.0 has it (NDEATH, reconnect, and birth once the host is
   back). Needs a `naut` newer than 0.17.0.
+- **`target.logix.continuous` in `nautilus.yaml`.** Completion and
+  validation for the option that schedules the program in a CONTINUOUS
+  Logix task, as the controller it was imported from did; `naut logix
+  import --project` sets it. Needs a `naut` newer than 0.17.0.
 
 ### Changed
 

@@ -1458,6 +1458,96 @@ to even like an assignment. An INT store out of range is not asserted
 (`division`'s large quotient): the controller wraps where nautilus keeps
 the value (`st-int-width`), which is not a conversion question.
 
+### Round trip on the yardstick (2026-10-14, #276)
+
+The video beat: import the public yardstick, show the project it writes,
+write it back, diff. Run offline, pure Go, no controller, from a
+directory holding a copy of `examples/batch-skid/line/Line.L5X`:
+
+```sh
+naut logix import --project line Line.L5X
+#   wrote line/MainProgram.ld, line/lib/logix_types.st,
+#   line/nautilus.yaml, line/tags/logix.yaml
+#   1 ladder routine, 1 complete; 5 rungs, 5 carried
+naut check line                       # clean: 0 errors, 0 warnings
+naut logix write -o back.L5X line/MainProgram.ld
+naut logix normalize --logic --check back.L5X Line.L5X
+```
+
+**On main before this change the flow did not hold.** `naut logix write`
+ignored the imported `target: logix` and the tag file, so the write-back
+was controller `MainProgram` on a 1756-L85E at 38.11, routine
+`MainRoutine`, and every tag at zero with no description: `Line_Ready`
+1 → 0, `Line_TankLevel` 20.0 → 0.0, `Line_Status.Mode` 1 → 0. And
+`naut check` warned on the fresh import (the timer, moved into the
+program, was also left in the tag file). Fixed here:
+
+- `naut logix write` on a project's task program writes what `naut logix
+  deploy` would send: controller, processor, revision, program, routine
+  and task from `target: logix`, the rate from the task, each tag's
+  `init:`, `desc:` and `alias:` from the tag file. A flag given still
+  overrides.
+- The import records `routine:` (when it is not `MainRoutine`), `program:`
+  (when the Logix name is not an identifier) and the new
+  `continuous: true` for a CONTINUOUS task, which `write` and `deploy`
+  honour instead of turning the task PERIODIC at the 10 ms nautilus scan.
+- A controller-scoped TIMER/COUNTER the import declares as a program
+  instance is left out of the tag file (unless some program also names it
+  as a tag), so the imported project checks clean.
+- `naut logix normalize --check` gained `--logic`: drift `--logic`'s
+  comparison (programs, routines, rung text and comments, tag names,
+  scopes and types; never values) between two files on disk, each
+  difference listed. A byte or normalized comparison of a write-back with
+  a lean export can never be equal (below), so this is the diff the beat
+  shows.
+
+**Outcome: equivalent, not identical, with four logic differences, each
+named** (`TestLogixRoundTripYardstickCLI` in `cmd/naut` pins the exact
+output; a new difference fails it):
+
+```
+4 logic difference(s) between Line.L5X (first) and back.L5X (second):
+  tag AcceptTmr (TIMER): only on the first side
+  tag Line_BatchId (DINT): only on the first side
+  tag MainProgram.AcceptTmr (TIMER): only on the second side
+  routine MainProgram/Receive rung 0:
+    LES(Line_TankLevel,80.0)OTE(Line_Ready);
+    LT(Line_TankLevel,80.0)OTE(Line_Ready);
+```
+
+| difference | class | issue |
+| --- | --- | --- |
+| rung 0 `LES(` → `LT(` | equivalent: spelling. `LES` is the editor caption, `LT` what an export carries (logix-target.md, display/neutral-text split); the yardstick was hand-written with the caption | #372 (correct the example) |
+| `AcceptTmr` controller → program scope | semantic for an external client (`AcceptTmr.ACC` moves to `Program:MainProgram.AcceptTmr.ACC`); the rungs run the same | #371 |
+| `Line_BatchId` not written | semantic: a tag the skid writes over EtherNet/IP is missing; no routine names it and the writer emits only the tags a program names | #370 |
+
+Rungs 1–4 are byte-identical, all five rung comments are identical, the
+controller (`LineController`, 1769-L33ER, 36.11), program, routine
+(`Receive`) and task (`MainTask`, CONTINUOUS) are identical, and every
+written tag's initial value and description equals the export's.
+
+Outside the logic comparison (the raw `diff` is 133 lines; `normalize
+--check` without `--logic` says "differ"):
+
+- **Equivalent — envelope.** The writer emits a whole project where the
+  yardstick is a lean export: `RedundancyInfo`, `Security`, `SafetyInfo`,
+  `Modules` (the `Local` module), `AddOnInstructionDefinitions`, `CST`,
+  `WallClockTime`, `Trends`, `TimeSynchronize`, `EthernetPorts`, more
+  `Controller` attributes, `Owner="nautilus"`, a different
+  `ExportOptions`, and `ExportDate="(pinned)"`.
+- **Equivalent — formatting.** Controller tags in name order rather than
+  declaration order; each value also as `<Data Format="L5K">`; the
+  Decorated data on its own lines.
+- **Named — metadata.** `SoftwareRevision` 38.01 against 36.00; the UDT's
+  description and `AcceptTmr`'s are not written (#373, #371). The `Local`
+  module's product code and backplane are the 1756-L85E's whatever the
+  processor (#373, unverified for CompactLogix).
+
+What the video can say, word for word: *"Import, write back, compare the
+logic: four differences, and each one has a name — one is a spelling, the
+timer moved into the program, and one tag no rung uses isn't written."*
+If #372 lands first the spelling line disappears.
+
 ## 8. The demo this enables
 
 James's target demo (2026-10-03), which replaces the Tier A `ab01` draft in the
