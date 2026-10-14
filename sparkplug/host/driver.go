@@ -286,9 +286,10 @@ func (d *Driver) ReadInputsInto(dst nio.Values) error {
 // Anything else is ignored — the runtime hands us exactly the Outputs list it
 // was configured with, but a hand-wired driver may not.
 //
-// __Rebirth is deliberately unaffected by the baseline: its baseline value is
-// false, and only a rising edge (false → true) is a command, so the rule
-// already reads it correctly.
+// __Rebirth follows the baseline rule like any output: only a rising edge
+// (false → true) is a command, and a value already TRUE on the first scan
+// is baseline, not an edge, so a __Rebirth held TRUE (or retained) across a
+// restart does not rebirth every site each time the controller starts.
 func (d *Driver) WriteOutputs(vals nio.Values) error {
 	d.wmu.Lock()
 	d.initWriteMapsLocked()
