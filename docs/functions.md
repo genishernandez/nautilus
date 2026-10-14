@@ -270,6 +270,18 @@ details, `type:` forms and `init:` forms (TIME members, arrays).
   are float64. The declared name is kept on the type, so a diagnostic
   says `DINT` or `WORD` for a variable declared that way, and
   [partial access](#bit-operations) knows a `DINT` has 32 bits.
+- **Arithmetic does not wrap at the declared width.** This is deliberate:
+  an `INT` holding 32767 plus 1 is 32768, not -32768 as on a PLC. A silent
+  wrap turns a totaliser or a counter into a wrong number with no fault,
+  and every seam on the tag bus carries the full value anyway. The width
+  is applied where you ask for it: a conversion (`TO_INT`, `DINT_TO_INT`)
+  wraps to the target, as on Codesys. A program that relies on a counter
+  rolling over should convert or `MOD` explicitly.
+- **Signed with unsigned widens** to the narrowest signed type that holds
+  both (`INT + UINT` is a `DINT`), as the
+  [common type](#operators) rules below say, rather than being refused as
+  strict IEC would. No value is lost either way, so the check stays out of
+  the way of ordinary mixed arithmetic.
 - `TIME` counts **milliseconds** internally. Literals: `T#500MS`, `T#5S`,
   `T#2M30S`. TIME values compare with the ordinary comparisons.
 - Mixed numeric arguments promote to REAL; comparing or combining a
