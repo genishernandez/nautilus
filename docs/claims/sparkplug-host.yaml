@@ -117,6 +117,7 @@ claims:
       - go ./sparkplug/host TestStateNBirthAppliesValues
       - go ./sparkplug/host TestStateNDeathKeepsValues
       - go ./sparkplug/host TestStateStaleNDeathIgnored
+      - go ./sparkplug/host TestEdgeBrokerDropIsANewSessionToTheHost
       - go ./sparkplug/host TestStateDeviceLifecycle
       - go ./sparkplug/host TestStateLastBirthMsMovesToTheNewerBirth
       - go ./sparkplug/host TestCompanionTagNames

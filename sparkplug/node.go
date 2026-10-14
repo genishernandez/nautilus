@@ -138,6 +138,14 @@ type Node struct {
 	sf *storeForward // nil unless WithStoreForward
 
 	tokenTimeout time.Duration // bound on every MQTT token wait; tests shorten it
+	// retryInterval is how long a client made by newSession waits between
+	// connect attempts while the broker refuses it (sessionRetryInterval;
+	// tests shorten it).
+	retryInterval time.Duration
+	// ownsClient is set by Start: n.cli is the node's own paho client, and a
+	// lost connection starts a new session (newSession). Tests that hand the
+	// node a fake client leave it false.
+	ownsClient bool
 	// lost is closed by connectionLost and replaced for the next connection.
 	// A publish captures it before issuing its token and waits on it too, so
 	// a token orphaned by a teardown is abandoned the moment paho reports the
@@ -154,6 +162,10 @@ type Node struct {
 
 const (
 	connectTimeout = 30 * time.Second
+	// sessionRetryInterval is how long a client made by newSession waits
+	// between connect attempts while the broker is unreachable or refuses it.
+	// The first attempt is immediate.
+	sessionRetryInterval = 5 * time.Second
 	// tokenTimeout bounds every MQTT token wait in the edge node (the same
 	// bound sparkplug/host uses). A QoS 0 publish completes on the socket
 	// write, so a token still pending after this long belongs to a link that
@@ -211,8 +223,9 @@ func New(rt *runtime.Runtime, cfg Config, opts ...Option) (*Node, error) {
 		devPartialSince: map[string]time.Time{},
 		tagOwner:        map[string]string{},
 
-		tokenTimeout: tokenTimeout,
-		lost:         make(chan struct{}),
+		tokenTimeout:  tokenTimeout,
+		retryInterval: sessionRetryInterval,
+		lost:          make(chan struct{}),
 	}
 	for _, o := range opts {
 		o(n)
@@ -276,8 +289,8 @@ func (n *Node) deviceTopic(msgType, device string) string {
 // ── lifecycle ─────────────────────────────────────────────────────────────
 
 // Start connects to the broker and runs the node until ctx is cancelled or
-// Stop is called. Connection loss is handled by paho's auto-reconnect (which
-// re-fires onConnect → rebirth).
+// Stop is called. A lost connection is a new session: a new client whose
+// will carries the next bdSeq (newSession), not paho's auto-reconnect.
 func (n *Node) Start(ctx context.Context) error {
 	ctx, n.cancel = context.WithCancel(ctx)
 	n.done = make(chan struct{})
@@ -287,6 +300,7 @@ func (n *Node) Start(ctx context.Context) error {
 	n.mu.Lock()
 	n.bdSeq = n.loadBdSeq()
 	n.stopping = false // clear any stop from a previous session (Node is reused across Start/Stop)
+	n.ownsClient = true
 	n.mu.Unlock()
 
 	opts, err := n.clientOptions()
@@ -308,18 +322,24 @@ func (n *Node) Start(ctx context.Context) error {
 
 // clientOptions builds the MQTT options for one session: its will is the
 // NDEATH for the current bdSeq, which it persists (the will and the NBIRTH
-// must carry the same value). A new session — Start, or a reconnect after
-// the node ended its session for an offline primary host — needs a new
+// must carry the same value). A new session — Start, a lost connection, or
+// the node ending its session for an offline primary host — needs a new
 // client, as paho fixes the will when the client is made.
+//
+// paho's auto-reconnect is off for exactly that reason: it would CONNECT
+// again with this client's will, so bdSeq would not move on across the
+// reconnect (tck-id-topics-nbirth-bdseq-increment), and a will from the
+// dead connection, fired late by the broker, could not be told from the
+// death of the new one. connectionLost starts the next session instead.
 func (n *Node) clientOptions() (*mqtt.ClientOptions, error) {
-	willTopic := n.topic("NDEATH")
-	willPayload, err := n.deathPayload()
-	if err != nil {
-		return nil, err
-	}
 	n.mu.Lock()
 	bd := n.bdSeq
 	n.mu.Unlock()
+	willTopic := n.topic("NDEATH")
+	willPayload, err := deathPayloadFor(bd)
+	if err != nil {
+		return nil, err
+	}
 	n.saveBdSeq(bd)
 
 	opts := mqtt.NewClientOptions().
@@ -327,7 +347,7 @@ func (n *Node) clientOptions() (*mqtt.ClientOptions, error) {
 		SetClientID(n.cfg.ClientID).
 		SetKeepAlive(n.cfg.Keepalive).
 		SetCleanSession(true).
-		SetAutoReconnect(true).
+		SetAutoReconnect(false).
 		SetConnectTimeout(30*time.Second).
 		SetOrderMatters(true).
 		SetBinaryWill(willTopic, willPayload, 1, false).
@@ -361,7 +381,7 @@ func (n *Node) Stop() {
 	n.mu.Lock()
 	born := n.born
 	n.mu.Unlock()
-	if born && n.cli.IsConnected() {
+	if born && n.cli.IsConnectionOpen() {
 		if p, err := n.deathPayload(); err == nil {
 			if err := n.publish(n.topic("NDEATH"), 1, false, p); err != nil {
 				n.log.Warn("sparkplug: NDEATH not confirmed", "error", err)
@@ -377,15 +397,16 @@ func (n *Node) Stop() {
 	n.mu.Unlock()
 }
 
-// onConnect (re)subscribes to command topics and births. Fires on first
-// connect and on every auto-reconnect, from paho's own connection goroutine —
-// asynchronously with respect to Start() returning, and (via reconnect) even
-// after Stop() has begun. beginInflight/n.inflight is what lets Stop() wait
-// for this before it mutates bdSeq/born.
+// onConnect subscribes to the command topics (and the primary host's STATE)
+// and births. It fires once per client, from paho's own connection goroutine
+// — asynchronously with respect to Start() returning, and for a client made
+// by newSession possibly after Stop() has begun. beginInflight/n.inflight is
+// what lets Stop() wait for the birth before it mutates bdSeq/born.
 //
-// It subscribes on the client paho hands it, which is n.cli: after the node
-// ends a session for an offline primary host, n.cli is replaced (see
-// endSession), and reading the field here would race that.
+// It subscribes on the client paho hands it, not n.cli: newSession replaces
+// n.cli, and reading the field here would race that. Every client is a
+// clean session, so this is where NCMD, DCMD and STATE are re-established
+// after a reconnect.
 func (n *Node) onConnect(c mqtt.Client) {
 	c.Subscribe(n.topic("NCMD"), 1, n.handleCommand)
 	c.Subscribe(n.deviceTopic("DCMD", "+"), 1, n.handleCommand)
@@ -401,16 +422,118 @@ func (n *Node) onConnect(c mqtt.Client) {
 
 // connectionLost is paho's connection-lost handler, run from a paho goroutine
 // once paho has noticed the loss — which can be long after the link actually
-// died, and (on a fast reconnect) barely before onConnect births again.
-// Besides clearing born it retires n.lost, which abandons any wait on a token
-// issued on the connection that just died.
-func (n *Node) connectionLost(_ mqtt.Client, e error) {
+// died. Besides clearing born it retires n.lost, which abandons any wait on a
+// token issued on the connection that just died. Then, for the node's own
+// client, it starts the next session (newSession): bdSeq+1 in a new will,
+// and the birth that follows carries the same bdSeq.
+//
+// A loss reported by a client that is no longer n.cli belongs to a session
+// already ended; born, lost and bdSeq are the current session's, so it is
+// ignored.
+func (n *Node) connectionLost(c mqtt.Client, e error) {
 	n.mu.Lock()
+	if c != n.cli {
+		n.mu.Unlock()
+		n.log.Debug("sparkplug: connection lost on an ended session's client", "error", e)
+		return
+	}
 	n.born = false
 	close(n.lost)
 	n.lost = make(chan struct{})
+	owns := n.ownsClient
 	n.mu.Unlock()
 	n.log.Warn("sparkplug: connection lost", "error", e)
+	if owns {
+		n.newSession(c, false)
+	}
+}
+
+// newSession ends the session on client old and starts the next one on a
+// new client. It is the one place bdSeq moves on while the node runs: on a
+// lost connection (connectionLost), and when the node ends its session for
+// an offline primary host (endSession, which asks for the explicit NDEATH
+// first — sayDeath).
+//
+// bdSeq increments on every new MQTT CONNECT
+// (tck-id-topics-nbirth-bdseq-increment), and paho fixes the will when a
+// client is made, so the next session is a new client whose will carries
+// bdSeq+1 — persisted to bdseq-file by clientOptions. It connects with retry
+// and is not waited on: its onConnect subscribes and births. The birth reads
+// the same n.bdSeq the will was built from, because bdSeq and the client
+// change together here, under pubMu, which every birth holds from the moment
+// it reads bdSeq until its NBIRTH is handed to the client. So the will the
+// broker holds and the NBIRTH a host sees always carry the same bdSeq, and a
+// will left over from the old connection — the broker may fire it late, on
+// takeover — carries the old one, which a host discards as stale.
+//
+// Meanwhile the node is unborn: with store-and-forward it keeps sampling
+// into the buffer (bufferingLocked), and the first tick after the new birth
+// replays it as historical.
+//
+// It registers as in-flight so Stop waits for it rather than racing the
+// client swap, and is a no-op once old is no longer n.cli (that session has
+// already been ended).
+func (n *Node) newSession(old mqtt.Client, sayDeath bool) {
+	if !n.beginInflight() {
+		return // Stop is in progress; it ends the session itself
+	}
+	defer n.inflight.Done()
+
+	n.pubMu.Lock()
+	n.mu.Lock()
+	if n.cli != old {
+		n.mu.Unlock()
+		n.pubMu.Unlock()
+		return
+	}
+	born := n.born
+	n.born = false
+	if n.rebirthTimer != nil {
+		n.rebirthTimer.Stop()
+		n.rebirthTimer = nil
+	}
+	n.mu.Unlock()
+
+	if sayDeath {
+		// A clean DISCONNECT makes the broker discard the will, so the
+		// NDEATH is published, before the DISCONNECT (see endSession).
+		if born && old.IsConnectionOpen() {
+			if p, err := n.deathPayload(); err == nil {
+				if err := n.publish(n.topic("NDEATH"), 1, false, p); err != nil {
+					n.log.Warn("sparkplug: NDEATH not confirmed", "error", err)
+				}
+			}
+		}
+		old.Disconnect(250)
+	}
+	// On a lost connection there is nothing to send and nothing to
+	// disconnect: the broker publishes the old will itself, with the old
+	// bdSeq, once it notices.
+
+	n.mu.Lock()
+	n.bdSeq = (n.bdSeq + 1) % 256
+	retry := n.retryInterval
+	n.mu.Unlock()
+	opts, err := n.clientOptions()
+	if err != nil {
+		n.pubMu.Unlock()
+		n.log.Error("sparkplug: new session", "error", err)
+		return
+	}
+	// Retry until the broker accepts: after a lost connection it is likely
+	// still down. The first attempt is immediate.
+	opts.SetConnectRetry(true).SetConnectRetryInterval(retry)
+	cli := mqtt.NewClient(opts)
+	n.mu.Lock()
+	n.cli = cli
+	bd := n.bdSeq
+	n.mu.Unlock()
+	n.pubMu.Unlock()
+	n.log.Info("sparkplug: new session", "bdSeq", bd)
+
+	// Not waited on: with connect retry the token completes only once the
+	// broker accepts, and Stop must not wait that long. onConnect births.
+	cli.Connect()
 }
 
 // beginInflight registers an in-flight birth/rebirth attempt and reports
@@ -537,11 +660,16 @@ func (n *Node) saveBdSeq(v uint64) {
 	_ = filepath.Clean(n.cfg.BdSeqFile)
 }
 
-// deathPayload builds the NDEATH / will payload: only bdSeq, no seq.
+// deathPayload builds the NDEATH payload for the current bdSeq.
 func (n *Node) deathPayload() ([]byte, error) {
 	n.mu.Lock()
 	bd := n.bdSeq
 	n.mu.Unlock()
+	return deathPayloadFor(bd)
+}
+
+// deathPayloadFor builds an NDEATH / will payload: only bdSeq, no seq.
+func deathPayloadFor(bd uint64) ([]byte, error) {
 	return Payload{OmitSeq: true, Metrics: []Metric{
 		{Name: "bdSeq", Datatype: spb.DataType_Int64, Value: int64(bd)},
 	}}.Encode()
@@ -608,7 +736,9 @@ type DeviceStatus struct {
 func (n *Node) Status() Status {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	connected := n.cli != nil && n.cli.IsConnected()
+	// IsConnectionOpen, not IsConnected: a client retrying its connect
+	// (newSession) reports IsConnected true.
+	connected := n.cli != nil && n.cli.IsConnectionOpen()
 	s := Status{
 		Group:           n.cfg.GroupID,
 		EdgeNode:        n.cfg.EdgeNode,

@@ -198,6 +198,15 @@ rate-limited so a backlog doesn't flood the broker on reconnect.
 `bdseq-file` persists the birth-death sequence number across restarts, as
 the spec expects; without it bdSeq restarts at 0 each run.
 
+A dropped broker connection is a new session. The broker publishes the
+node's will, an NDEATH with the old bdSeq; the node connects again with
+the next bdSeq (retrying every 5 seconds until the broker accepts), writes
+it to `bdseq-file`, and births with it. Its new will carries the same
+bdSeq as its new NBIRTH, so a host applies the next death and discards a
+will from the old connection that arrives late, after the new birth.
+Commands, the primary host's STATE and store-and-forward carry on across
+the reconnect as above.
+
 ## From Go
 
 The manifest section is the manifest form of the `sparkplug` package —

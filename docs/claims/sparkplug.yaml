@@ -180,6 +180,7 @@ claims:
     source: "#primary-host-and-store-and-forward"
     tests:
       - go ./sparkplug TestStoreForwardBuffersAcrossABrokerOutage
+      - go ./sparkplug TestBrokerDropStartsANewSessionWithTheNextBdSeq
       - go ./sparkplug TestStoreForwardBuffersWhileThePrimaryHostIsOffline
       - go ./sparkplug TestNoPublishWhileTheConnectionIsNotOpen
       - go ./sparkplug TestTimedOutTickIsBufferedWhenStoreForwardIsOn
@@ -198,6 +199,20 @@ claims:
     source: "#primary-host-and-store-and-forward"
     tests:
       - go ./sparkplug TestBdSeqFilePersistsAcrossRestarts
+  - id: SPB-027
+    claim: >-
+      A dropped broker connection is a new session: the broker's will
+      carries the old bdSeq, and the node reconnects with the next bdSeq,
+      persisted to `bdseq-file`, in both its new will and its new NBIRTH, so
+      a host applies the next death and ignores a late will from the old
+      connection. Commands, the primary host's STATE and store-and-forward
+      carry on across the reconnect.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestBrokerDropStartsANewSessionWithTheNextBdSeq
+      - go ./sparkplug TestBrokerDropResubscribesToThePrimaryHost
+      - go ./sparkplug TestBrokerDropThenHostOfflineDisconnect
+      - go ./sparkplug/host TestEdgeBrokerDropIsANewSessionToTheHost
   - id: SPB-023
     claim: >-
       The node passes the Sparkplug TCK edge-node profile, run against a

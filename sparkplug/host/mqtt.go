@@ -15,7 +15,8 @@
 //     client's will timestamp goes stale and diverges from a fresh birth. We
 //     rebuild the client — and the will timestamp — per attempt, and the STATE
 //     birth reuses that same ts byte-identically (TCK
-//     host-topic-phid-birth-payload-timestamp compares ==).
+//     host-topic-phid-birth-payload-timestamp compares ==). (The edge node
+//     now does the same, for its NDEATH will's bdSeq: node.go newSession.)
 //
 // OWNED BY B3.
 
