@@ -224,12 +224,19 @@ func (c *Client) Close(ctx context.Context) {
 	c.hc.CloseIdleConnections()
 }
 
+// url resolves a resource path against the BMC. An @odata.id is already
+// percent-encoded ("/Chassis/Front%20Panel"): it goes on the wire as it is,
+// not encoded a second time into %2520. A path that is not valid escaping
+// (a hand-written space, a bare %) is encoded as before.
 func (c *Client) url(path string) string {
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		return path
 	}
 	u := *c.base
-	u.Path = path
+	u.Path, u.RawPath = path, ""
+	if p, err := url.PathUnescape(path); err == nil {
+		u.Path, u.RawPath = p, path
+	}
 	return u.String()
 }
 

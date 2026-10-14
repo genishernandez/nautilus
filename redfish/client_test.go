@@ -243,6 +243,58 @@ func TestClientWireShape(t *testing.T) {
 	}
 }
 
+// An @odata.id is already percent-encoded; it reaches the BMC unchanged,
+// not double-encoded. A hand-written path with a raw space is encoded once.
+func TestClientPathEncoding(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.RequestURI)
+		mu.Unlock()
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c, err := NewClient(Source{ID: "X", Host: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		"/redfish/v1/Chassis/Front%20Panel",
+		"/redfish/v1/Chassis/A%2FB/Thermal",
+		"/redfish/v1/Chassis/Rear Panel",
+		"/redfish/v1/Chassis/100%",
+	} {
+		if _, err := c.Get(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{
+		"/redfish/v1/Chassis/Front%20Panel",
+		"/redfish/v1/Chassis/A%2FB/Thermal",
+		"/redfish/v1/Chassis/Rear%20Panel",
+		"/redfish/v1/Chassis/100%25",
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(seen, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("on the wire:\n%s\nwant:\n%s", strings.Join(seen, "\n"), strings.Join(want, "\n"))
+	}
+
+	// And the stand-in, keyed by @odata.id, answers the encoded id.
+	tree := smallTree()
+	tree["/redfish/v1/Chassis/Front%20Panel"] = json.RawMessage(`{"@odata.id":"/redfish/v1/Chassis/Front%20Panel","Id":"Front Panel"}`)
+	mock := mockup.New(tree, mockup.Options{})
+	if err := mock.Start("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mock.Stop)
+	mc, _ := NewClient(Source{ID: "X", Host: mock.URL()})
+	if r, err := mc.Get(context.Background(), "/redfish/v1/Chassis/Front%20Panel"); err != nil || r.Status != 200 {
+		t.Fatalf("stand-in GET of an encoded id: %v %+v", err, r)
+	}
+}
+
 // A self-signed BMC certificate fails verification by default, and the
 // error names both fixes; insecure and ca-file each work.
 func TestClientTLS(t *testing.T) {
