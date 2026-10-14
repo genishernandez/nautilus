@@ -416,10 +416,10 @@ func TestBaseWrites(t *testing.T) {
 	_ = b.WriteOutputs(nio.Values{"REFUSE_Cmd": false})
 	_ = b.WriteOutputs(nio.Values{"REFUSE_Cmd": true})
 	deadline = time.Now().Add(time.Second)
-	for !strings.Contains(b.Health().Sources[0].LastError, "wrongValue") && time.Now().Before(deadline) {
+	for !strings.Contains(b.Health().Sources[0].LastWriteError, "wrongValue") && time.Now().Before(deadline) {
 		time.Sleep(2 * time.Millisecond)
 	}
-	if h := b.Health(); !strings.Contains(h.Sources[0].LastError, "REFUSE_Cmd") || h.Sources[0].QueuedWrites != 0 {
+	if h := b.Health(); !strings.Contains(h.Sources[0].LastWriteError, "REFUSE_Cmd") || h.Sources[0].QueuedWrites != 0 {
 		t.Fatalf("refused write: %+v", h.Sources[0])
 	}
 	// A closed gate (a standby) neither queues nor records a command...

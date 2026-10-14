@@ -102,7 +102,7 @@ func TestForeignImportByteIdenticalOnRerun(t *testing.T) {
 func TestForeignCpuMemPollAndRate(t *testing.T) {
 	url := simURL(t)
 	m := prom.Manifest{
-		Sources: []prom.Source{{ID: "SIM", URL: url, Interval: 300 * time.Millisecond, Timeout: 5 * time.Second}},
+		Sources: []prom.Source{{ID: "SIM", URL: url, Interval: time.Second, Timeout: 5 * time.Second}},
 		Tags: []prom.Tag{{
 			Name: "SIM", Type: "Server", Source: "SIM",
 			Members: map[string]prom.Binding{
@@ -137,20 +137,29 @@ func TestForeignCpuMemPollAndRate(t *testing.T) {
 	if mem := get(sv, "MemPct"); mem < 0 || mem > 100 {
 		t.Fatalf("MemPct = %v, want [0,100]", mem)
 	}
-	// CpuPct needs a second sample; wait past a second interval.
-	waitFor(t, "a rated CpuPct", func() bool {
+	// CpuPct needs a second sample; wait past a second interval (generously:
+	// a loaded runner can delay a scrape by whole seconds).
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		v, _ := d.ReadInputs()
-		sv, ok := v["SIM"].(ir.Value)
-		return ok && get(sv, "CpuPct") != 0
-	})
+		if sv, ok := v["SIM"].(ir.Value); ok && get(sv, "CpuPct") != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for a rated CpuPct")
+		}
+	}
 	vals, _ = d.ReadInputs()
-	// Within a point of [0,100]: the exporter's own read time varies by a
-	// millisecond or so, and on an idle runner the idle rate sits right at
-	// the CPU count, so the true value is 0 and a sample can land a hair
-	// below it. A wrong rate (a gap, a reset, the wrong time base) is off by
-	// far more than that.
-	if cpu := get(vals["SIM"].(ir.Value), "CpuPct"); cpu < -1 || cpu > 100 {
-		t.Fatalf("CpuPct = %v, want [0,100] within a point", cpu)
+	// Within five points of [0,100]. The rate's window is measured on our
+	// clock but the counters are read by the exporter at some instant inside
+	// the request, and node_exporter's idle seconds tick in 10 ms USER_HZ
+	// steps; on a busy runner that is several milliseconds of jitter and a
+	// tick or two of quantization, and on an idle runner the idle rate sits
+	// right at the CPU count, so the true value is 0 and a sample can land a
+	// few points either side. The window is a full second to keep that to
+	// about a point; a wrong rate (a gap, a reset, the wrong time base) is
+	// off by far more than five.
+	if cpu := get(vals["SIM"].(ir.Value), "CpuPct"); cpu < -5 || cpu > 105 {
+		t.Fatalf("CpuPct = %v, want [0,100] within five points", cpu)
 	}
 	if q := d.Quality(); q["SIM"] == nio.Bad {
 		t.Fatalf("SIM must not be Bad: %v", q)
