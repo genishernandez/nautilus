@@ -106,6 +106,11 @@ claims:
     source: "#the-block-plan"
     tests:
       - go ./modbus TestPlanSkipsNoPollAndWriteOnly
+    partial: true
+    note: >-
+      The plan leaving out `none` and `write-only` bindings while keeping a
+      readable writable one is asserted; that a `none` tag stays in the
+      driver's catalog (declared, still writable) is not.
   - id: MB-011
     claim: >-
       Scan classes poll at their own rates: a binding's `scan-class` places
@@ -190,7 +195,7 @@ claims:
     claim: >-
       Each source gets a `<source>__Online` BOOL input that is true while
       its connection is up and false while the source is dead or parked.
-    source: "#the-online-companion-and-enable"
+    source: "#the-__online-companion-and-enable"
     tests:
       - go ./modbus TestDriverDeliversTagsPerClass
       - go ./modbus TestSlaveDeathHoldsValuesQueuesWritesRecovers
@@ -200,7 +205,7 @@ claims:
       The `__Online` companion is present from `Start`, before any poll has
       landed, and data tags stay absent from the snapshot until their block
       has been read at least once.
-    source: "#the-online-companion-and-enable"
+    source: "#the-__online-companion-and-enable"
     tests:
       - go ./modbus TestForeignExceptionMarksOnlyThatBlock
     partial: true
@@ -210,10 +215,10 @@ claims:
       `__Online` already present.
   - id: MB-020
     claim: >-
-      A source with an `enable:` tag that is false is parked: it closes the
-      connection, `__Online` is false, its tags hold their last values and
-      report Stale, and setting the tag true reconnects.
-    source: "#the-online-companion-and-enable"
+      A source with an `enable:` tag that is false is parked: no connection
+      is attempted, `__Online` is false, its tags hold their last values and
+      report Stale, and setting the tag true wakes the source.
+    source: "#the-__online-companion-and-enable"
     tests:
       - go ./modbus TestEnableTagParksSource
     partial: true
@@ -225,7 +230,7 @@ claims:
     claim: >-
       The enable tag is a command to the driver, not a register write: it
       appears in `OutputNames()` and never goes on the wire.
-    source: "#the-online-companion-and-enable"
+    source: "#the-__online-companion-and-enable"
     tests:
       - go ./modbus TestEnableTagParksSource
     partial: true
@@ -344,6 +349,11 @@ claims:
     source: "#writes"
     tests:
       - go ./modbus TestRewriteFiresOnPeriodAndStopsOnGate
+    partial: true
+    note: >-
+      The baseline write on connect, repeated re-asserts and change-only
+      plain bindings are asserted; the re-assert interval is not measured
+      (any rate giving four writes within the 5s wait passes).
   - id: MB-032
     claim: >-
       A `write-only` register is taken out of the read plan; without it a
@@ -352,6 +362,11 @@ claims:
     source: "#writes"
     tests:
       - go ./modbus TestPlanSkipsNoPollAndWriteOnly
+    partial: true
+    note: >-
+      Write-only leaving the plan and a readable writable binding staying in
+      it are asserted; no test changes a writable register on the device and
+      checks the polled read-back wins over the last command.
   - id: MB-033
     claim: >-
       Exactly adjacent register writes in one flush merge into a single
@@ -360,6 +375,11 @@ claims:
     source: "#writes"
     tests:
       - go ./modbus TestWriteCoalescingAndBaseline
+    partial: true
+    note: >-
+      Adjacent pairs merging to FC16/FC15 and lone writes going as FC6/FC5
+      are asserted; the lone writes sit far from the pairs, so a write run
+      bridging a small hole (not "exactly adjacent") is not ruled out.
   - id: MB-035
     claim: >-
       Requests on a source are strictly sequential: one outstanding request
@@ -531,8 +551,8 @@ claims:
       absences with nothing to assert.
   - id: MB-050
     claim: >-
-      `WithDialer` substitutes the TCP dial and `driver.Plan()` returns the
-      computed block plan.
+      `WithDialer` substitutes the TCP dial, `driver.Plan()` returns the
+      computed block plan, and `Stop` closes every source's connection.
     source: "#from-go"
     tests:
       - go ./modbus TestNewNeverDialsAndReadsFaultBeforeStart
