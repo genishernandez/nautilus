@@ -56,5 +56,5 @@ var Rules = []struct{ ID, Description string }{
 	{ruleMember, "member access is only into timer, counter and user-block instances and declared STRUCT types"},
 	{ruleST, "ST: RETURN, CONTINUE, STRING, MIN/MAX/LIMIT/SEL/MUX, ATAN2 and user calls have no Logix form"},
 	{ruleDataOp, "an assignment is MOVE/ADD/SUB/MUL/DIV/ABS or a CPT expression; no comparisons, booleans, or functions Logix cannot spell"},
-	{ruleConversion, "ST conversions are written so Logix computes nautilus's result: no REAL → integer rounding (TRUNC_<int> as a whole right-hand side instead), no unsigned, bit-string, LINT, LTIME or STRING conversions, BOOL → number and int → LREAL only as a whole right-hand side, int → REAL of a tag or literal"},
+	{ruleConversion, "ST conversions are written so Logix computes nautilus's result: REAL → integer only as the whole right-hand side of an assignment to a tag of that integer type (the store rounds), TRUNC_<int> only as the whole right-hand side of an integer assignment, no integer / whose quotient meets a REAL (Logix divides it in REAL), no unsigned, bit-string, LINT, LTIME or STRING conversions, BOOL → number and int → LREAL only as a whole right-hand side, int → REAL of a tag or literal"},
 }

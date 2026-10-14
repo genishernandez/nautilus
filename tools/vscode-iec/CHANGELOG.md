@@ -47,9 +47,27 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   (narrowing as a wrap, integer to REAL as `(v * 1.0)` where it would
   otherwise divide as integers, BOOL to a number as an `IF`), or it
   squiggles with the new rule `logix/conversion` and says what to write
-  instead: REAL to an integer (until the controller's rounding is
-  verified; `TRUNC_DINT` works), unsigned and bit-string types, LINT,
-  LTIME and STRING. Needs a `naut` newer than 0.17.0. (#255)
+  instead: REAL to an integer inside an expression, unsigned and
+  bit-string types, LINT, LTIME and STRING. Needs a `naut` newer than
+  0.17.0. (#255)
+
+- **`REAL_TO_DINT(r)` no longer squiggles as a whole right-hand side.**
+  A Logix controller rounds a REAL halves to even as it stores it into an
+  integer, as nautilus does (verified on an Echo controller), so
+  `d := REAL_TO_DINT(r);` and its INT, SINT, `TO_DINT` and `REAL_TO_TIME`
+  forms are written as a plain store when the tag is of the conversion's
+  own type. Inside an expression, into a tag of another type, or from an
+  LREAL it still squiggles. Out of range the controller wraps silently
+  where nautilus faults. Needs a `naut` newer than 0.17.0.
+
+- **An integer division that meets a REAL squiggles on a Logix target.**
+  The controller divides integers in REAL once the quotient is stored
+  into a REAL, sits beside a REAL, or is compared with one: `r := a / 2;`
+  gave 3.5 on the controller for `a = 7`, where nautilus gives 3, and
+  `a / 2 > x` with `x` REAL compared differently. These now squiggle with
+  `logix/conversion` and say to compute the quotient into a DINT tag
+  first; an all-integer division is written unchanged. Needs a `naut`
+  newer than 0.17.0. (#361)
 
 ## [0.17.0] - 2026-10-14
 

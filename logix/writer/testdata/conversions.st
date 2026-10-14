@@ -51,6 +51,15 @@ d := BOOL_TO_DINT(b);
 r := BOOL_TO_REAL(b);
 (* truncation stores a whole number *)
 d := TRUNC_DINT(r);
+(* REAL to an integer of the destination's own type: the store rounds,
+   halves to even *)
+d := REAL_TO_DINT(r);
+i := REAL_TO_INT(r);
+s := REAL_TO_SINT(r);
+d := TO_DINT(r);
+t := REAL_TO_TIME(r);
+(* integer division that never meets a REAL truncates *)
+d := a / 2;
 (* a comparison and an index are integer computations of their own *)
 IF DINT_TO_INT(d) > 5 AND r > 1.5 THEN
     r := r + arr[DINT_TO_SINT(d)];

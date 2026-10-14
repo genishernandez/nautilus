@@ -194,6 +194,28 @@ claims:
       asserted, and WHILE, REPEAT ... UNTIL and an EXIT inside an IF in the
       loop, in order, as written.
 
+  - id: LGA-038
+    claim: >-
+      An ST conversion is written as Logix that computes nautilus's result:
+      a narrowing wraps in integer arithmetic, an integer meets REAL as
+      `(v * 1.0)` where it would otherwise divide as integers, a BOOL
+      becomes a number through an `IF`, and REAL to an integer as the whole
+      right-hand side into a tag of that integer type is a plain store,
+      which the controller rounds halves to even as nautilus does.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestConversionsWritten
+      - go ./logix/writer TestGoldenConversions
+      - go ./logix/writer TestNarrowingWrapMatchesNautilus
+      - go ./logix/writer TestRealToIntegerStores
+    partial: true
+    note: >-
+      The tests assert what is written and that the wrap equals nautilus's
+      narrowing under either MOD sign rule. That the controller computes
+      the same was verified once on an Echo v38 controller (#297: 271 of
+      279 results identical over 9 input sets, the rest float32 rounding of
+      a 3.7 input; REAL stores round halves to even), not in CI.
+
   - id: LGA-017
     claim: >-
       What the target cannot express is a `naut check` diagnostic that names
@@ -217,6 +239,22 @@ claims:
       across logix/name, fb-pin, operand, time, member and array-shape, not
       for every message. The page names the exceptions with no alternative
       (STRING, a self-containing type, a binding the compiler cannot read).
+
+  - id: LGA-039
+    claim: >-
+      `logix/conversion` refuses what the controller would compute
+      differently: REAL to an integer inside an expression or into a tag of
+      another type, an integer `/` whose quotient meets a REAL (stored into
+      a REAL, beside a REAL operand, compared with a REAL), and unsigned,
+      bit-string, LINT, LTIME and STRING conversions; an all-integer
+      division is written unchanged.
+    source: "#rejected-at-check-time-by-name"
+    tests:
+      - go ./logix/writer TestConversionsRefused
+      - go ./logix/writer TestIntegerDivisionUnchanged
+    note: >-
+      That Logix divides integers in REAL beside a REAL (7 / 2 = 3.5) was
+      observed on an Echo v38 controller (#361), not in CI.
 
   - id: LGA-018
     claim: >-

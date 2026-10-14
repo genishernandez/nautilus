@@ -45,17 +45,28 @@ import (
 //	TRUNC_<int>(r)            TRUNC(r), as the whole right-hand side of
 //	                          an integer assignment: the value stored is
 //	                          already whole, so no rounding rule applies
-//	REAL → integer, TIME      refused: Logix rounds only as it stores, and
-//	                          that it rounds halves to even is not yet
-//	                          verified on a controller
+//	REAL → integer, TIME      the REAL as written, as the whole right-hand
+//	                          side of an assignment to a tag of the
+//	                          conversion's own type (REAL_TO_INT into an
+//	                          INT): the store rounds halves to even, as
+//	                          nautilus does (verified on a v38 controller).
+//	                          Refused inside an expression (Logix rounds
+//	                          only as it stores), into another type (it
+//	                          rounds to the destination's width) and from
+//	                          an LREAL (not verified)
 //	unsigned, bit strings, LINT, LTIME, STRING   refused: no Logix type
 //	TO_<Enum>(n), TO_DINT(e)  as written: an enumeration is its DINT
+//
+// An integer / whose quotient meets a REAL (stored into a REAL, beside a
+// REAL operand, compared with a REAL) is refused too, conversion or not:
+// Logix then divides in REAL, 7 / 2 = 3.5, where nautilus truncates (#361).
 //
 // What stays a divergence of every value, not of the conversions: a
 // REAL is 32 bits on the controller and 64 in nautilus, so an integer
 // beyond 2^24 converts to the nearest float32; and a REAL with no value in
-// the target faults the nautilus scan, where the controller stores
-// something and sets its overflow flag.
+// the target faults the nautilus scan, where the controller rounds it and
+// stores the low bits of the result (3e9 into a DINT is −1294967296, 1e20
+// is 0), silently with the writer's ReportMinorOverflow="false".
 
 // convWidth is an integer type's width as the controller holds it. TIME is
 // a DINT of milliseconds; anyInt is an integer of no declared width, which
@@ -177,15 +188,41 @@ func (w *stWriter) conversion(c *st.CallExpr, beside bool) (string, bool) {
 		w.diag(ruleConversion, w.line, "%s(): how Logix mixes REAL and LREAL inside an expression is not yet verified; assign the conversion to a %s tag of its own (x := %s(v);) and use the tag", c.Name, to, c.Name)
 		return "0", true
 	case isRealType(from):
-		alt := fmt.Sprintf("for truncation write TRUNC_%s(x) as the whole right-hand side of an assignment", to)
-		if to == "TIME" {
-			alt = "for truncation compute the milliseconds with TRUNC_DINT(x) into a DINT tag and convert that with DINT_TO_TIME"
-		}
-		w.diag(ruleConversion, w.line, "%s(): Logix rounds a REAL to an integer only as it stores it, and that it rounds halves to even as nautilus does (2.5 → 2) is not yet verified on a controller; %s", c.Name, alt)
-		return "0", true
+		return w.realToInt(c, from, to, at, arg, whole), true
 	}
 	w.diag(ruleConversion, w.line, "%s(): no Logix form", c.Name)
 	return "0", true
+}
+
+// realToInt writes a REAL → integer or TIME conversion: the REAL as
+// written, as the whole right-hand side of an assignment to a tag of the
+// conversion's own type. Logix rounds a REAL to an integer as it stores it,
+// halves to even, as nautilus does (verified on a v38 controller: 2.5 → 2,
+// 3.5 → 4, −2.5 → −2); TIME is a DINT of milliseconds, as REAL_TO_TIME
+// counts them. Anywhere else Logix would not round, or would round to
+// another width, so it is refused.
+func (w *stWriter) realToInt(c *st.CallExpr, from, to, at string, arg st.Expression, whole bool) string {
+	if from == "LREAL" || at == "LREAL" {
+		w.diag(ruleConversion, w.line, "%s(): how Logix stores an LREAL into an integer is not yet verified on a controller; convert from a REAL", c.Name)
+		return "0"
+	}
+	if !whole {
+		w.diag(ruleConversion, w.line, "%s(): Logix rounds a REAL to an integer only as it stores it, so inside an expression it would compute with the unrounded REAL; assign the conversion to a %s tag of its own (n := %s(x);) and use the tag", c.Name, to, c.Name)
+		return "0"
+	}
+	if at == "" {
+		w.diag(ruleConversion, w.line, "%s(): the writer cannot tell the argument's type, so not whether a plain store rounds it as nautilus does; convert a REAL tag or literal", c.Name)
+		return "0"
+	}
+	if w.dest != to {
+		dest := w.dest
+		if dest == "" {
+			dest = "a tag the writer cannot type"
+		}
+		w.diag(ruleConversion, w.line, "%s(): written as a plain store, Logix rounds the REAL to the destination's width, and the destination is %s, not %s; assign the conversion to a %s tag (n := %s(x);), then convert that tag", c.Name, dest, to, to, c.Name)
+		return "0"
+	}
+	return w.expr(arg)
 }
 
 // narrow writes an integer conversion: the argument read at width bits,
@@ -208,9 +245,9 @@ func (w *stWriter) narrow(c *st.CallExpr, arg st.Expression, width int) string {
 
 // toBool writes X_TO_BOOL: nonzero, with the argument read as X.
 func (w *stWriter) toBool(c *st.CallExpr, from string, arg st.Expression) string {
-	saved := w.realCtx
-	w.realCtx = w.numReal(arg)
-	defer func() { w.realCtx = saved }()
+	saved, savedKnown := w.realCtx, w.realKnown
+	w.realCtx, w.realKnown = w.numReal(arg), w.knownReal(arg)
+	defer func() { w.realCtx, w.realKnown = saved, savedKnown }()
 	if isRealType(from) {
 		return "(" + w.expr(arg) + " <> 0.0)"
 	}
@@ -358,15 +395,21 @@ func (w *stWriter) fits(e st.Expression, width int) bool {
 // numReal reports an expression that may be computed in REAL on Logix: one
 // with a REAL operand, or one the writer cannot type. A comparison is a
 // BOOL and starts afresh, as does an index.
-func (w *stWriter) numReal(e st.Expression) bool {
+func (w *stWriter) numReal(e st.Expression) bool { return w.realIn(e, true) }
+
+// knownReal reports an expression with a REAL operand the writer can see:
+// numReal without the operands it cannot type.
+func (w *stWriter) knownReal(e st.Expression) bool { return w.realIn(e, false) }
+
+func (w *stWriter) realIn(e st.Expression, unknown bool) bool {
 	switch v := e.(type) {
 	case *st.BinaryExpr:
 		if isCompare(v.Op) {
 			return false
 		}
-		return w.numReal(v.Left) || w.numReal(v.Right)
+		return w.realIn(v.Left, unknown) || w.realIn(v.Right, unknown)
 	case *st.UnaryExpr:
-		return w.numReal(v.Operand)
+		return w.realIn(v.Operand, unknown)
 	case *st.CallExpr:
 		t := w.typeOf(v)
 		if isRealType(t) {
@@ -376,14 +419,27 @@ func (w *stWriter) numReal(e st.Expression) bool {
 			return false
 		}
 		for _, a := range v.Args {
-			if w.numReal(a) {
+			if w.realIn(a, unknown) {
 				return true
 			}
 		}
-		return t == ""
+		return unknown && t == ""
 	}
 	t := w.typeOf(e)
-	return t == "" || isRealType(t)
+	return unknown && t == "" || isRealType(t)
+}
+
+// intDivision refuses an integer / whose result meets a REAL (#361): Logix
+// then divides in REAL, so 7 / 2 is 3.5 where nautilus truncates to 3. It
+// meets one when it is stored into a REAL or LREAL, or computed beside or
+// compared with a REAL operand. Unless an operand of its own is a REAL (a
+// division nautilus also does in REAL), it is refused.
+func (w *stWriter) intDivision(v *st.BinaryExpr) bool {
+	if v.Op != "/" || !w.realKnown || isRealType(w.typeOf(v.Left)) || isRealType(w.typeOf(v.Right)) {
+		return false
+	}
+	w.diag(ruleConversion, w.line, "integer division (/): Logix divides integers in REAL once the quotient meets a REAL (a REAL destination, a REAL operand beside it or a REAL it is compared with), so 7 / 2 gives 3.5 where nautilus gives 3; compute the quotient into a DINT tag of its own first (q := a / b;) and use the tag, or divide by a REAL (a / 2.0) if a REAL quotient is meant")
+	return true
 }
 
 // typeOf is what the writer knows of an expression's type: an elementary

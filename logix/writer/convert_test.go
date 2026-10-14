@@ -96,6 +96,10 @@ func TestConversionsWritten(t *testing.T) {
 		"IF b THEN", "d := 1;", "d := 0;", "r := 1.0;", "r := 0.0;",
 		// truncation
 		"d := TRUNC(r);",
+		// REAL → integer, TIME: the store rounds
+		"d := r;", "i := r;", "s := r;", "t := r;",
+		// integer division
+		"d := (a / 2);",
 		// a comparison and an index of their own beside a REAL
 		"IF ((((((d MOD 65536) + 98304) MOD 65536) - 32768) > 5) AND (r > 1.5)) THEN",
 		"r := (r + arr[((((d MOD 256) + 384) MOD 256) - 128)]);",
@@ -113,12 +117,15 @@ func TestConversionsRefused(t *testing.T) {
 		return "PROGRAM P\nVAR\n  d : DINT; a : DINT; i : INT; r : REAL; lr : LREAL; b : BOOL; t : TIME;\nEND_VAR\n" + body + "\nEND_PROGRAM\n"
 	}
 	cases := []struct{ name, body, mention string }{
-		{"REAL to DINT", "d := REAL_TO_DINT(r);", "TRUNC_DINT"},
-		{"REAL to DINT in an expression", "d := REAL_TO_DINT(r) + 1;", "halves to even"},
-		{"REAL to INT", "i := REAL_TO_INT(r);", "TRUNC_INT"},
-		{"LREAL to DINT", "d := LREAL_TO_DINT(lr);", "halves to even"},
-		{"REAL to TIME", "t := REAL_TO_TIME(r);", "DINT_TO_TIME"},
-		{"overloaded TO_DINT of a REAL", "d := TO_DINT(r);", "halves to even"},
+		{"REAL to DINT in an expression", "d := REAL_TO_DINT(r) + 1;", "DINT tag of its own"},
+		{"REAL to DINT in a comparison", "b := REAL_TO_DINT(r) > 2;", "DINT tag of its own"},
+		{"REAL to TIME in an expression", "t := REAL_TO_TIME(r) + t;", "TIME tag of its own"},
+		{"REAL to DINT stored into an INT", "i := REAL_TO_DINT(r);", "destination is INT, not DINT"},
+		{"REAL to INT stored into a DINT", "d := REAL_TO_INT(r);", "destination is DINT, not INT"},
+		{"REAL to DINT stored into a REAL", "r := REAL_TO_DINT(r);", "destination is REAL, not DINT"},
+		{"LREAL to DINT", "d := LREAL_TO_DINT(lr);", "LREAL"},
+		{"overloaded TO_DINT of an LREAL", "d := TO_DINT(lr);", "LREAL"},
+		{"REAL to DINT of an LREAL", "d := REAL_TO_DINT(lr);", "LREAL"},
 		{"TRUNC in an expression", "d := TRUNC_DINT(r) + 1;", "tag of its own"},
 		{"TRUNC of an LREAL", "d := LREAL_TRUNC_DINT(lr);", "LREAL"},
 		{"bit transfer", "r := DWORD_TO_REAL(REAL_TO_DWORD(r));", "COP"},
@@ -133,6 +140,16 @@ func TestConversionsRefused(t *testing.T) {
 		{"REAL to LREAL in an expression", "lr := lr * REAL_TO_LREAL(r);", "LREAL tag of its own"},
 		{"narrowing beside a REAL", "r := r + DINT_TO_INT(d);", "integer tag of its own"},
 		{"narrowing stored into a REAL", "r := DINT_TO_INT(d);", "integer tag of its own"},
+		// #361: an integer / that meets a REAL is divided in REAL on Logix.
+		{"integer division stored into a REAL", "r := a / 2;", "integer division"},
+		{"integer division of tags stored into a REAL", "r := a / d;", "integer division"},
+		{"integer division stored into an LREAL", "lr := a / 2;", "integer division"},
+		{"integer division compared with a REAL", "b := a / 2 > r;", "integer division"},
+		{"integer division compared in an IF", "IF a / d >= r THEN b := TRUE; END_IF;", "integer division"},
+		{"integer division beside a REAL", "r := (a / 2) + r;", "integer division"},
+		{"integer division divided by a REAL", "r := (a / 2) / 2.0;", "integer division"},
+		{"integer division nested in REAL arithmetic", "r := r * ((a + 1) / d - 1);", "integer division"},
+		{"integer division in a call stored into a REAL", "r := ABS(a / 2);", "integer division"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -208,4 +225,74 @@ func TestNarrowingWrapMatchesNautilus(t *testing.T) {
 			}
 		}
 	}
+}
+
+// REAL → integer and TIME as the whole right-hand side of an assignment to
+// a tag of the conversion's own type is a plain store: Logix rounds it as
+// it stores it, halves to even, as nautilus does (verified on a v38
+// controller, #297).
+func TestRealToIntegerStores(t *testing.T) {
+	cases := []struct{ body, want string }{
+		{"d := REAL_TO_DINT(r);", "d := r;"},
+		{"i := REAL_TO_INT(r);", "i := r;"},
+		{"s := REAL_TO_SINT(r);", "s := r;"},
+		{"d := TO_DINT(r);", "d := r;"},
+		{"i := TO_INT(r);", "i := r;"},
+		{"t := REAL_TO_TIME(r);", "t := r;"},
+		{"d := REAL_TO_DINT(r * 2.0 + 0.5);", "d := ((r * 2.0) + 0.5);"},
+		{"d := REAL_TO_DINT(2.5);", "d := 2.5;"},
+		{"arr[1] := REAL_TO_INT(r);", "arr[1] := r;"},
+	}
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			src := "PROGRAM P\nVAR\n  d : DINT; i : INT; s : SINT; r : REAL; t : TIME; arr : ARRAY [0..3] OF INT;\nEND_VAR\n" + c.body + "\nEND_PROGRAM\n"
+			text := writeRoutine(t, src)
+			if !strings.Contains(text, c.want) {
+				t.Errorf("want %q in:\n%s", c.want, text)
+			}
+		})
+	}
+}
+
+// An integer / that never meets a REAL is written unchanged: Logix
+// truncates it as nautilus does (#361).
+func TestIntegerDivisionUnchanged(t *testing.T) {
+	cases := []struct{ body, want string }{
+		{"d := a / 2;", "d := (a / 2);"},
+		{"i := a / d;", "i := (a / d);"},
+		{"b := a / 2 > d;", "b := ((a / 2) > d);"},
+		{"b := a / 2 = 3;", "b := ((a / 2) = 3);"},
+		{"IF a / 2 > 5 AND r > 1.5 THEN b := TRUE; END_IF;", "IF (((a / 2) > 5) AND (r > 1.5)) THEN"},
+		{"b := DINT_TO_BOOL(a / 2);", "b := ((a / 2) <> 0);"},
+		{"r := DINT_TO_REAL(a) / 2;", "r := ((a * 1.0) / 2);"},
+		{"r := a / 2.0;", "r := (a / 2.0);"},
+		{"r := a / r;", "r := (a / r);"},
+	}
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			src := "PROGRAM P\nVAR\n  d : DINT; a : DINT; i : INT; r : REAL; b : BOOL;\nEND_VAR\n" + c.body + "\nEND_PROGRAM\n"
+			text := writeRoutine(t, src)
+			if !strings.Contains(text, c.want) {
+				t.Errorf("want %q in:\n%s", c.want, text)
+			}
+		})
+	}
+}
+
+// writeRoutine writes src and returns its one ST routine's text, failing
+// on any diagnostic.
+func writeRoutine(t *testing.T, src string) string {
+	t.Helper()
+	doc, diags, err := WriteST(src, Options{Controller: "C"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diags) > 0 {
+		t.Fatal(joinDiags(diags))
+	}
+	f, err := l5x.Parse(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f.Controller.Programs[0].Routines[0].Text
 }
