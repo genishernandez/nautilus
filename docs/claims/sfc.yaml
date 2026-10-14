@@ -31,11 +31,7 @@ claims:
       - go ./lang/conformance TestConformance/sfc-step-t
       - go ./lang/sfc TestCheckKnownStepXTRefIsClean
       - go ./lang/sfc TestStepTimerGatesTransition
-    partial: true
-    note: >-
-      That Step.X is retained is not asserted here (see SFC-038); Step.X in a
-      transition condition is only shown legal by the structural check
-      (TestCheckKnownStepXTRefIsClean), not run.
+      - go ./lang/sfc TestStepXRetainedAndStepTInBody
 
   - id: SFC-004
     claim: >-
@@ -64,8 +60,8 @@ claims:
     tests:
       - go ./lang/sfc TestScanTrace
       - go ./lang/sfc TestEnabledNotCondGuard
-    partial: true
-    note: The pass order is asserted through behaviour rather than as a single property.
+      - go ./lang/sfc TestScanOrderOneFixedPass
+      - go ./lang/sfc TestStepTimerStartsOnActivationScan
 
   - id: SFC-007
     claim: >-
@@ -174,10 +170,7 @@ claims:
     tests:
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers
       - go ./lang/sfc TestTimedLoweringStableSlots
-    partial: true
-    note: >-
-      A TIME-variable duration (as opposed to a literal) is asserted only in
-      the transpiled ST (TestTimedLoweringStableSlots), never run.
+      - go ./lang/sfc TestTimedQualifierTimeVariableDuration
 
   - id: SFC-018
     claim: >-
@@ -228,13 +221,7 @@ claims:
     source: "#action-qualifiers"
     tests:
       - go ./lang/sfc TestTranspileShape
-    partial: true
-    note: >-
-      Only the transpiled OR expression for an N target is asserted; no test
-      runs two steps driving one variable and checks it drops only when both
-      are left, and pulse/timed targets are not combined in any test.
-      (TestNStoreInteraction was dropped: it runs S, then N, then R on one
-      variable and asserts nothing about OR-combining.)
+      - go ./lang/sfc TestAssociationsOROnOneVariable
 
   - id: SFC-022
     claim: >-
@@ -259,14 +246,7 @@ claims:
       - go ./lang/sfc TestResetActsOnceThenActionMaySet
       - go ./lang/sfc TestNDrivesOnlyWhileActive
       - go ./acceptance TestSFCResetOnInactiveStepKeepsActionWrite
-    partial: true
-    note: >-
-      The association winning over an ACTION body's write in the same scan
-      is asserted only for N (TestNDrivesOnlyWhileActive); no test has an
-      ACTION write the target on the activation scan of an S or R, the scan
-      of a pulse, or inside a timed qualifier's window. The ACTION owning the
-      variable the rest of the time, and R-on-abort coexisting with an
-      ACTION set, are asserted.
+      - go ./lang/sfc TestAssociationBeatsActionWrite
 
   - id: SFC-024
     claim: >-
@@ -277,10 +257,7 @@ claims:
       - go ./lang/sfc TestCheckAssocVsActionWrite
       - go ./lang/sfc TestCheckAssocVsActionWriteN
       - go ./lang/sfc TestCheckTimedAssocVsActionWrite
-    partial: true
-    note: >-
-      The warning is asserted for R, N, D and L associations only; no test
-      asserts it for S, the pulses (P1, P, P0) or SD, DS, SL.
+      - go ./lang/sfc TestCheckAssocVsActionWriteEveryQualifier
 
   - id: SFC-025
     claim: >-
@@ -293,12 +270,7 @@ claims:
       - go ./lang/conformance TestConformance/sfc-final-scan
       - go ./lang/sfc TestFinalScanResetsTON
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/the scan at PT — L and SL drop, D SD DS rise, the L body runs its final scan
-    partial: true
-    note: >-
-      The final scan is asserted for an N body (sfc-final-scan,
-      TestFinalScanResetsTON) and an L body (sfc-timed-qualifiers), and its
-      absence for a P1 body; no test runs an ACTION body under S, D, SD, DS
-      or SL and checks its final scan.
+      - go ./lang/sfc TestActionBodyFinalScanEveryLevelQualifier
 
   - id: SFC-026
     claim: >-
@@ -310,12 +282,11 @@ claims:
       - go ./lang/sfc TestStepTimerGatesTransition
 
   - id: SFC-027
-    claim: Step.T compiles to a hidden TON only for steps whose .T is read.
+    claim: >-
+      Step.T compiles to a hidden TON only for steps whose .T is read.
     source: "#action-qualifiers"
-    tests: []
-    note: >-
-      Behaviour of .T is tested (SFC-026); no test asserts that unread steps
-      get no hidden timer.
+    tests:
+      - go ./lang/sfc TestUnreadStepTimerHasNoHiddenTON
 
   - id: SFC-028
     claim: >-
@@ -337,12 +308,7 @@ claims:
     source: "#step-supervision"
     tests:
       - go ./lang/conformance TestConformance/sfc-step-maxtime/the flag holds after the step is left, until Fill runs again
-    partial: true
-    note: >-
-      Holding after the step is left and clearing on the next activation are
-      asserted; "nothing else happens automatically" is not — the fixture
-      always has an abort transition on Fill.ERR, so no test shows an
-      overrunning step staying active with no transition reading the flag.
+      - go ./lang/sfc TestStepOverrunDoesNothingElse
 
   - id: SFC-030
     claim: >-
@@ -378,11 +344,14 @@ claims:
       - go ./lang/sfc TestCheckMultipleInitialSteps
       - go ./lang/sfc TestCheckUnknownFromTo
       - go ./lang/sfc TestCheckEmptyCondition
-    partial: true
-    note: >-
-      The tests call the chart checker naut check runs (sfc.Check); no test
-      runs naut check or naut sfc check on a chart with these errors and checks
-      the CLI reports it.
+      - go ./cmd/naut TestCheckSFCDiagnostics/duplicate step
+      - go ./cmd/naut TestCheckSFCDiagnostics/duplicate action
+      - go ./cmd/naut TestCheckSFCDiagnostics/duplicate transition
+      - go ./cmd/naut TestCheckSFCDiagnostics/no initial step
+      - go ./cmd/naut TestCheckSFCDiagnostics/two initial steps
+      - go ./cmd/naut TestCheckSFCDiagnostics/FROM missing step
+      - go ./cmd/naut TestCheckSFCDiagnostics/TO missing step
+      - go ./cmd/naut TestCheckSFCDiagnostics/empty condition
 
   - id: SFC-033
     claim: >-
@@ -393,8 +362,10 @@ claims:
       - go ./lang/sfc TestCheckUnresolvedActionAssociation
       - go ./lang/sfc TestCheckActionAssociationResolvesToVariable
       - go ./lang/sfc TestCheckUnknownStepXTRef
-    partial: true
-    note: Only an unknown-step .X reference is asserted; a .T reference to an unknown step is not.
+      - go ./lang/sfc TestCheckUnknownStepTRef
+      - go ./cmd/naut TestCheckSFCDiagnostics/association to nothing
+      - go ./cmd/naut TestCheckSFCDiagnostics/unknown step X ref
+      - go ./cmd/naut TestCheckSFCDiagnostics/unknown step T ref
 
   - id: SFC-034
     claim: >-
@@ -406,11 +377,9 @@ claims:
       - go ./lang/sfc TestCheckUnsupportedQualifier
       - go ./lang/sfc TestCheckQualifierDiagnostics
       - go ./lang/sfc TestCheckTimeArgumentOnUntimedQualifierIsAnError
-    partial: true
-    note: >-
-      The tests call the chart checker naut check runs (sfc.Check); no test
-      runs naut check or naut sfc check on a chart with these errors and checks
-      the CLI reports it.
+      - go ./cmd/naut TestCheckSFCDiagnostics/unknown qualifier
+      - go ./cmd/naut TestCheckSFCDiagnostics/timed qualifier without duration
+      - go ./cmd/naut TestCheckSFCDiagnostics/untimed qualifier with duration
 
   - id: SFC-035
     claim: >-
@@ -420,11 +389,8 @@ claims:
     tests:
       - go ./lang/sfc TestCheckUnreachableStepWarns
       - go ./lang/sfc TestCheckDeadEndStepWarns
-    partial: true
-    note: >-
-      The tests call the chart checker naut check runs (sfc.Check); no test
-      runs naut check or naut sfc check on a chart with these warnings and checks
-      the CLI reports it.
+      - go ./cmd/naut TestCheckSFCDiagnostics/unreachable step
+      - go ./cmd/naut TestCheckSFCDiagnostics/dead-end step
 
   - id: SFC-036
     claim: >-
@@ -434,11 +400,8 @@ claims:
     tests:
       - go ./lang/sfc TestCheckConvergenceUnreachableWarns
       - go ./lang/sfc TestCheckConvergenceReachableIsClean
-    partial: true
-    note: >-
-      The tests call the chart checker naut check runs (sfc.Check); no test
-      runs naut check or naut sfc check on a chart with this warning and checks
-      the CLI reports it.
+      - go ./cmd/naut TestCheckSFCDiagnostics/convergence from alternative branches
+      - go ./cmd/naut TestCheckSFCDiagnostics/convergence from a simultaneous divergence
 
   - id: SFC-037
     claim: >-
@@ -448,10 +411,15 @@ claims:
     source: "#structural-checks"
     tests:
       - go ./lang/sfc TestTranspileShape
+      - go ./cmd/naut TestCheckSFCTypeErrorLines
     partial: true
     note: >-
-      Transpile-and-lower is tested; no test asserts the line mapping of a
-      type error to the TRANSITION or ACTION line.
+      The transpile-and-compile half and the condition half are asserted: a type
+      error in a condition is reported on its TRANSITION line through naut check.
+      A type error in an action body is reported on the offending statement's
+      own line inside the ACTION block (line 20 in the test chart), not on the
+      ACTION header line the page says; left partial until the page or the
+      mapping is reconciled.
 
   - id: SFC-038
     claim: >-
@@ -485,8 +453,7 @@ claims:
     source: "#tooling"
     tests:
       - go ./lang/conformance TestConformance/sfc-step-t
-    partial: true
-    note: The conformance corpus is the evidence; the naut test CLI itself is not asserted here.
+      - naut examples/lift-station lead pump starts at LeadOn and post-runs after LeadOff
 
   - id: SFC-041
     claim: >-
@@ -495,10 +462,8 @@ claims:
     source: "#not-supported"
     tests:
       - go ./cmd/naut TestCheckRejects/SFC macro step
-    partial: true
-    note: >-
-      A MACRO_STEP is refused by naut check. A chart nested inside a step is
-      never tried.
+      - go ./cmd/naut TestCheckSFCNotSupported/step nested in a step
+      - go ./cmd/naut TestCheckSFCNotSupported/chart nested in a step
 
   - id: SFC-042
     claim: >-
@@ -507,8 +472,8 @@ claims:
     source: "#not-supported"
     tests:
       - go ./lang/conformance TestConformance/sfc-alt-priority/with every condition true the first declared branch wins alone
-    partial: true
-    note: Declaration-order priority is tested; rejection of a numeric priority syntax is not.
+      - go ./cmd/naut TestCheckSFCNotSupported/numeric priority after TO
+      - go ./cmd/naut TestCheckSFCNotSupported/numeric priority attribute
 
   - id: SFC-043
     claim: >-
@@ -524,8 +489,14 @@ claims:
     source: "#not-supported"
     tests:
       - go ./lang/sfc TestIECAssociationForm
+      - go ./cmd/naut TestCheckSFCNotSupported/indicator on a transition
     partial: true
-    note: The association case is tested; indicator variables on transitions are not.
+    note: >-
+      The association case names the forms it does take (TestIECAssociationForm).
+      An indicator on a transition is refused by naut check (exit 1), but with a
+      generic parse error ("expected ':='") that does not name the forms a
+      transition does take; and a two-entry Lamp(N, Y) is reported as a time
+      argument, not as an indicator.
 
   - id: SFC-045
     claim: >-
@@ -536,5 +507,6 @@ claims:
       - go ./lang/l5x TestVendorSFCRoutineIsRefused
     partial: true
     note: >-
-      A Logix SFC routine in an L5X is refused by the ladder import, which
-      names it as skipped. Siemens GRAPH and CODESYS SFC are never tried.
+      A Logix SFC routine in an L5X is refused by the ladder import, which names
+      it as skipped. There is no Siemens GRAPH or CODESYS SFC importer in the
+      codebase at all, so there is nothing to refuse and no test is possible.
