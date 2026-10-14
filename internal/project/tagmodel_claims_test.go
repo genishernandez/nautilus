@@ -105,7 +105,7 @@ func TestLocalShadowIsWhatTheProgramReads(t *testing.T) {
 }
 
 // Tag-model: functions, like function blocks, do not see tags implicitly.
-func TestFunctionsDoNotSeeTagsImplicitly(t *testing.T) {
+func TestTagModelFunctionsDoNotSeeTagsImplicitly(t *testing.T) {
 	files := map[string]string{
 		"nautilus.yaml": "tasks:\n  - program: main.st\ntags:\n  - { name: Level, role: state, init: 5.0 }\n  - { name: Out, role: state, init: 0.0 }\n",
 		"lib.st":        "FUNCTION Peek : REAL\nVAR_INPUT\n    x : REAL;\nEND_VAR\nPeek := x + Level;\nEND_FUNCTION\n",

@@ -86,7 +86,7 @@ claims:
     source: "#tags-in-scope-the-rules"
     tests:
       - go ./internal/project TestFunctionBlocksDoNotSeeTagsImplicitly
-      - go ./internal/project TestFunctionsDoNotSeeTagsImplicitly
+      - go ./internal/project TestTagModelFunctionsDoNotSeeTagsImplicitly
   - id: TAG-010
     claim: >-
       A file-level VAR_GLOBAL block in a library .st (a GVL) declares globals
