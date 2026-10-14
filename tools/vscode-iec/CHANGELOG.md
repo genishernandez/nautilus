@@ -180,6 +180,18 @@ symbol.
   instances of that FB in the same file use it; a builtin's member such as
   `t1.Q` cannot be renamed. (#195)
 
+- **A Logix target no longer writes a conversion as a plain move.** In an
+  ST program with a `target: logix` section, `DINT_TO_INT(x)` went to the
+  controller as `x`, so it did not wrap (70000 stayed 70000, nautilus
+  gives 4464), and `REAL_TO_DINT(r) + 1` rounded differently. Each
+  conversion is now written so the controller computes nautilus's result
+  (narrowing as a wrap, integer to REAL as `(v * 1.0)` where it would
+  otherwise divide as integers, BOOL to a number as an `IF`), or it
+  squiggles with the new rule `logix/conversion` and says what to write
+  instead: REAL to an integer (until the controller's rounding is
+  verified; `TRUNC_DINT` works), unsigned and bit-string types, LINT,
+  LTIME and STRING. Needs a `naut` newer than 0.16.2. (#255)
+
 ## [0.15.0] - 2026-10-12
 
 The pre-release line after the stable release 0.14.0. Same contents as

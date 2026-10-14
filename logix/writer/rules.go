@@ -31,6 +31,7 @@ const (
 	ruleMember        = "logix/member"         // an accessor into a type with no Logix shape
 	ruleST            = "logix/st"             // an ST statement or function with no Logix form
 	ruleDataOp        = "logix/data-op"        // an assignment with no Logix data instruction or expression
+	ruleConversion    = "logix/conversion"     // an X_TO_Y Logix would compute differently, or not at all
 )
 
 // Rules lists every rule with a one-line description, for documentation
@@ -55,4 +56,5 @@ var Rules = []struct{ ID, Description string }{
 	{ruleMember, "member access is only into timer, counter and user-block instances and declared STRUCT types"},
 	{ruleST, "ST: RETURN, CONTINUE, STRING, MIN/MAX/LIMIT/SEL/MUX, ATAN2 and user calls have no Logix form"},
 	{ruleDataOp, "an assignment is MOVE/ADD/SUB/MUL/DIV/ABS or a CPT expression; no comparisons, booleans, or functions Logix cannot spell"},
+	{ruleConversion, "ST conversions are written so Logix computes nautilus's result: no REAL → integer rounding (TRUNC_<int> as a whole right-hand side instead), no unsigned, bit-string, LINT, LTIME or STRING conversions, BOOL → number and int → LREAL only as a whole right-hand side, int → REAL of a tag or literal"},
 }
