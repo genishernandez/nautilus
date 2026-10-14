@@ -40,7 +40,7 @@ type Driver struct {
 
 	// leafMode marks struct bindings whose root reads the controller refuses
 	// (AOI access restrictions); they poll member-by-member instead. Touched
-	// only from the run goroutine.
+	// only from the run goroutine; Health reads leafModeN (under mu) instead.
 	leafMode  map[string]bool
 	leafCache map[string][]leafDesc
 	// deadLeaves records members the controller permanently refuses to serve
@@ -54,9 +54,13 @@ type Driver struct {
 	// current connection, and cleared when the connection changes. The
 	// snapshot fills tag by tag during a poll, so before this a reader can
 	// see some of the first poll's tags and not the rest.
-	primed  bool
-	lastErr error
-	stats   driverStats
+	primed bool
+	// leafModeN is len(leafMode), kept under mu for Health: the map itself
+	// belongs to the run goroutine, and Health is called from others (a
+	// Sparkplug device's health check, every tick).
+	leafModeN int
+	lastErr   error
+	stats     driverStats
 
 	wmu     sync.Mutex
 	pending map[string]any // queued writes (nautilus tag name -> desired value)
@@ -335,7 +339,7 @@ func (d *Driver) Health() Health {
 		Host:       d.host,
 		Slot:       d.slot,
 		Tags:       len(d.inputs),
-		LeafMode:   len(d.leafMode),
+		LeafMode:   d.leafModeN,
 		Polls:      d.stats.polls,
 		PollErrors: d.stats.pollErrors,
 		Reconnects: d.stats.reconnects,
@@ -664,6 +668,9 @@ func (d *Driver) pollClass(ctx context.Context, sess *session, bindings []TagBin
 			}
 			if !isElem && b.Type != "STRING" && b.ArrayLen == 0 {
 				d.leafMode[b.Name] = true
+				d.mu.Lock()
+				d.leafModeN = len(d.leafMode)
+				d.mu.Unlock()
 				leafBindings = append(leafBindings, b)
 				d.log.Info("eip: struct root read refused; switching to member reads",
 					"tag", b.Name, "device", b.Device, "error", err)
