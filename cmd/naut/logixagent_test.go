@@ -28,6 +28,9 @@ type fakeLogixd struct {
 	// uploadToNew records the body of an upload-from-controller, which is
 	// how an online edit gets the project it edits.
 	uploadToNew map[string]any
+	// convert records the body of the last convert, where drift's
+	// detailedL5x choice travels.
+	convert     map[string]any
 	probeUsable bool
 }
 
@@ -88,6 +91,7 @@ func newFakeLogixd(t *testing.T) (*fakeLogixd, string, func()) {
 		case r.URL.Path == "/v1/convert":
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			f.convert = body
 			out, _ := body["output"].(string)
 			f.files[out] = []byte("<?xml version=\"1.0\"?><RSLogix5000Content/>")
 			ok(map[string]any{"input": body["input"], "output": out, "bytes": len(f.files[out])})
@@ -320,12 +324,17 @@ func TestLogixDownloadRequiresACommPath(t *testing.T) {
 // A dead agent is the most common failure in practice, and the message has
 // to say where nautilus looked and what to start.
 func TestLogixAgentReportsAnUnreachableAgentHelpfully(t *testing.T) {
-	code := runLogixAgent([]string{"--agent", "http://127.0.0.1:1"})
+	out, code := captureStderr(t, func() int { return runLogixAgent([]string{"--agent", "http://127.0.0.1:1"}) })
 	if code == 0 {
 		t.Error("an unreachable agent should be an error")
 	}
+	// The wording the guide quotes, the URL it tried, and what to start.
+	for _, want := range []string{"logixd: unreachable", "127.0.0.1:1", "refused", "Is logixd running?"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stderr missing %q:\n%s", want, out)
+		}
+	}
 }
-
 
 // A failing gate has to tell the reader what to DO. The detail says what is
 // wrong; without the remedy beside it they go looking through a guide, which
@@ -353,5 +362,32 @@ func TestLogixProbePrintsTheRemedyForAFailingGate(t *testing.T) {
 	}
 	if sdkLine == "" || !strings.HasPrefix(sdkLine, "ok") {
 		t.Errorf("sdk-service should have passed: %q", sdkLine)
+	}
+}
+
+// Drift compares the controller's export with the repo file, and the two
+// are only comparable when they are the same KIND of export: a detailed one
+// carries megabytes of product-defined types a basic one omits. So the
+// export drift asks the agent for must follow the repo file's own kind.
+func TestLogixDriftAsksForTheRepoFilesExportKind(t *testing.T) {
+	const base = "References NoRawData L5KData DecoratedData Context Dependencies ForceProtectedEncoding AllProjDocTrans"
+	for _, c := range []struct {
+		name, options string
+		want          bool
+	}{
+		{"basic repo file", base, false},
+		{"detailed repo file", base + " ProductDefinedTypes", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f, url, stop := newFakeLogixd(t)
+			defer stop()
+			repo := writeTemp(t, "repo.L5X", `<?xml version="1.0"?><RSLogix5000Content SchemaRevision="1.0" TargetType="Controller" ExportOptions="`+c.options+`"><Controller Name="C"/></RSLogix5000Content>`)
+			captureStdout(t, func() int {
+				return runLogixDrift([]string{"--agent", url, "--comm-path", "AB_ETH-1/1.2.3.4/Backplane/0", repo})
+			})
+			if got, ok := f.convert["detailedL5x"].(bool); !ok || got != c.want {
+				t.Errorf("convert asked for detailedL5x = %v, want %v (body %v)", f.convert["detailedL5x"], c.want, f.convert)
+			}
+		})
 	}
 }
