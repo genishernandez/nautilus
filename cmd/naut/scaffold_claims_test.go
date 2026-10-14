@@ -200,7 +200,8 @@ func TestScaffoldedManifestProjectsCheckTestAndBuild(t *testing.T) {
 
 // Getting started: an SDK project's go test runs its acceptance suite — here
 // the scaffolded sdk and sdk-demo projects are generated against this
-// checkout (--replace) and `go test ./...` is run inside them, offline.
+// checkout (--replace) and `go test ./...` is run inside them, fetching modules as a fresh
+// project would (a GOPROXY=off run depends on what the local module cache holds).
 func TestScaffoldedSDKProjectsGoTest(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles and tests two generated Go projects")
@@ -228,7 +229,7 @@ func TestScaffoldedSDKProjectsGoTest(t *testing.T) {
 			}
 			cmd := exec.Command(goBin, "test", "-count=1", "-v", "./...")
 			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off", "GOWORK=off")
+			cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOWORK=off")
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("go test in the scaffolded %s project: %v\n%s", tc.name, err, out)
