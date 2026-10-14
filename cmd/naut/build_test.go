@@ -3,12 +3,17 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"io"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/runtime"
@@ -432,5 +437,248 @@ func TestBuildEmbedsHMIAndBuiltBinaryServesIt(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/_nautilus/", nil))
 	if rec.Code != 200 {
 		t.Fatalf("GET /_nautilus/ = %d, want 200 (the built-in dashboard)", rec.Code)
+	}
+}
+
+// The e2e project for TestBuiltControllerActivatesWarm: a library FB, and
+// two tasks that each run a TON and an instance of it. Each program writes
+// a revision marker, so the test can tell which commit every task runs.
+const (
+	e2eManifest = `name: warm-e2e
+server:
+  online-edits: true
+tasks:
+  - program: main.st
+    scan: 20ms
+  - name: totals
+    program: totals.st
+    scan: 20ms
+tags:
+  - { name: MainET,  role: output, type: TIME }
+  - { name: MainSum, role: output, type: REAL }
+  - { name: MainRev, role: output, type: INT }
+  - { name: AuxET,   role: output, type: TIME }
+  - { name: AuxSum,  role: output, type: REAL }
+  - { name: AuxRev,  role: output, type: INT }
+driver:
+  type: memory
+`
+	e2eBlocks = `FUNCTION_BLOCK Totalizer
+VAR_INPUT X : REAL; END_VAR
+VAR_OUTPUT Y : REAL; END_VAR
+VAR Sum : REAL; END_VAR
+Sum := Sum + X;
+Y := Sum;
+END_FUNCTION_BLOCK
+`
+	e2eMain = `PROGRAM Main
+VAR Dwell : TON; Acc : Totalizer; END_VAR
+Dwell(IN := TRUE, PT := T#1H);
+MainET := Dwell.ET;
+Acc(X := 1.0);
+MainSum := Acc.Y;
+MainRev := REV;
+END_PROGRAM
+`
+	e2eAux = `PROGRAM Totals
+VAR Hold : TON; Acc : Totalizer; END_VAR
+Hold(IN := TRUE, PT := T#1H);
+AuxET := Hold.ET;
+Acc(X := 1.0);
+AuxSum := Acc.Y;
+AuxRev := REV;
+END_PROGRAM
+`
+)
+
+// TestBuiltControllerActivatesWarm runs a REAL built controller: it builds
+// the naut CLI, has that binary `naut build` a two-commit, two-task git
+// project into a controller, runs the controller with no Go toolchain or
+// git on PATH, lets both tasks' timers and FB instances run, then
+// activates the older commit over HTTP. The activation must rebuild every
+// task's source from the embedded history (library composed ahead), swap
+// both tasks, and carry each one's TON and FB instance state.
+func TestBuiltControllerActivatesWarm(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs a controller binary")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+
+	// 1. The real CLI, built from this package.
+	naut := filepath.Join(dir, "naut")
+	if out, err := exec.Command(goBin, "build", "-o", naut, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build ./cmd/naut: %v\n%s", err, out)
+	}
+
+	// 2. A git project with two commits: rev 1 (the one activated) and rev
+	// 2 (HEAD, the one built).
+	proj := filepath.Join(dir, "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", proj}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	writeRev := func(rev string) {
+		t.Helper()
+		for name, body := range map[string]string{
+			"nautilus.yaml": e2eManifest,
+			"blocks.st":     e2eBlocks,
+			"main.st":       strings.Replace(e2eMain, "REV", rev, 1),
+			"totals.st":     strings.Replace(e2eAux, "REV", rev, 1),
+		} {
+			if err := os.WriteFile(filepath.Join(proj, name), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	git("init", "-q", "-b", "main")
+	writeRev("1")
+	git("add", "-A")
+	git("commit", "-q", "-m", "rev 1")
+	rev1 := git("rev-parse", "HEAD")
+	writeRev("2")
+	git("add", "-A")
+	git("commit", "-q", "-m", "rev 2")
+
+	// 3. naut build, by the real CLI: the controller is that binary with
+	// the project and its history appended.
+	ctl := filepath.Join(dir, "ctl")
+	if out, err := exec.Command(naut, "build", "-o", ctl, proj).CombinedOutput(); err != nil {
+		t.Fatalf("naut build: %v\n%s", err, out)
+	}
+
+	// 4. Run it: an empty PATH proves it needs neither Go nor git, and
+	// NAUTILUS_TOKEN is left unset so online edits need no token.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	var logs bytes.Buffer
+	cmd := exec.Command(ctl)
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=", "HOME=" + dir, "NAUTILUS_ADDR=" + addr}
+	cmd.Stdout, cmd.Stderr = &logs, &logs
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		if t.Failed() {
+			t.Logf("controller output:\n%s", logs.String())
+		}
+	})
+	base := "http://" + addr
+	client := &http.Client{Timeout: 5 * time.Second}
+	state := func() map[string]float64 {
+		t.Helper()
+		resp, err := client.Get(base + "/api/state")
+		if err != nil {
+			return nil
+		}
+		defer resp.Body.Close()
+		var f struct {
+			Tags map[string]any `json:"tags"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&f) != nil {
+			return nil
+		}
+		out := map[string]float64{}
+		for k, v := range f.Tags {
+			if n, ok := v.(float64); ok {
+				out[k] = n
+			}
+		}
+		return out
+	}
+
+	// 5. Let both tasks run a while: each TON past 1 s, each integrator
+	// well into the tens.
+	var before map[string]float64
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		before = state()
+		if before != nil && before["MainET"] >= 1000 && before["AuxET"] >= 1000 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("controller never ran both tasks for 1 s: state %v", before)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if before["MainRev"] != 2 || before["AuxRev"] != 2 {
+		t.Fatalf("the built controller should boot HEAD (rev 2): %v", before)
+	}
+
+	// 6. Activate rev 1 through the API, by short sha.
+	body, _ := json.Marshal(map[string]string{"sha": rev1[:7]})
+	resp, err := client.Post(base+"/api/program/activate", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var act struct {
+		Programs []struct {
+			Task   string   `json:"task"`
+			Resets []string `json:"resets"`
+		} `json:"programs"`
+		Error string `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&act)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("activate = %d: %s", resp.StatusCode, act.Error)
+	}
+	swapped := map[string]bool{}
+	for _, p := range act.Programs {
+		swapped[p.Task] = true
+		if len(p.Resets) != 0 {
+			t.Errorf("task %s reset %v: nothing in it changed but a constant", p.Task, p.Resets)
+		}
+	}
+	if len(act.Programs) != 2 || !swapped["main"] || !swapped["totals"] {
+		t.Fatalf("activation should swap both tasks: %+v", act.Programs)
+	}
+
+	// 7. Both tasks now run rev 1, and neither restarted its timer or its
+	// FB instance: a cold swap would read a few scans' worth, under the
+	// pre-activation values.
+	var after map[string]float64
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		after = state()
+		if after != nil && after["MainRev"] == 1 && after["AuxRev"] == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("both tasks should run rev 1 after activation: %v", after)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for _, name := range []string{"MainET", "MainSum", "AuxET", "AuxSum"} {
+		if after[name] < before[name] {
+			t.Errorf("%s went %v → %v across the activation: state restarted instead of carrying",
+				name, before[name], after[name])
+		}
 	}
 }
