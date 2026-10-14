@@ -1,0 +1,120 @@
+# The operator blocks of docs/functions.md "Operators", run as FBD blocks
+# and as the ST operators they lower to; every step asserts both. The
+# bitwise integer forms are st-bitwise; DIV and MOD by zero are st-div-zero.
+tests:
+  - name: AND, OR and XOR are logical on BOOL (the whole truth table), NOT negates a BOOL
+    steps:
+      - given: { A: false, B: false }
+        scans: 1
+        expect: { st_AND: false, fbd_AND: false, st_OR: false, fbd_OR: false, st_XOR: false, fbd_XOR: false, st_NOT: true, fbd_NOT: true }
+      - given: { A: false, B: true }
+        scans: 1
+        expect: { st_AND: false, fbd_AND: false, st_OR: true, fbd_OR: true, st_XOR: true, fbd_XOR: true, st_NOT: true, fbd_NOT: true }
+      - given: { A: true, B: false }
+        scans: 1
+        expect: { st_AND: false, fbd_AND: false, st_OR: true, fbd_OR: true, st_XOR: true, fbd_XOR: true, st_NOT: false, fbd_NOT: false }
+      - given: { A: true, B: true }
+        scans: 1
+        expect: { st_AND: true, fbd_AND: true, st_OR: true, fbd_OR: true, st_XOR: false, fbd_XOR: false, st_NOT: false, fbd_NOT: false }
+
+  - name: AND, OR and XOR take a third input - the third one counts
+    steps:
+      - given: { A: true, B: true, C: true }
+        scans: 1
+        expect: { st_AND3: true, fbd_AND3: true, st_OR3: true, fbd_OR3: true, st_XOR3: true, fbd_XOR3: true }
+      - given: { A: true, B: true, C: false }
+        scans: 1
+        expect: { st_AND3: false, fbd_AND3: false, st_OR3: true, fbd_OR3: true, st_XOR3: false, fbd_XOR3: false }
+      - given: { A: false, B: true, C: true }
+        scans: 1
+        expect: { st_AND3: false, fbd_AND3: false, st_OR3: true, fbd_OR3: true, st_XOR3: false, fbd_XOR3: false }
+      - given: { A: false, B: false, C: true }
+        scans: 1
+        expect: { st_AND3: false, fbd_AND3: false, st_OR3: true, fbd_OR3: true, st_XOR3: true, fbd_XOR3: true }
+      - given: { A: false, B: false, C: false }
+        scans: 1
+        expect: { st_AND3: false, fbd_AND3: false, st_OR3: false, fbd_OR3: false, st_XOR3: false, fbd_XOR3: false }
+      - given: { A: true, B: false, C: false }
+        scans: 1
+        expect: { st_AND3: false, fbd_AND3: false, st_OR3: true, fbd_OR3: true, st_XOR3: true, fbd_XOR3: true }
+
+  - name: ADD and MUL are n-ary - the third input counts; SUB is the binary difference
+    steps:
+      - given: { X: 2, Y: 3, Z: 4 }
+        scans: 1
+        expect: { st_ADD3: 9, fbd_ADD3: 9, st_MUL3: 24, fbd_MUL3: 24, st_SUB: -1, fbd_SUB: -1 }
+      - given: { X: 10, Y: -4, Z: -1 }
+        scans: 1
+        expect: { st_ADD3: 5, fbd_ADD3: 5, st_MUL3: 40, fbd_MUL3: 40, st_SUB: 14, fbd_SUB: 14 }
+
+  - name: an INT combined with a REAL gives a REAL - the common type, nothing truncated
+    steps:
+      - given: { X: 1, R: 0.5 }
+        scans: 1
+        expect: { st_ADDR: 1.5, fbd_ADDR: 1.5, st_MULR: 0.5, fbd_MULR: 0.5, st_SUBR: 0.5, fbd_SUBR: 0.5 }
+      - given: { X: -3, R: 0.25 }
+        scans: 1
+        expect: { st_ADDR: -2.75, fbd_ADDR: -2.75, st_MULR: -0.75, fbd_MULR: -0.75, st_SUBR: -3.25, fbd_SUBR: -3.25 }
+
+  - name: DIV of two integers is the quotient, MOD the remainder
+    steps:
+      - given: { X: 7, Y: 2 }
+        scans: 1
+        expect: { st_DIV: 3, fbd_DIV: 3, st_MOD: 1, fbd_MOD: 1 }
+      - given: { X: 17, Y: 5 }
+        scans: 1
+        expect: { st_DIV: 3, fbd_DIV: 3, st_MOD: 2, fbd_MOD: 2 }
+      - given: { X: -7, Y: 2 }
+        scans: 1
+        expect: { st_DIV: -3, fbd_DIV: -3, st_MOD: -1, fbd_MOD: -1 }
+      - given: { X: 7, Y: -2 }
+        scans: 1
+        expect: { st_DIV: -3, fbd_DIV: -3, st_MOD: 1, fbd_MOD: 1 }
+
+  - name: MOVE passes its single input through unchanged, whatever its type
+    steps:
+      - given: { A: true, X: -42, R: 2.75, S: 'pump 1' }
+        scans: 1
+        expect: { st_MOVEB: true, fbd_MOVEB: true, st_MOVEI: -42, fbd_MOVEI: -42, st_MOVER: 2.75, fbd_MOVER: 2.75, st_MOVES: 'pump 1', fbd_MOVES: 'pump 1' }
+      - given: { A: false, X: 1099511627776, R: -0.125, S: '' }
+        scans: 1
+        expect: { st_MOVEB: false, fbd_MOVEB: false, st_MOVEI: 1099511627776, fbd_MOVEI: 1099511627776, st_MOVER: -0.125, fbd_MOVER: -0.125, st_MOVES: '', fbd_MOVES: '' }
+
+  - name: GT GE LT LE EQ NE on INT return BOOL - below, equal, above
+    steps:
+      - given: { X: 3, Y: 5 }
+        scans: 1
+        expect: { st_GT: false, fbd_GT: false, st_GE: false, fbd_GE: false, st_LT: true, fbd_LT: true, st_LE: true, fbd_LE: true, st_EQ: false, fbd_EQ: false, st_NE: true, fbd_NE: true }
+      - given: { X: 5, Y: 5 }
+        scans: 1
+        expect: { st_GT: false, fbd_GT: false, st_GE: true, fbd_GE: true, st_LT: false, fbd_LT: false, st_LE: true, fbd_LE: true, st_EQ: true, fbd_EQ: true, st_NE: false, fbd_NE: false }
+      - given: { X: 6, Y: 5 }
+        scans: 1
+        expect: { st_GT: true, fbd_GT: true, st_GE: true, fbd_GE: true, st_LT: false, fbd_LT: false, st_LE: false, fbd_LE: false, st_EQ: false, fbd_EQ: false, st_NE: true, fbd_NE: true }
+      - given: { X: -6, Y: -5 }
+        scans: 1
+        expect: { st_GT: false, fbd_GT: false, st_GE: false, fbd_GE: false, st_LT: true, fbd_LT: true, st_LE: true, fbd_LE: true, st_EQ: false, fbd_EQ: false, st_NE: true, fbd_NE: true }
+
+  - name: GT GE LT LE EQ NE on REAL compare the fractions too
+    steps:
+      - given: { RX: 0.5, RY: 0.75 }
+        scans: 1
+        expect: { st_RGT: false, fbd_RGT: false, st_RGE: false, fbd_RGE: false, st_RLT: true, fbd_RLT: true, st_RLE: true, fbd_RLE: true, st_REQ: false, fbd_REQ: false, st_RNE: true, fbd_RNE: true }
+      - given: { RX: 0.75, RY: 0.75 }
+        scans: 1
+        expect: { st_RGT: false, fbd_RGT: false, st_RGE: true, fbd_RGE: true, st_RLT: false, fbd_RLT: false, st_RLE: true, fbd_RLE: true, st_REQ: true, fbd_REQ: true, st_RNE: false, fbd_RNE: false }
+      - given: { RX: 0.875, RY: 0.75 }
+        scans: 1
+        expect: { st_RGT: true, fbd_RGT: true, st_RGE: true, fbd_RGE: true, st_RLT: false, fbd_RLT: false, st_RLE: false, fbd_RLE: false, st_REQ: false, fbd_REQ: false, st_RNE: true, fbd_RNE: true }
+
+  - name: GT GE LT LE EQ NE on TIME (milliseconds)
+    steps:
+      - given: { T1: 1500, T2: 2000 }
+        scans: 1
+        expect: { st_TGT: false, fbd_TGT: false, st_TGE: false, fbd_TGE: false, st_TLT: true, fbd_TLT: true, st_TLE: true, fbd_TLE: true, st_TEQ: false, fbd_TEQ: false, st_TNE: true, fbd_TNE: true }
+      - given: { T1: 2000, T2: 2000 }
+        scans: 1
+        expect: { st_TGT: false, fbd_TGT: false, st_TGE: true, fbd_TGE: true, st_TLT: false, fbd_TLT: false, st_TLE: true, fbd_TLE: true, st_TEQ: true, fbd_TEQ: true, st_TNE: false, fbd_TNE: false }
+      - given: { T1: 2001, T2: 2000 }
+        scans: 1
+        expect: { st_TGT: true, fbd_TGT: true, st_TGE: true, fbd_TGE: true, st_TLT: false, fbd_TLT: false, st_TLE: false, fbd_TLE: false, st_TEQ: false, fbd_TEQ: false, st_TNE: true, fbd_TNE: true }

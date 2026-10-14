@@ -823,13 +823,12 @@ claims:
     tests:
       - go ./lang/conformance TestConformance/st-bitwise
       - go ./lang/conformance TestConformance/st-xor
-    partial: true
+      - go ./lang/conformance TestConformance/fn-ops/AND, OR and XOR are logical on BOOL (the whole truth table), NOT negates a BOOL
+      - go ./lang/conformance TestConformance/fn-ops/AND, OR and XOR take a third input - the third one counts
     note: >-
-      Bitwise AND/OR/XOR on integers (ST and FBD, bits above 32) and XOR's
-      BOOL truth table are asserted. Logical AND and OR on BOOL are not
-      asserted by these features, and the n-ary (3+ input) block form is not
-      exercised. The claim no longer says "XOR of n inputs is TRUE when an
-      odd number are": that came from the test, not the page.
+      Bitwise AND/OR/XOR on integers (ST and FBD, bits above 32, -8 AND 6 =
+      0) in st-bitwise; the logical BOOL truth tables of AND, OR and XOR, two
+      and three inputs, as FBD blocks and ST operators, in fn-ops.
 
   - id: FN-065
     claim: >-
@@ -839,8 +838,10 @@ claims:
     tests:
       - go ./lang/conformance TestConformance/st-bitwise
       - go ./lang/st TestLowerNotOnInt
-    partial: true
-    note: The integer complement is asserted (NOT 0 = -1, NOT 12 = -13); NOT on a BOOL is not asserted by these tests.
+      - go ./lang/conformance TestConformance/fn-ops/AND, OR and XOR are logical on BOOL (the whole truth table), NOT negates a BOOL
+    note: >-
+      The integer complement (NOT 0 = -1, NOT 12 = -13) in st-bitwise; NOT
+      on a BOOL, as the FBD block and the ST operator, in fn-ops.
 
   - id: FN-066
     claim: >-
@@ -849,23 +850,29 @@ claims:
     source: "#operators"
     tests:
       - go ./lang/st TestLowerRealArithmetic
+      - go ./lang/conformance TestConformance/fn-ops/ADD and MUL are n-ary - the third input counts; SUB is the binary difference
+      - go ./lang/conformance TestConformance/fn-ops/an INT combined with a REAL gives a REAL - the common type, nothing truncated
+      - go ./lang/fbd TestB1OperatorArityAndTypes
     partial: true
     note: >-
-      One REAL addition is asserted; the n-ary arity, SUB, MUL and the
-      "common type" rule are not. TestBuiltinNumerics was removed: it tests
-      EXPT, TRUNC and ATAN2.
+      Asserted: three-input ADD and MUL (the third input counts), SUB as the
+      binary difference (a three-input SUB is refused), and the common type
+      across kinds: INT with INT is an integer (drives an INT coil), INT
+      with REAL is a REAL (1 + 0.5 = 1.5; it may not drive an INT coil). Not
+      asserted, and the code disagrees: the common type across integer
+      widths. DINT + DINT is typed as the generic INT, not DINT (assigning
+      it to a STRING says "cannot assign INT to STRING"), where IEC's common
+      type is DINT. Values are unaffected (every integer is 64-bit here).
 
   - id: FN-067
     claim: DIV gives the quotient and MOD the remainder of two integers.
     source: "#operators"
     tests:
       - go ./lang/conformance TestConformance/st-div-zero/ordinary division truncates toward zero, MOD keeps the dividend's sign
-      - go ./lang/conformance TestConformance/fbd-en-eno/DIV's ENO is FALSE on a zero divisor, TRUE otherwise
-    partial: true
+      - go ./lang/conformance TestConformance/fn-ops/DIV of two integers is the quotient, MOD the remainder
     note: >-
-      Integer quotient and remainder are asserted through ST's `/` and MOD.
-      The DIV block itself (FBD) is asserted only on REALs (9.0 DIV 2.0 =
-      4.5 in fbd-en-eno); no test calls the DIV block on two integers.
+      The DIV and MOD blocks (FBD) and ST's / and MOD on two integers, both
+      signs (7 DIV 2 = 3, -7 DIV 2 = -3, -7 MOD 2 = -1, 7 MOD -2 = 1).
 
   - id: FN-068
     claim: >-
@@ -889,8 +896,13 @@ claims:
   - id: FN-070
     claim: MOVE passes its single input through as an assignment (FBD wiring aid).
     source: "#operators"
-    tests: []
-    note: Gap. No test exercises the MOVE block.
+    tests:
+      - go ./lang/conformance TestConformance/fn-ops/MOVE passes its single input through unchanged, whatever its type
+      - go ./lang/fbd TestB1OperatorArityAndTypes
+    note: >-
+      The FBD MOVE block passes a BOOL, an INT (beyond 32 bits), a REAL and a
+      STRING through unchanged, matching the ST assignment; a two-input MOVE
+      is refused and MOVE of a REAL may not drive an INT (it keeps its type).
 
   - id: FN-071
     claim: >-
@@ -898,13 +910,17 @@ claims:
       and return BOOL.
     source: "#operators"
     tests:
-      - go ./lang/ld TestFunctionContactExpressionArgs
-      - go ./lang/conformance TestConformance/sfc-step-t/a Step.T condition fires one scan after T reaches PT
-    partial: true
+      - go ./lang/conformance TestConformance/fn-ops/GT GE LT LE EQ NE on INT return BOOL - below, equal, above
+      - go ./lang/conformance TestConformance/fn-ops/GT GE LT LE EQ NE on REAL compare the fractions too
+      - go ./lang/conformance TestConformance/fn-ops/GT GE LT LE EQ NE on TIME (milliseconds)
+      - go ./lang/fbd TestB1OperatorArityAndTypes
     note: >-
-      GT and EQ compile as contacts (BOOL), and one TIME comparison (>=) is
-      run; there is no per-function truth-table test. TestLowerTimeArithmetic
-      was removed: it adds TIMEs and compares nothing.
+      All six as FBD blocks and ST operators on INT, REAL and TIME, each
+      below, equal and above, driving BOOL tags; a three- or one-input
+      comparison is refused and a comparison may not drive an INT (its
+      result is BOOL). TestFunctionContactExpressionArgs and the sfc-step-t
+      condition were dropped: one compiles contacts, the other is one TIME
+      comparison.
 
   # ── Standard functions ──────────────────────────────────────────────
   - id: FN-072
@@ -917,20 +933,26 @@ claims:
       - go ./lang/st TestENOnFunctionAssign
       - go ./lang/st TestENOOnlyAndPositional
       - go ./lang/st TestENErrors
-    partial: true
+      - go ./lang/fbd TestENOErrors
+      - go ./lang/conformance TestConformance/fn-select-numeric/SEL gives IN0 when G is FALSE and IN1 when G is TRUE, positional or formal
+      - go ./lang/conformance TestConformance/fn-select-numeric/a formal MUX picks by K over IN0..IN2
+      - go ./lang/conformance TestConformance/fn-select-numeric/MIN and MAX of three or four inputs find the extreme wherever it sits
+      - go ./lang/conformance TestConformance/fn-select-numeric/ABS is the absolute value of an INT, a DINT and a REAL, each in its own type
     note: >-
-      Formal LIMIT (MN/IN/MX) and MAX (IN1/IN2) calls run, and a mixed call
-      is refused ("formal or positional"). The SEL (G/IN0/IN1) and MUX
-      (K/IN0...) formal names are not exercised. TestUserFunc_NamedArgs was
-      removed: it calls a user FUNCTION, not a standard one.
+      Formal calls run under every naming scheme the page lists, each
+      matching the positional call: LIMIT (MN/IN/MX) and MAX (IN1/IN2) in
+      the ST EN/ENO tests; SEL (G/IN0/IN1), MUX (K/IN0..IN2), MIN
+      (IN1..IN3) and ABS (IN) in fn-select-numeric, ST and FBD. A mixed
+      call is refused in ST ("formal or positional") and FBD ("by name or
+      none").
 
   - id: FN-073
     claim: SEL(G, IN0, IN1) returns IN0 when G is FALSE and IN1 when G is TRUE.
     source: "#selection"
     tests:
       - go ./lang/st TestBuiltinSelMux
-    partial: true
-    note: Only G = TRUE (IN1) is asserted; G = FALSE returning IN0 is not.
+      - go ./lang/conformance TestConformance/fn-select-numeric/SEL gives IN0 when G is FALSE and IN1 when G is TRUE, positional or formal
+    note: G = FALSE gives IN0 and G = TRUE gives IN1, positional and formal, in ST and FBD.
 
   - id: FN-074
     claim: >-
@@ -958,18 +980,23 @@ claims:
     tests:
       - go ./lang/st TestBuiltinMinMaxLimit
       - go ./lang/conformance TestConformance/st-mux-fault/LIMIT keeps a wandering selector in range, so the scan never faults
-    partial: true
+      - go ./lang/conformance TestConformance/fn-select-numeric/MIN and MAX of three or four inputs find the extreme wherever it sits
     note: >-
-      Two-input MIN and MAX and LIMIT clamping at both ends are asserted;
-      MIN or MAX with three or more inputs is not run.
+      LIMIT clamps at both ends; MIN and MAX of three inputs (and MAX of
+      four) find the extreme in the first, second, third or fourth position,
+      in ST and FBD.
 
   - id: FN-077
     claim: ABS returns the absolute value in the argument's own type.
     source: "#numeric"
     tests:
       - go ./lang/st TestBuiltinABS
-    partial: true
-    note: Only ABS of an INT (-5 to 5) is asserted; a REAL argument and the result type are not.
+      - go ./lang/conformance TestConformance/fn-select-numeric/ABS is the absolute value of an INT, a DINT and a REAL, each in its own type
+      - go ./lang/st TestB1ABSKeepsArgumentType
+    note: >-
+      Values for INT, DINT and REAL arguments (ST and FBD); the result type
+      is the argument's for SINT, INT, DINT, LINT, UINT, UDINT and REAL (the
+      compiler names it when the result cannot be assigned).
 
   - id: FN-078
     claim: >-
@@ -991,11 +1018,11 @@ claims:
       - go ./lang/conformance TestConformance/st-conversions-matrix/REAL to integer rounds half to even; TRUNC goes toward zero
       - go ./lang/ir TestConversionSemantics
       - go ./lang/st TestBuiltinTruncStaysTruncation
-    partial: true
+      - go ./lang/conformance TestConformance/fn-select-numeric/TRUNC goes toward zero into a 64-bit integer - a value beyond 32 bits survives
     note: >-
       Toward-zero truncation is asserted for TRUNC and the typed TRUNC_DINT /
-      TRUNC_INT. That TRUNC's result is a 64-bit integer (a value beyond 32
-      bits survives) is not.
+      TRUNC_INT; TRUNC(±5000000000.7) = ±5000000000 shows the result is a
+      64-bit integer.
 
   - id: FN-080
     claim: >-
@@ -1383,8 +1410,16 @@ claims:
       - go ./lang/conformance TestConformance/fbd-en-eno/EN TRUE runs the call and ENO is TRUE
       - go ./lang/conformance TestConformance/fbd-en-eno/DIV's ENO is FALSE on a zero divisor, TRUE otherwise
       - go ./lang/conformance TestConformance/fbd-en-eno/DIV with EN FALSE holds its result and reports ENO FALSE
-    partial: true
-    note: DIV is covered; MOD's ENO is not separately asserted.
+      - go ./lang/conformance TestConformance/fbd-en-eno/EN FALSE leaves the function's result unassigned
+      - go ./lang/fbd TestENOModByZero
+      - go ./runtime TestB1FBDDivModZeroENOAndDivZero
+      - go ./lang/conformance TestMuxOutOfRangeFaults
+    note: >-
+      ENO follows EN for LIMIT and CTU (TRUE when run, FALSE when not); DIV's
+      and MOD's ENO is FALSE on a zero divisor with the result 0, and each
+      zero divisor is counted in divZero while the scan keeps running
+      (TestB1FBDDivModZeroENOAndDivZero, FBD on the runtime); a call that
+      errors (MUX out of range) faults the scan.
 
   - id: FN-115
     claim: >-
@@ -1422,11 +1457,14 @@ claims:
       - go ./lang/fbd TestENOFunctionGatesItsCoil
       - go ./lang/fbd TestENOErrors
       - go ./lang/conformance TestConformance/fbd-en-eno
-    partial: true
+      - go ./lang/fbd TestB1ENOFeedsTheNextBlocksEN
     note: >-
       EN/ENO on LIMIT, DIV, TON and CTU, the "must drive a variable" error,
-      and ENO wired to a coil are asserted. ENO feeding the next block's EN
-      (the EN/ENO chain) is not.
+      and ENO wired to a coil are asserted. TestB1ENOFeedsTheNextBlocksEN
+      chains ENO into the next block's EN through every kind of block (a
+      standard function, an operator block, a user FUNCTION, a standard FB,
+      a user FUNCTION_BLOCK, DIV): EN FALSE at the head stops the whole
+      chain, a zero divisor at the tail drops only the last ENO.
 
   - id: FN-118
     claim: >-
