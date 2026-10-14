@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/internal/stproject"
 )
 
@@ -193,8 +194,10 @@ func (s *Server) setDocument(uri, text string) {
 // envFor is the project a document at path compiles in: its libraries
 // (unsaved buffers win over disk) and the manifest's tags.
 func (s *Server) envFor(uri, path string) env {
-	prelude, libs, segs := stproject.PreludeParts(path, s.otherBuffers(uri))
+	others := s.otherBuffers(uri)
+	prelude, libs, segs := stproject.PreludeParts(path, others)
 	return env{
+		peers:        project.PeersFor(path, others, libs),
 		libs:         libs,
 		prelude:      prelude,
 		preludeLines: strings.Count(prelude, "\n"),

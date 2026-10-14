@@ -925,6 +925,62 @@ func TagDefsFor(file string) []runtime.TagDef {
 	return nil
 }
 
+// PeersFor is the programs of the project governing file — every task's
+// program, by its task name (the first task is main) — for the compile
+// options' Peers: the language server and `naut check` compile one file
+// at a time, and with these a reference to another task's instance
+// (`t1.Q`) is told that tasks share only tags (#327), as runtime.New
+// tells it. override holds unsaved editor buffers by absolute path; libs
+// are the project's library sources (a ladder rung needs a user block's
+// pins). nil when the file is in no project.
+func PeersFor(file string, override map[string]string, libs []string) []st.PeerProgram {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Dir(abs)
+	for range 32 {
+		if fi, err := os.Stat(filepath.Join(dir, ManifestName)); err == nil && !fi.IsDir() {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
+	}
+	m, err := ReadManifest(os.DirFS(dir), "")
+	if err != nil || len(m.Tasks) < 2 {
+		return nil
+	}
+	var peers []st.PeerProgram
+	for i, t := range m.Tasks {
+		if t.Program == "" {
+			continue
+		}
+		p := filepath.Join(dir, filepath.FromSlash(path.Clean(t.Program)))
+		src, ok := override[p]
+		if !ok {
+			raw, err := os.ReadFile(p)
+			if err != nil {
+				continue
+			}
+			src = string(raw)
+		}
+		name := t.Name
+		switch {
+		case i == 0:
+			name = runtime.MainTaskName
+		case name == "":
+			name = strings.TrimSuffix(path.Base(t.Program), path.Ext(t.Program))
+		}
+		if peer, ok := runtime.PeerOf(src, name, libs...); ok {
+			peers = append(peers, peer)
+		}
+	}
+	return peers
+}
+
 func tagDefs(tags []TagConfig) ([]runtime.TagDef, error) {
 	var defs []runtime.TagDef
 	for _, t := range tags {

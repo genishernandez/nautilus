@@ -236,7 +236,7 @@ func runCheck(args []string) int {
 			}
 			return 1
 		}
-		res := compileFile(source, prelude, segs, tags)
+		res := compileFile(source, prelude, segs, tags, project.PeersFor(f, nil, libSources)...)
 		if res.failed {
 			if res.inLib {
 				libErrs = append(libErrs, res.lib)
@@ -611,7 +611,10 @@ type checkResult struct {
 // the project's tags are in scope as the runtime puts them there
 // (runtime.ResolveTagScope). Positions in src are reported in src's
 // coordinates; an error inside the prelude is attributed to its library.
-func compileFile(src, prelude string, segs []stproject.Segment, tags []runtime.TagDef) checkResult {
+//
+// peers are the project's programs (project.PeersFor): a reference to
+// another task's variable is then explained, as runtime.New explains it.
+func compileFile(src, prelude string, segs []stproject.Segment, tags []runtime.TagDef, peers ...st.PeerProgram) checkResult {
 	prog, err := st.Parse(src)
 	if err != nil {
 		// Anchor on the parser-reported position (shared with the LSP via
@@ -634,6 +637,7 @@ func compileFile(src, prelude string, segs []stproject.Segment, tags []runtime.T
 		scope, _ := runtime.ResolveTagScope(tags, types)
 		opts = scope.LowerOpts()
 	}
+	opts.Peers = peers
 	if _, err := st.LowerWithOpts(lowerProg, opts); err != nil {
 		pos := st.Pos{Line: 1, Col: 1}
 		msg := err.Error()

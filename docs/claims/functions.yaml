@@ -264,20 +264,31 @@ claims:
 
   - id: FN-021
     claim: >-
-      Any instance output is addressable as inst.Pin everywhere, including
-      from another task's FBD/ST program.
+      An instance output is addressable as inst.Pin anywhere in the program
+      that declares the instance, a non-BOOL pin as a contact's argument
+      included. Another task's program cannot name the instance (t1.Q, or
+      through its program's or task's name): that is an undeclared
+      identifier whose error names the owning program and says to go
+      through a tag. Published to a tag in the owner, the output reaches
+      the other task as of the owner's last committed scan — at once for a
+      reader that scans after the owner, on its next scan for one that
+      scans before.
     source: "#ladder-power-flow"
     tests:
       - go ./lang/conformance TestConformance/ld-coils/FB-only rung (no coil) still runs, its outputs read elsewhere
-    partial: true
+      - go ./lang/conformance TestCrossTaskPublishedInstanceOutput
+      - go ./lang/conformance TestCrossTaskInstanceIsDiagnosed
+      - go ./lang/conformance TestUndeclaredIdentifierWithoutPeerKeepsItsMessage
+      - go ./cmd/naut TestCheckGoldenCrossTaskInstance
+      - go ./internal/lsp TestCrossTaskInstanceDiagnostic
     note: >-
-      A rung reading cnt.Q from another rung of the same program is asserted;
-      a non-BOOL pin (inst.ET) used as a contact argument is untested.
-      Disagreement: "from another task's FBD/ST program" does not hold. An
-      instance is a program local, and a second task's ST program reading
-      t1.Q (or A.t1.Q) of task A's `t1 : TON` fails naut check with
-      'undeclared identifier "t1"' (checked 2026-10-13); the page and the
-      code need reconciling before this clause can be tested.
+      #327: the page used to say an instance output is readable from
+      another task's program; it never was (an instance lives in its
+      program's private frame, and tasks share only the tag store). The
+      page now states the rule and the tag recipe. The diagnostic is
+      asserted from the runtime (project load), naut check and the
+      language server, for ST and ladder readers; the recipe's timing in
+      naut test's deterministic task order (main first, then tasks: order).
 
   # ── SFC qualifiers and step supervision ─────────────────────────────
   - id: FN-022

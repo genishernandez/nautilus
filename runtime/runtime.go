@@ -12,6 +12,7 @@ import (
 	"github.com/joyautomation/nautilus/internal/stproject"
 	nio "github.com/joyautomation/nautilus/io"
 	"github.com/joyautomation/nautilus/lang/ir"
+	"github.com/joyautomation/nautilus/lang/st"
 	"github.com/joyautomation/nautilus/retain"
 )
 
@@ -326,6 +327,7 @@ func New(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	lopts := scope.LowerOpts()
+	lopts.Peers = peersOf(o)
 	prog, err := CompileWith(o.Program, lopts)
 	if err != nil {
 		return nil, err
@@ -448,6 +450,34 @@ func New(o Options) (*Runtime, error) {
 	r.stats.Periods = make([]float64, 0, historyLen)
 	r.stats.Histogram = make([]int, histBuckets)
 	return r, nil
+}
+
+// peersOf describes every program of the resource as a peer (#327): a
+// program that names another's instance (`t1.Q`, `A.t1.Q`) is told that
+// tasks share only tags, instead of only that t1 is undeclared. A source
+// that does not parse is left out; its own compile reports it.
+func peersOf(o Options) []st.PeerProgram {
+	if len(o.Tasks) == 0 {
+		return nil
+	}
+	var peers []st.PeerProgram
+	if p, ok := PeerOf(o.Program, MainTaskName); ok {
+		peers = append(peers, p)
+	}
+	for i, td := range o.Tasks {
+		src := td.Program
+		if len(td.Libraries) > 0 {
+			src = stproject.Join(td.Libraries, src)
+		}
+		name := td.Name
+		if name == "" {
+			name = fmt.Sprintf("task%d", i+1)
+		}
+		if p, ok := PeerOf(src, name); ok {
+			peers = append(peers, p)
+		}
+	}
+	return peers
 }
 
 // tagScopeFor resolves the tags every program sees without declaring
