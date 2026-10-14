@@ -100,6 +100,11 @@ func (d Duration) MarshalYAML() (any, error) { return time.Duration(d).String(),
 // "RTU9_WEL15_FIT_001.HH" rather than a flat BOOL. It must resolve to a
 // BOOL; true means in alarm.
 type Def struct {
+	// Source names where the definition was declared ("manifest" or an
+	// alarm file's path), so a duplicate-id error can point at it. Stamped
+	// at compose time, never read from YAML.
+	Source string `yaml:"-" json:"-"`
+
 	ID   string `yaml:"id" json:"id"`     // defaults to Tag
 	Tag  string `yaml:"tag" json:"tag"`   // "tag" or "tag.member"; BOOL, true = in alarm
 	Name string `yaml:"name" json:"name"` // the human-readable identity; defaults to ID
@@ -262,6 +267,18 @@ type Match struct {
 	Tag    string `yaml:"tag"`
 }
 
+// describe renders the match's set fields as "type=T member=M tag=G" for
+// error messages.
+func (m Match) describe() string {
+	var parts []string
+	for _, p := range [][2]string{{"type", m.Type}, {"member", m.Member}, {"tag", m.Tag}} {
+		if p[1] != "" {
+			parts = append(parts, p[0]+"="+p[1])
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // UnmarshalYAML exists only to keep `match:` strict. A Rule is decoded
 // through strictDecode, which calls node.Decode and so builds a fresh
 // decoder without KnownFields — nested mappings would lose their
@@ -333,6 +350,10 @@ func glob(pattern, s string) bool {
 // name template fails the load instead of shipping "{sight}" to an
 // operator screen.
 type Rule struct {
+	// Source names where the rule was declared ("manifest" or an alarm
+	// file's path); see Def.Source.
+	Source string `yaml:"-"`
+
 	Match Match `yaml:"match"`
 
 	ID   string `yaml:"id"`   // template; default "{path}"
@@ -423,6 +444,22 @@ func Expand(rules []Rule, defs []Def, tags []TagInfo) ([]Def, error) {
 		return nil
 	}
 
+	// A rule is labelled by its position within its own source, not within
+	// the merged list Compose builds, so the number matches what a reader
+	// counts in the file.
+	ruleNo := make([]int, len(rules))
+	seen := make(map[string]int)
+	for i, r := range rules {
+		ruleNo[i] = seen[r.Source]
+		seen[r.Source]++
+	}
+	ruleSrc := func(i int) string {
+		if rules[i].Source == "" {
+			return fmt.Sprintf("rule %d", i)
+		}
+		return fmt.Sprintf("%s rule %d (match %s)", rules[i].Source, ruleNo[i], rules[i].Match.describe())
+	}
+
 	for _, t := range sorted {
 		for _, c := range candidatesFor(t) {
 			for i, r := range rules {
@@ -433,7 +470,7 @@ func Expand(rules []Rule, defs []Def, tags []TagInfo) ([]Def, error) {
 				if err != nil {
 					return nil, fmt.Errorf("rule %d (%s): %w", i, c.path(), err)
 				}
-				if err := add(d, fmt.Sprintf("rule %d", i)); err != nil {
+				if err := add(d, ruleSrc(i)); err != nil {
 					return nil, err
 				}
 				break // first match wins
@@ -451,7 +488,11 @@ func Expand(rules []Rule, defs []Def, tags []TagInfo) ([]Def, error) {
 		if d.Name == "" {
 			d.Name = d.ID
 		}
-		if err := add(d, fmt.Sprintf("alarm %q", d.ID)); err != nil {
+		defSrc := fmt.Sprintf("alarm %q", d.ID)
+		if d.Source != "" {
+			defSrc = d.Source + " " + defSrc
+		}
+		if err := add(d, defSrc); err != nil {
 			return nil, err
 		}
 	}
@@ -713,12 +754,31 @@ func (c *Config) ShelveDurations() []time.Duration {
 func (c *Config) Compose(files []File, tags []TagInfo) ([]Def, error) {
 	rules := make([]Rule, 0, len(c.Rules))
 	defs := make([]Def, 0, len(c.Defs))
-	for _, f := range files {
-		rules = append(rules, f.Rules...)
-		defs = append(defs, f.Defs...)
+	// Stamp where each item came from, so a duplicate-id error can name
+	// the manifest or the file. A source already set (the project loader
+	// merges alarm files into the config and stamps them there) is kept.
+	stamp := func(src string, rs []Rule, ds []Def) {
+		for _, r := range rs {
+			if r.Source == "" {
+				r.Source = src
+			}
+			rules = append(rules, r)
+		}
+		for _, d := range ds {
+			if d.Source == "" {
+				d.Source = src
+			}
+			defs = append(defs, d)
+		}
 	}
-	rules = append(rules, c.Rules...)
-	defs = append(defs, c.Defs...)
+	for _, f := range files {
+		src := f.Path
+		if src == "" {
+			src = "alarm file"
+		}
+		stamp(src, f.Rules, f.Defs)
+	}
+	stamp("manifest", c.Rules, c.Defs)
 
 	out, err := Expand(rules, defs, tags)
 	if err != nil {
@@ -737,6 +797,7 @@ func (c *Config) Compose(files []File, tags []TagInfo) ([]Def, error) {
 // can emit the handful of rules that cover a site's UDTs alongside the
 // standalone BOOLs that name themselves, in one reviewable artifact.
 type File struct {
+	Path  string // where the file was read from; labels errors, set by the caller
 	Defs  []Def
 	Rules []Rule
 }
