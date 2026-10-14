@@ -82,28 +82,28 @@ func TestWriteTag(t *testing.T) {
 		t.Errorf("empty name accepted: %d", rec.Code)
 	}
 
-	// A non-scalar value the runtime can't store must be rejected, not
-	// silently accepted with a 204 that wrote nothing.
+	// A name no tag declares is refused with a 400 naming it, whatever the
+	// value: the write would otherwise create a stray top-level tag no
+	// program reads (#329). The same holds for a string and for a number.
+	for _, c := range []struct{ name, body string }{
+		{"Mode", `{"name": "Mode", "value": "AUTO"}`},
+		{"Bias", `{"name": "Bias", "value": 2.5}`},
+	} {
+		rec = httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", bytes.NewBufferString(c.body)))
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "undefined tag "+c.name) {
+			t.Errorf("write to undeclared %s: status %d, body %q; want 400 naming it", c.name, rec.Code, rec.Body)
+		}
+		if _, ok := rt.Tags().All()[c.name]; ok {
+			t.Errorf("a refused write created the tag %s", c.name)
+		}
+	}
+	// A value the declared tag can't store is still rejected, not silently
+	// accepted with a 204 that wrote nothing.
 	rec = httptest.NewRecorder()
-	body = bytes.NewBufferString(`{"name": "Mode", "value": "AUTO"}`)
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", body))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", bytes.NewBufferString(`{"name": "SP", "value": "AUTO"}`)))
 	if rec.Code != 422 {
-		t.Errorf("string value status = %d, want 422", rec.Code)
-	}
-	if _, ok := rt.Tags().All()["Mode"]; ok {
-		t.Error("rejected write should not have created the tag")
-	}
-
-	// A name no tag has yet. The operator is one of the four writers, and
-	// writes create: a scalar write lands as a new tag a program can read.
-	rec = httptest.NewRecorder()
-	body = bytes.NewBufferString(`{"name": "Bias", "value": 2.5}`)
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", body))
-	if rec.Code != 204 {
-		t.Fatalf("scalar write to a new name: status %d, body %s", rec.Code, rec.Body)
-	}
-	if v, err := rt.Tags().ReadGlobal("Bias"); err != nil || v.F != 2.5 {
-		t.Errorf("Bias = %+v, %v; want the operator's 2.5 as a new tag", v, err)
+		t.Errorf("string value to a REAL tag: status = %d, want 422", rec.Code)
 	}
 	// A member path under an unknown name creates nothing: it is refused
 	// with the reason, and neither the dotted name nor its root appears.

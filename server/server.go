@@ -1164,6 +1164,14 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 	// recipe name, a scenario), so a typo cannot turn a REAL into text.
 	// Anything else is refused here rather than answered 204 for a write
 	// that didn't happen.
+	// The name must be a declared tag. A write to anything else would create
+	// a top-level tag no program reads and a Sparkplug edge would publish as
+	// a bogus metric, so it is a 400 that names the tag. A CONSTANT is not a
+	// tag, so it lands here too: a project constant cannot be written.
+	if !s.declaredTag(req.Name) {
+		http.Error(w, "undefined tag "+req.Name+": not a declared tag, so there is nothing to write (a CONSTANT is not a tag and cannot be written)", http.StatusBadRequest)
+		return
+	}
 	switch v := req.Value.(type) {
 	case float64, bool:
 		s.rt.Tags().Set(req.Name, req.Value)
@@ -1178,6 +1186,30 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "value must be a number or boolean", http.StatusUnprocessableEntity)
 	}
+}
+
+// declaredTag reports whether name is a tag the controller declares: one in
+// the store, one the manifest types or a program binds (VAR_EXTERNAL or the
+// project's tag table), or a driver input or output not yet delivered. A
+// CONSTANT is none of these.
+func (s *Server) declaredTag(name string) bool {
+	if _, ok := s.rt.Tags().Canonical(name); ok || s.rt.Tags().TypeOf(name) != nil {
+		return true
+	}
+	for _, list := range [][]string{s.rt.Inputs(), s.rt.Outputs()} {
+		for _, n := range list {
+			if strings.EqualFold(n, name) {
+				return true
+			}
+		}
+	}
+	key := ir.NameKey(name)
+	for g := range s.rt.Globals() {
+		if ir.NameKey(g) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // refuseMemberWrite reports why a member write to this root tag must not
