@@ -248,7 +248,7 @@ func (c *rungCtx) cmpExpr(fn string, args []string, e ld.Element) (string, bool)
 		}
 		s, bad := c.logixExpr(x)
 		if bad != "" {
-			c.lw.diag(ruleOperand, c.r.Line, c.r.Name, "%s(%s): %s has no Logix expression form", e.Fn, e.Args, bad)
+			c.lw.diag(ruleOperand, c.r.Line, c.r.Name, "%s(%s): %s has no Logix expression form; compute it into a tag first", e.Fn, e.Args, bad)
 			return "", false
 		}
 		sides = append(sides, stripOuter(s))

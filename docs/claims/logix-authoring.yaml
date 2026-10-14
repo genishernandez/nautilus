@@ -16,19 +16,23 @@ claims:
     claim: >-
       `VAR_EXTERNAL` is optional: a ladder or ST program that names a
       manifest tag it did not declare still gets its controller tag, typed
-      from the manifest.
+      from the manifest. A manifest tag with no `role:` stops `naut logix
+      deploy` and `naut logix write` with an error naming the tag.
     source: "#a-project-with-a-logix-target"
     tests:
       - go ./logix/writer TestImplicitTagsBecomeControllerTags
       - go ./logix/writer TestImplicitTagsInST
       - go ./logix/writer TestImplicitTagsLadderMembersAndLiterals
       - go ./cmd/naut TestLogixDeployTypesUndeclaredTagsFromTheManifest
+      - go ./cmd/naut TestLogixDeployRefusesATagWithNoRole
     note: >-
       The CLI test deploys (to a fake agent) and writes a project whose ladder
       names four manifest tags it never declares: each becomes a controller
       tag typed from nautilus.yaml, `type:` where given (INT over the REAL
       `init: 0` would imply; DINT with no init) and else the type `init:`
-      implies (REAL, BOOL); a manifest tag no rung names is not written.
+      implies (REAL, BOOL); a manifest tag no rung names is not written. A
+      tag with no role: is refused by name (exit 2) by `naut logix deploy`,
+      before anything reaches the agent, and by `naut logix write`.
 
   - id: LGA-003
     claim: >-
@@ -92,34 +96,40 @@ claims:
     claim: >-
       Compares become the Logix compare instructions (an expression operand
       becomes `CMP`), and `{ y := expr }` becomes `MOVE`, `ADD`, `SUB`,
-      `MUL`, `DIV`, `MOD`, `NEG`, `ABS`, `SQR`, `XPY` or `CPT` according to
-      its shape.
+      `MUL` or `DIV` for one operation on plain operands, `ABS` for
+      `ABS(x)`, and `CPT` for anything else (`MOD`, unary `-`, `SQRT` as
+      `SQR`, `**` or `EXPT`, nested expressions).
     source: "#what-the-target-accepts"
     tests:
       - go ./logix/writer TestAssignmentsAndExpressionCompares
       - go ./logix/writer TestGolden/subset
       - go ./logix/writer TestLEIsAPlainCompare
-    partial: true
     note: >-
-      MOVE, ADD, SUB, MUL, DIV, ABS, CPT and CMP are asserted, and the plain
-      compares GE, NE, GT, LT (golden snapshot) and LE. Page and code disagree
-      on MOD, NEG, SQR and XPY: the writer never emits them as instructions,
-      it folds `A MOD B`, `-A`, `SQRT(S)` and `EXPT`/`**` into CPT (and
-      refuses `NEG(A)` as logix/data-op), while the page's table lists them as
-      instructions.
+      MOVE, ADD, SUB, MUL, DIV, ABS, CPT (including MOD, unary minus, SQRT,
+      ** and EXPT) and CMP are asserted, and the plain compares GE, NE, GT,
+      LT (golden snapshot) and LE.
 
   - id: LGA-009
     claim: >-
-      `TON`, `TOF` and `CTU` blocks are written as the Logix instructions on
-      `TIMER` / `COUNTER` tags, with `t.Q` written as `t.DN` and `t.ET` as
-      `t.ACC`.
+      In ladder, `TON`, `TOF` and `CTU` blocks are written as the Logix
+      instructions on `TIMER` / `COUNTER` tags; in ST, as `TONR(t)` (with
+      `t.Reset := NOT IN`), `TOFR(t)` and `CTUD(c)` on `FBD_TIMER` /
+      `FBD_COUNTER` tags. Either way `t.Q` is written as `t.DN`, `t.ET` as
+      `t.ACC` and `c.CV` as `c.ACC`.
     source: "#what-the-target-accepts"
     tests:
       - go ./logix/writer TestNeutralTextSpelling
       - go ./logix/writer TestCounterEndsItsRung
       - go ./logix/writer TestOutputCapturesAndResetConditions
       - go ./logix/writer TestGolden/subset
-    note: "`TOF` and the `TIMER` / `COUNTER` tag types are asserted through the subset golden snapshot."
+      - go ./logix/writer TestStructuredText
+      - go ./logix/writer TestSTTOFAndCounterValue
+    note: >-
+      Ladder `TOF` and the `TIMER` / `COUNTER` tag types are asserted through
+      the subset golden snapshot; the ST TON and CTU forms and the
+      `FBD_TIMER` / `FBD_COUNTER` types by TestStructuredText, ST `TOF` and
+      `c.CV` by TestSTTOFAndCounterValue, ladder `c.CV` by
+      TestOutputCapturesAndResetConditions.
 
   - id: LGA-010
     claim: >-
@@ -187,8 +197,9 @@ claims:
   - id: LGA-017
     claim: >-
       What the target cannot express is a `naut check` diagnostic that names
-      the construct, carries a stable `logix/<rule>` ID and a line, and
-      stops the writer from emitting any document.
+      the construct, and the alternative where Logix has one, carries a
+      stable `logix/<rule>` ID and a line, and stops the writer from
+      emitting any document.
     source: "#rejected-at-check-time-by-name"
     tests:
       - go ./logix/writer TestRejections
@@ -196,14 +207,16 @@ claims:
       - go ./logix/writer TestUserDefinedTypeRejections
       - go ./logix/writer TestRefusalsTheTableNames
       - go ./logix/writer TestSTAndTypeRefusalsHaveALineAndWriteNothing
+      - go ./logix/writer TestRefusalsNameTheAlternative
     partial: true
     note: >-
-      Every rule has a case, now including trailing-underscore names
+      Every rule has a case, including trailing-underscore names
       (logix/name) and an AOI with an array input or output (logix/type);
       ladder, ST and user-type refusals each assert a line and that no
-      document is written. That the message names the alternative, which the
-      page also promises, is not asserted, and not every message does
-      (logix/name says what is wrong, not what to write instead).
+      document is written. The alternative is asserted for twelve messages
+      across logix/name, fb-pin, operand, time, member and array-shape, not
+      for every message. The page names the exceptions with no alternative
+      (STRING, a self-containing type, a binding the compiler cannot read).
 
   - id: LGA-018
     claim: >-
@@ -228,8 +241,9 @@ claims:
 
   - id: LGA-020
     claim: >-
-      The writer emits a `TONR` as a `TON` with a `RES(t)` rung ahead of the
-      timer's rung.
+      In ladder the writer emits a `TONR` as a `TON` with a `RES(t)` rung
+      ahead of the timer's rung; in ST, as `TONR(t);` on an `FBD_TIMER`
+      whose `.Reset` is TRUE while `Reset` is TRUE or `IN` is FALSE.
     source: "#vendor-idioms-dialect-logix"
     tests:
       - go ./logix/writer TestTONR

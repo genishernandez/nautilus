@@ -1854,8 +1854,9 @@ claims:
 
   - id: FN-140
     claim: >-
-      On a Logix controller a TONR is written as a TON with a RES(t) rung
-      ahead of the timer's rung.
+      On a Logix controller a TONR in ladder is written as a TON with a
+      RES(t) rung ahead of the timer's rung, and in ST as TONR(t) on an
+      FBD_TIMER whose .Reset is TRUE while Reset is TRUE or IN is FALSE.
     source: "#dialects"
     tests:
       - go ./logix/writer TestTONR

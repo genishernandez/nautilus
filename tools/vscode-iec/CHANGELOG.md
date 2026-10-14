@@ -19,6 +19,15 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   say indicator variables are not supported and list the forms that are.
   Needs a `naut` newer than 0.17.0.
 
+- **Logix target squiggles say what to write instead.** More `logix/*`
+  diagnostics name the alternative: a tag name with doubled or trailing
+  underscores suggests the rename, a wrong block pin lists the block's
+  parameters, a timer or counter member lists the readable ones, and a
+  BOOL array gives the size to declare. A manifest tag typed as a
+  FUNCTION_BLOCK the project declares now reads "is a function block", as
+  a standard block does, not "unknown type". Needs a `naut` newer than
+  0.17.0.
+
 ## [0.17.0] - 2026-10-14
 
 The pre-release line after the stable release 0.16.0. Same contents as

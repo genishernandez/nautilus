@@ -150,7 +150,7 @@ expression (operators, functions, members, indexes); it is compiled as a
 `SEL` on the rung condition, so it is evaluated every scan like any block
 — an array index in it must stay valid while the rung is false. On a
 Logix target an assignment becomes the matching instruction (MOVE, ADD,
-SUB, MUL, DIV, MOD, NEG, ABS, SQR, XPY) or a CPT; see
+SUB, MUL, DIV, ABS) or, for anything else, a CPT; see
 `docs/design/logix-authoring.md`.
 
 Reading FB outputs: any instance output is addressable as `inst.Pin`
@@ -825,7 +825,7 @@ The `logix` dialect today:
 
 | Block | Pins | Semantics | On a Logix controller |
 | --- | --- | --- | --- |
-| `TONR` | `IN`, `PT`, `Reset` → `Q`, `ET` | a TON whose `Reset` clears the accumulated time and `Q` while TRUE; the free-running pulse is `t:TONR(PT := T#1S, Reset := t.Q)` | a `TON` with a `RES(t)` rung ahead of the timer's rung |
+| `TONR` | `IN`, `PT`, `Reset` → `Q`, `ET` | a TON whose `Reset` clears the accumulated time and `Q` while TRUE; the free-running pulse is `t:TONR(PT := T#1S, Reset := t.Q)` | in ladder, a `TON` with a `RES(t)` rung ahead of the timer's rung; in ST, an `FBD_TIMER` run by `TONR(t);`, its `.Reset` TRUE while `Reset` is TRUE or `IN` is FALSE |
 
 A vendor idiom with a standard equivalent is not a dialect block. The
 first-scan flag and the controller's calendar are `FIRST_SCAN()` and

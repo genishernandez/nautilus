@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -78,6 +79,10 @@ func ResolveTagType(name string, types map[string]*ir.Type) (*ir.Type, error) {
 	t, err := st.ResolveTypeName(name, types)
 	if err == nil {
 		return t, nil
+	}
+	if errors.Is(err, st.ErrFunctionBlockType) {
+		// The name is known, as a block: say that, not "unknown type".
+		return nil, err
 	}
 	return nil, fmt.Errorf("type %s is neither an IEC elementary type (BOOL, INT, DINT, REAL, "+
 		"TIME, STRING, …) nor a TYPE this project's ST declares (known: %s) — %v", name, knownTypes(types), err)

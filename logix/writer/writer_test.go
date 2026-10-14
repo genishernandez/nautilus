@@ -1012,7 +1012,7 @@ LD
   RUNG math
     a { n := n + 1; m := n - m; r := r * 2.0; q := r / q; r := ABS(q) }
   RUNG cpt
-    a { n := (n + 3) * m - 7; r := SQRT(q) + ABS(r) ** 2.0; n := -m; n := n MOD 4; r := TRUNC(q) }
+    a { n := (n + 3) * m - 7; r := SQRT(q) + ABS(r) ** 2.0; n := -m; n := n MOD 4; r := TRUNC(q); r := EXPT(q, 2.0) }
   RUNG cmp
     GT(n + 1, m) /LE(r * 2.0, q) EQ(n MOD 2, 0) ( b )
   RUNG time
@@ -1028,7 +1028,7 @@ END_PROGRAM
 	want := []string{
 		"XIC(a)MOVE(m,n)MOVE(1.5,r)MOVE(16#FF,n);",
 		"XIC(a)ADD(n,1,n)SUB(n,m,m)MUL(r,2.0,r)DIV(r,q,q)ABS(q,r);",
-		"XIC(a)CPT(n,((n + 3) * m) - 7)CPT(r,SQR(q) + (ABS(r) ** 2.0))CPT(n,-m)CPT(n,n MOD 4)CPT(r,TRN(q));",
+		"XIC(a)CPT(n,((n + 3) * m) - 7)CPT(r,SQR(q) + (ABS(r) ** 2.0))CPT(n,-m)CPT(n,n MOD 4)CPT(r,TRN(q))CPT(r,q ** 2.0);",
 		"CMP(n + 1 > m)CMP(r * 2.0 > q)CMP(n MOD 2 = 0)OTE(b);",
 		"XIC(a)MOVE(1500,n);",
 	}
@@ -1402,6 +1402,95 @@ END_PROGRAM
 	for _, w := range []string{"GSV(WallClockTime,,LocalDateTime,clk[0]);", "Sec := clk[5];", "Ms := (clk[6] / 1000);"} {
 		if !strings.Contains(string(doc), w) {
 			t.Errorf("st: missing %q in\n%s", w, doc)
+		}
+	}
+}
+
+// LGA-017: a refusal names the construct and what to write instead. Each
+// case pins the alternative, not only the construct.
+func TestRefusalsNameTheAlternative(t *testing.T) {
+	wrap := func(vars, rungs string) string {
+		return "PROGRAM P\nVAR\n" + vars + "\nEND_VAR\nLD\n" + rungs + "\nEND_LD\nEND_PROGRAM\n"
+	}
+	seq := "FUNCTION_BLOCK Seq\nVAR_INPUT A : BOOL; END_VAR\nVAR_OUTPUT Q : BOOL; END_VAR\nLD\n RUNG r A ( Q )\nEND_LD\nEND_FUNCTION_BLOCK\n"
+	ladder := []struct{ name, src, rule, want string }{
+		{"name underscores", wrap("Bad__Name_ : BOOL; Y : BOOL;", "RUNG r Bad__Name_ ( Y )"), ruleName, "rename it, e.g. Bad_Name"},
+		{"name length", wrap("A_very_long_tag_name_that_logix_will_not_take_at_all : BOOL; Y : BOOL;", "RUNG r A_very_long_tag_name_that_logix_will_not_take_at_all ( Y )"), ruleName, "rename it shorter"},
+		{"block parameter", seq + wrap("X : BOOL; s : Seq;", "RUNG r X s:Seq(B := X)"), ruleFBPin, "(parameters: A, Q)"},
+		{"block input captured", seq + wrap("X : BOOL; Y : BOOL; s : Seq;", "RUNG r X s:Seq(A => Y)"), ruleFBPin, "capture one of Q with =>"},
+		{"operand Logix cannot spell", wrap("Y : BOOL; N : INT;", "RUNG r GT(MIN(N, 1), 5) ( Y )"), ruleOperand, "compute it into a tag first"},
+		{"time as operand", wrap("T : TIME; t1 : TON; Y : BOOL;", "RUNG r GT(T, 5) t1:TON(PT := T) ( Y )"), ruleTime, "DINT of milliseconds"},
+		{"member of timer", wrap("t : TON; Y : BOOL;", "RUNG r t.TT ( Y )"), ruleMember, "the readable members are Q (DN)"},
+		{"bool array x32", wrap("A : ARRAY [0..7] OF BOOL; X : BOOL; Y : BOOL;", "RUNG r X ( Y )"), ruleArrayShape, "ARRAY [0..31] OF BOOL"},
+	}
+	for _, c := range ladder {
+		t.Run(c.name, func(t *testing.T) {
+			diags, err := Check(c.src)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if !hasDiag(diags, c.rule, c.want) {
+				t.Errorf("want %s with %q, got:\n%s", c.rule, c.want, joinDiags(diags))
+			}
+		})
+	}
+	stWrap := func(body string) string {
+		return "PROGRAM P\nVAR\n  X : REAL; B : BOOL; t : TON; m : Motor;\nEND_VAR\n" + body + "\nEND_PROGRAM\n"
+	}
+	lib := "FUNCTION_BLOCK Motor\nVAR_INPUT Run : BOOL; END_VAR\nVAR_OUTPUT Running : BOOL; END_VAR\nEND_FUNCTION_BLOCK\n"
+	st := []struct{ name, src, rule, want string }{
+		{"timer member", stWrap("B := t.TT;"), ruleMember, "the readable members are Q (DN), ET (ACC)"},
+		{"timer output", stWrap("t(IN := B, PT := T#1S, TT => X);"), ruleFBPin, "the outputs are Q and ET"},
+		{"block input", stWrap("m(Go := B);"), ruleFBPin, "(inputs: Run)"},
+		{"block output", stWrap("m(Run := B, Done => B);"), ruleFBPin, "(outputs: Running)"},
+	}
+	for _, c := range st {
+		t.Run(c.name, func(t *testing.T) {
+			diags, err := CheckST(c.src, lib)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if !hasDiag(diags, c.rule, c.want) {
+				t.Errorf("want %s with %q, got:\n%s", c.rule, c.want, joinDiags(diags))
+			}
+		})
+	}
+}
+
+func hasDiag(diags []Diag, rule, want string) bool {
+	for _, d := range diags {
+		if d.Rule == rule && strings.Contains(d.Message, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// An ST TOF is TOFR on an FBD_TIMER, with no Reset: TOFR restarts from
+// the input's rising edge by itself. A counter's CV reads as ACC.
+func TestSTTOFAndCounterValue(t *testing.T) {
+	src := "PROGRAM P\nVAR\n  Run : BOOL; Fan : BOOL; t : TOF; c : CTU; N : DINT;\nEND_VAR\n" +
+		"t(IN := Run, PT := T#5S, Q => Fan);\nc(CU := Run, PV := 3);\nN := c.CV;\nEND_PROGRAM\n"
+	doc, diags, err := WriteST(src, Options{Controller: "C"})
+	if err != nil || len(diags) > 0 {
+		t.Fatalf("%v %v", err, joinDiags(diags))
+	}
+	f, err := l5x.Parse(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := f.Controller.Programs[0].Routines[0].Text
+	for _, want := range []string{"t.PRE := 5000;", "t.TimerEnable := Run;", "TOFR(t);", "Fan := t.DN;", "N := c.ACC;"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "t.Reset") {
+		t.Errorf("a TOF drives no Reset:\n%s", text)
+	}
+	for _, tg := range append(f.Controller.Tags, f.Controller.Programs[0].Tags...) {
+		if tg.Name == "t" && tg.DataType != "FBD_TIMER" {
+			t.Errorf("t is %s, want FBD_TIMER", tg.DataType)
 		}
 	}
 }

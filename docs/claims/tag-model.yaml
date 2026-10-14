@@ -148,9 +148,9 @@ claims:
       - go ./internal/project TestTagTypeAndInitMustAgree
       - go ./internal/project TestProjectFunctionBlockIsRefusedAsTagType
     note: >-
-      A standard block (type: TON) is refused with 'TON is a function block'; a
-      project-declared FUNCTION_BLOCK is refused too, though with the generic
-      unknown-type message.
+      A standard block (type: TON) and a project-declared FUNCTION_BLOCK are
+      both refused with '<name> is a function block', not the unknown-type
+      message.
   - id: TAG-016
     claim: >-
       GET /api/meta reports each tag's declared type beside its desc, plus an

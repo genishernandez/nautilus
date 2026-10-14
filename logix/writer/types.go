@@ -83,7 +83,7 @@ func (lw *lowered) resolveType(name string, line int, use string) (*udt, bool) {
 	}
 	if !good || len(u.Members) == 0 {
 		if len(u.Members) == 0 && good {
-			lw.diag(ruleType, line, "", "%s: type %s declares no members", use, td.Name)
+			lw.diag(ruleType, line, "", "%s: type %s declares no members; a Logix UDT needs at least one", use, td.Name)
 		}
 		return nil, false
 	}
@@ -99,12 +99,12 @@ func (lw *lowered) udtMember(typeName string, f st.VarDecl) (udtMember, bool) {
 	te := f.Type
 	if arr, ok := te.(*st.ArrayType); ok {
 		if len(arr.Dims) != 1 {
-			lw.diag(ruleArrayShape, f.Pos.Line, "", "type %s member %s: multi-dimensional arrays are not in the v1 subset", typeName, f.Name)
+			lw.diag(ruleArrayShape, f.Pos.Line, "", "type %s member %s: multi-dimensional arrays are not in the v1 subset; declare one array per dimension", typeName, f.Name)
 			return m, false
 		}
 		lo, hi, ok := literalBounds(arr.Dims[0])
 		if !ok || lo != 0 {
-			lw.diag(ruleArrayShape, f.Pos.Line, "", "type %s member %s: a Logix array starts at 0 with literal bounds", typeName, f.Name)
+			lw.diag(ruleArrayShape, f.Pos.Line, "", "type %s member %s: a Logix array starts at 0 with literal bounds; declare ARRAY [0..n]", typeName, f.Name)
 			return m, false
 		}
 		m.Dim = hi + 1
@@ -118,7 +118,7 @@ func (lw *lowered) udtMember(typeName string, f st.VarDecl) (udtMember, bool) {
 			return m, false
 		}
 		if u == "BOOL" && m.Dim > 0 && m.Dim%32 != 0 {
-			lw.diag(ruleArrayShape, f.Pos.Line, "", "type %s member %s: a BOOL array's size must be a multiple of 32", typeName, f.Name)
+			lw.diag(ruleArrayShape, f.Pos.Line, "", "type %s member %s: a BOOL array's size must be a multiple of 32; declare ARRAY [0..%d] OF BOOL", typeName, f.Name, (m.Dim+31)/32*32-1)
 			return m, false
 		}
 		m.DataType = scalarTypes[u]
@@ -136,7 +136,7 @@ func (lw *lowered) udtMember(typeName string, f st.VarDecl) (udtMember, bool) {
 		}
 		m.DataType, m.Struct = sub.Name, sub
 	default:
-		lw.diag(ruleType, f.Pos.Line, "", "type %s member %s: %s is not a Logix UDT member type", typeName, f.Name, te.String())
+		lw.diag(ruleType, f.Pos.Line, "", "type %s member %s: %s is not a Logix UDT member type; use BOOL, SINT, INT, DINT, REAL, LREAL, a declared STRUCT, or a one-dimensional array of those", typeName, f.Name, te.String())
 		return m, false
 	}
 	return m, true

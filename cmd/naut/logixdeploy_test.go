@@ -42,6 +42,28 @@ func TestLogixDeployRefusals(t *testing.T) {
 	}
 }
 
+// A manifest tag with no role: is refused by name before anything is
+// written, not deployed (or written) with the manifest's tags untyped.
+func TestLogixDeployRefusesATagWithNoRole(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"nautilus.yaml": "name: x\ntasks:\n  - program: MainProgram.ld\ntags:\n" +
+			"  - { name: StartPB, role: input, init: false }\n  - { name: LevelPct, init: 0.0 }\n" +
+			"target:\n  logix:\n    controller: DemoLine\n",
+		"MainProgram.ld": cleanLadder,
+	})
+	out, code := captureStderr(t, func() int { return runLogixDeploy([]string{dir}) })
+	if code != 2 || !strings.Contains(out, "tag LevelPct: role must be input, output, setpoint, or state") {
+		t.Fatalf("exit %d, want 2 naming LevelPct's missing role:\n%s", code, out)
+	}
+	if _, err := loadLogixProject(dir); err == nil {
+		t.Error("loadLogixProject accepted a tag with no role")
+	}
+	out, code = captureStderr(t, func() int { return runLogixWrite([]string{filepath.Join(dir, "MainProgram.ld")}) })
+	if code != 2 || !strings.Contains(out, "tag LevelPct: role must be") {
+		t.Errorf("logix write: exit %d, want 2 naming LevelPct:\n%s", code, out)
+	}
+}
+
 func TestLogixDeployNeedsATargetSection(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "nautilus.yaml"), []byte("name: x\ntasks:\n  - name: main\n    program: main.ld\n"), 0o644)
