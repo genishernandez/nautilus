@@ -771,16 +771,13 @@ claims:
       - go ./lang/st TestGlobalConstantRules
       - go ./lang/st TestGlobalConstantsVisibleEverywhere
       - go ./internal/project TestProjectConstantIsNotATag
-    partial: true
     note: >-
       Shadowing and the type rule are tested; constants are absent from the
       compiled program's globals, and in a running project from the tag
       store and from GET /api/state's live values (a GVL global beside it is
-      listed). "No API path" is not fully true: POST /api/tags with the
-      constant's name and a scalar answers 204 and creates a stray store tag
-      of that name (any undeclared name does), which the programs never read
-      — the constant keeps its value. Left partial until the page or the
-      API's handling of undeclared names is settled.
+      listed). POST /api/tags with the constant's name is refused with a 400
+      naming it (an undeclared name never creates a tag, #329) and the
+      program still reads the constant.
 
   # ── VAR_TEMP ────────────────────────────────────────────────────────
   - id: FN-056

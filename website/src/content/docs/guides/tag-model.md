@@ -28,7 +28,9 @@ there are exactly four writers:
 
 1. a **seed** in the Go composition (initial value, exists from scan one),
 2. a **driver** delivering it as an input each scan,
-3. an **operator** writing it through the HMI or `POST /api/tags`,
+3. an **operator** writing a tag the project declares through the HMI or
+   `POST /api/tags` (a name nothing declares, a CONSTANT's included, is
+   refused with a 400 naming it, never created),
 4. the **program itself** assigning it (a coil write creates the tag).
 
 The one rule that bites: **writes create, reads fault.** Reading a tag

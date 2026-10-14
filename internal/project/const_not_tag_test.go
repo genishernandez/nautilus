@@ -42,12 +42,17 @@ func TestProjectConstantIsNotATag(t *testing.T) {
 		t.Errorf("/api/state lists the project constant MaxLevel:\n%s", body)
 	}
 
-	// A tag write by the constant's name never reaches the constant: the
-	// program still reads 90. (POST /api/tags with an undeclared name and a
-	// scalar value currently answers 204 and creates a stray store entry of
-	// that name; see the FN-055 note in docs/claims/functions.yaml.)
+	// A tag write by the constant's name is refused: a constant is not a
+	// tag, so the name is undeclared (#329). It is a 400 naming the constant,
+	// no stray tag appears, and the program still reads 90.
 	rec = httptest.NewRecorder()
 	server.New(rt).Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", strings.NewReader(`{"name": "MaxLevel", "value": 5}`)))
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "undefined tag MaxLevel") || !strings.Contains(rec.Body.String(), "CONSTANT") {
+		t.Errorf("POST /api/tags to a constant: status %d, body %q; want a 400 naming MaxLevel and the CONSTANT", rec.Code, rec.Body)
+	}
+	if _, err := rt.Tags().ReadGlobal("MaxLevel"); err == nil {
+		t.Error("the refused write created a MaxLevel tag")
+	}
 	rt.Scan()
 	if got := readReal(t, rt, "Out"); got != 90 {
 		t.Errorf("Out = %v after a write to the name MaxLevel, want the constant's 90", got)

@@ -75,6 +75,11 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   diagnostic. The instance in scope now wins, and its declaration carries
   a warning (`instance f shadows FUNCTION F`); using the instance in an
   expression is an error that names the function. (#336) Needs a `naut`
+
+- **Writing an undeclared tag name is refused, not created.** A write to a
+  name no tag declares (a typo, or a CONSTANT's name) through `POST /api/tags`,
+  and so from an HMI, a faceplate or the dashboard, answered 204 and created a
+  stray top-level tag. It is now a 400 that names the tag. Needs a `naut`
   newer than 0.16.2.
 
 - **Text after `END_PROGRAM` is an error, not silently ignored.** A

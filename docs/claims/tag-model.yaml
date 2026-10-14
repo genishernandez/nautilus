@@ -19,8 +19,8 @@ claims:
       Naming a tag in a program binds it but does not create it; a tag
       exists only once one of four writers has written it: a seed (exists
       from scan one), a driver input, an operator write through the HMI or
-      POST /api/tags, or the program assigning it (a coil write creates the
-      tag).
+      POST /api/tags to a declared tag (an undeclared name is refused), or
+      the program assigning it (a coil write creates the tag).
     source: "#the-tag-model"
     tests:
       - go ./runtime TestTagDefs
