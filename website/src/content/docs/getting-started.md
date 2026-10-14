@@ -64,7 +64,7 @@ extension uses), and the `eip`, `modbus`, `sparkplug`, and `historian` tools.
 
 ```sh
 naut new my-plant                      # the tour: 3 tasks, 3 IEC languages, simulated plant
-naut new my-plant --template minimal   # one task, one program, one test
+naut new my-plant --template minimal   # one task, one program, one test file
 naut new my-plant --template sdk       # Go project, for a custom field bus
 naut new my-plant --template sdk-demo  # Go project with plant physics in Go
 ```
@@ -113,8 +113,15 @@ program:
 cd my-plant
 go mod tidy      # resolves github.com/joyautomation/nautilus from the proxy
 go run .         # scan loop + tag API on http://localhost:8080
-go test ./...    # the program's acceptance tests, on the same virtual clock
+go test ./...    # Go tests that scan the program against an in-memory driver
 ```
+
+The scaffolded `program_test.go` calls `rt.Scan()` one scan at a time
+against the loopback `Memory` driver and asserts on the outputs. For timed
+behaviour, a Go test can run on the same virtual clock as `naut test`
+(`acceptance.NewClock` and `acceptance.NewScheduler`); the
+[go-sdk example](https://github.com/joyautomation/nautilus/tree/main/examples/go-sdk)
+does.
 
 Open **http://localhost:8080** for the built-in live dashboard, or
 `GET /api/state` for the raw tag snapshot. Setpoints are click-to-set right in
@@ -152,7 +159,9 @@ full path (`which naut`), or launch VS Code from a terminal with `code .`.
 - Add an HMI with the SvelteKit component kit: faceplates, trends, and an
   SSE realtime client.
 - Ship it as one binary. The scaffolded CI gates on `naut check`,
-  `naut test`, and `naut build`. Add `--deploy` to `naut new`
+  `naut test`, and `naut build`; an SDK project's CI runs `go vet`,
+  `naut check` (through `go run`), `go test`, and `go build` instead. Add
+  `--deploy` to `naut new`
   for a Dockerfile, a redundant-pair Kubernetes manifest, and the workflow
   that ships a merged commit to the controller.
 

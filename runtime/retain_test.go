@@ -280,6 +280,62 @@ func TestRetainedProgramApplies(t *testing.T) {
 	}
 }
 
+// OE-005: an online edit survives a restart when a retain store is
+// configured. The edit is saved by the leader's saver tick and reloaded by
+// the next runtime on the same store before its first scan, even when that
+// runtime's built-in program differs (a newer binary): the retained source
+// replaces it until a build whose program matches it ships.
+func TestOnlineEditSurvivesARestartThroughTheStore(t *testing.T) {
+	store := &fakeStore{}
+	rt := newRetained(t, store, nil)
+	rt.Scan()
+	if err := rt.Program().Swap(strings.Replace(counterProgram, "n := n + 1;", "n := n + 10;", 1)); err != nil {
+		t.Fatal(err)
+	}
+	rt.saveRetained(nil)
+	if _, ok := store.state.Programs[MainTaskName]; !ok {
+		t.Fatal("the saver did not persist the online edit")
+	}
+
+	// Restart: a fresh runtime from the same built-in program and store.
+	rt2 := newRetained(t, store, nil)
+	rt2.Scan()
+	if got := rt2.Tags().vals["Count"].v.I; got != 10 {
+		t.Fatalf("Count = %d after a restart, want 10 from the online edit", got)
+	}
+
+	// A newer binary (a different built-in program) still runs the edit.
+	rt3, err := New(Options{
+		Program: strings.Replace(counterProgram, "n := n + 1;", "n := n + 5;", 1),
+		Tags:    []TagDef{Setpoint("SP", 65.0), State("Count", int64(0))},
+		Retain:  store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt3.Scan()
+	if got := rt3.Tags().vals["Count"].v.I; got != 10 {
+		t.Fatalf("Count = %d on a newer binary, want 10: the retained edit replaces the built-in program", got)
+	}
+
+	// A build whose program is the edit (pulled and committed) runs clean,
+	// and its next save drops the retained source.
+	rt4, err := New(Options{
+		Program: strings.Replace(counterProgram, "n := n + 1;", "n := n + 10;", 1),
+		Tags:    []TagDef{Setpoint("SP", 65.0), State("Count", int64(0))},
+		Retain:  store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt4.Program().Dirty() {
+		t.Fatal("a build matching the retained edit still reads as edited")
+	}
+	if st := rt4.retainState(); len(st.Programs) != 0 {
+		t.Fatalf("a build matching the edit still persists it: %v", st.Programs)
+	}
+}
+
 // A retained program that no longer compiles must not take down the
 // controller: the error surfaces in stats, the built-in program runs.
 func TestBrokenRetainedProgramIsReportedNotFatal(t *testing.T) {

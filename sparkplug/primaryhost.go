@@ -13,9 +13,11 @@ import (
 //
 // Primary-host STATE gating. When a PrimaryHostID is configured the edge node
 // tracks that host's STATE birth-certificate: it defers its own birth until
-// the host is ONLINE and, once born, dies (NDEATH) if the host goes offline —
-// the spec's mechanism for coordinating store-and-forward with a designated
-// consumer, so the node buffers exactly when its consumer isn't listening.
+// the host is ONLINE. When the host goes offline the node keeps its session
+// (no NDEATH, still born) and stops publishing data, which buffers under
+// store-and-forward until the host returns, so the node buffers exactly when
+// its consumer isn't listening. Sparkplug 3.0 has the node disconnect here
+// instead; whether to follow it is open (#333).
 // With no primary host these are no-ops and the node births on connect.
 //
 // Two STATE encodings coexist in the wild and we accept both:

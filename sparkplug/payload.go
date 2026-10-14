@@ -3,7 +3,8 @@
 // with a SCADA consumer) and accepts commands back. The runtime is the edge
 // node; each io.Driver is a Sparkplug device whose birth/death tracks its
 // connection health. MQTT and protobuf live only in this package — the
-// runtime core stays stdlib-only.
+// runtime core's one dependency outside the standard library is
+// gopkg.in/yaml.v3.
 package sparkplug
 
 import (

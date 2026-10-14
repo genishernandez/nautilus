@@ -573,7 +573,8 @@ Types map faithfully (BOOL→Boolean, integer→Int64, REAL→Double, UDT→Temp
 a SCADA host can write the writable tags back via NCMD/DCMD, and
 `Node Control/Rebirth` is honored. The node passes the **Sparkplug TCK edge-node profile** — CI runs the
 `joyautomation/sparkplug-tck-go` harness against a live node on every push. MQTT
-and protobuf live only in this package; the runtime core stays stdlib-only.
+and protobuf live only in this package; the runtime core's one dependency
+outside the Go standard library is `gopkg.in/yaml.v3`.
 
 #### Consuming Sparkplug B (host)
 

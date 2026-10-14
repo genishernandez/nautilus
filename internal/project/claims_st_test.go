@@ -1,6 +1,7 @@
 package project
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/joyautomation/nautilus/lang/ir"
@@ -89,5 +90,34 @@ func TestGVLUndeclaredGlobalBecomesAStateTag(t *testing.T) {
 	}
 	if roles["Level"] != runtime.RoleInput || n["Level"] != 1 {
 		t.Errorf("Level (declared in the manifest) has role %v and %d definitions, want its manifest role input and one", roles["Level"], n["Level"])
+	}
+}
+
+// ST-004: a VAR_EXTERNAL naming a tag typed only by its init: sets the tag's
+// type (the init's implied type does not override it), and the init: must
+// then be a value of the declared type. A number init fits an integer
+// declaration; a boolean, a fraction or text that contradicts the declaration
+// is an error naming the tag and both kinds, not silently accepted.
+func TestDeclarationTypesAnInitOnlyTag(t *testing.T) {
+	files := func(init, decl string) map[string]string {
+		return map[string]string{
+			"nautilus.yaml": "tasks:\n  - program: main.st\ntags:\n  - { name: Speed, role: state, init: " + init + " }\n",
+			"main.st":       "PROGRAM Main\nVAR_EXTERNAL\n    Speed : " + decl + ";\nEND_VAR\nEND_PROGRAM\n",
+		}
+	}
+	rt := loadRuntime(t, files("0", "DINT"))
+	if v, _ := rt.Tags().ReadGlobal("Speed"); v.Kind != ir.TypeInt {
+		t.Errorf("init: 0 with VAR_EXTERNAL DINT seeded %v, want an integer (the declaration)", v.Kind)
+	}
+	for _, tc := range []struct{ init, decl, want string }{
+		{"true", "REAL", "tag Speed (declared REAL by a program): init: want REAL, got a boolean"},
+		{"2.5", "DINT", "tag Speed (declared DINT by a program)"},
+		{"0", "BOOL", "init: want BOOL, got a number"},
+		{"'fast'", "REAL", "init: want REAL, got a string"},
+	} {
+		err := newRuntimeErr(t, files(tc.init, tc.decl))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("init: %s with VAR_EXTERNAL %s: err = %v, want it to contain %q", tc.init, tc.decl, err, tc.want)
+		}
 	}
 }
