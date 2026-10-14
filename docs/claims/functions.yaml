@@ -1335,15 +1335,15 @@ claims:
     source: "#type-conversions"
     tests:
       - go ./lang/st TestDateTypesAreNotRuntimeTypes
-    partial: true
+      - go ./cmd/naut TestCheckRejects/D literal
+      - go ./cmd/naut TestCheckRejects/TOD literal
+      - go ./cmd/naut TestCheckRejects/TIME_OF_DAY literal
     note: >-
       Every spelling of the three (DATE, TIME_OF_DAY, TOD, DATE_AND_TIME, DT) is
-      refused as a type, and no typed or TO_<type> conversion to or from them
-      exists. Not covered, a disagreement: TOD#12:00:00, TIME_OF_DAY#12:00:00
-      and D#20 compile as integer literals (x := TOD#12:00:00 into a DINT
-      is accepted), so a TOD or DATE literal reaches the run time as an
-      integer; #307 tracks the TOD# case, and D# with a bare number is the
-      same gap.
+      refused as a type, no typed or TO_<type> conversion to or from them
+      exists, and their literals (D#, DATE#, TOD#, TIME_OF_DAY#, DT#,
+      DATE_AND_TIME#) are refused by naut check instead of compiling as
+      integers (#307).
 
   # ── Standard function blocks ────────────────────────────────────────
   - id: FN-101

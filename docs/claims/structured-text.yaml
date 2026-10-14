@@ -588,13 +588,16 @@ claims:
       - go ./cmd/naut TestCheckRejects/DT
       - go ./cmd/naut TestCheckRejects/DATE_AND_TIME
       - go ./cmd/naut TestCheckRejects/DATE literal
+      - go ./cmd/naut TestCheckRejects/D literal
+      - go ./cmd/naut TestCheckRejects/D literal date
       - go ./cmd/naut TestCheckRejects/DT literal
-    partial: true
+      - go ./cmd/naut TestCheckRejects/DATE_AND_TIME literal
+      - go ./cmd/naut TestCheckRejects/TOD literal
+      - go ./cmd/naut TestCheckRejects/TIME_OF_DAY literal
     note: >-
-      All five type names are refused as unknown scalar types, and DATE# and
-      DT# literals are refused. TOD# and TIME_OF_DAY# literals are accepted by
-      naut check today (#307); TestCheckRejects/TOD_literal skips on that bug
-      until it is fixed.
+      All five type names are refused as unknown scalar types, and the D#,
+      DATE#, TOD#, TIME_OF_DAY#, DT# and DATE_AND_TIME# literals are refused
+      with a diagnostic naming the construct (#307).
 
   - id: ST-054
     claim: Exponentiation with ** is not supported; EXPT(base, exp) is used instead.

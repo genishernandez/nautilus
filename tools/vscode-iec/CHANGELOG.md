@@ -49,6 +49,12 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   dereference operator is not supported, as `REF_TO` already was. Needs a
   `naut` newer than 0.16.2.
 
+- **`TOD#`, `TIME_OF_DAY#`, `D#` and `DT#` literals are now errors in ST.**
+  `TOD#12:00:00` and `D#20` compiled as plain integers while the page says
+  date and time-of-day values do not evaluate. They are now refused with a
+  diagnostic naming the literal, as `DATE#` and `DT#` were. Needs a `naut`
+  newer than 0.16.2.
+
 - **Text after `END_PROGRAM` is an error, not silently ignored.** A
   `FUNCTION_BLOCK` (or anything else) placed after `END_PROGRAM` was never
   compiled, yet the file showed no diagnostics and `naut check` passed it.
