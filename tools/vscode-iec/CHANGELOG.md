@@ -5,6 +5,15 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Added
+
+- **`sparkplug.primary-host-offline` in `nautilus.yaml`.** Completion
+  and validation for the new option that says what an edge node does when
+  its primary host goes offline: `buffer` (the default, as before) keeps
+  the session and holds data back, and `disconnect` ends the session as
+  Sparkplug 3.0 has it (NDEATH, reconnect, and birth once the host is
+  back). Needs a `naut` newer than 0.17.0.
+
 ### Changed
 
 - **A ladder rung with no coil must end at its last block.** In

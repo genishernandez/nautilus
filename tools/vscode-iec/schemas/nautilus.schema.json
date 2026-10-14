@@ -668,6 +668,12 @@
           "type": "string",
           "description": "Gate births on this SCADA host's STATE topic."
         },
+        "primary-host-offline": {
+          "type": "string",
+          "enum": ["buffer", "disconnect"],
+          "default": "buffer",
+          "description": "What the node does when the primary host's STATE goes offline. buffer (the default): stay connected and born, send no NDEATH, and stop publishing data until the host returns (store-forward buffers it and replays it as historical). disconnect: the Sparkplug 3.0 behaviour; publish NDEATH, disconnect, connect again with the next bdSeq, and birth once the host is back online. Needs primary-host."
+        },
         "publish-interval": {
           "$ref": "#/definitions/duration",
           "description": "How often changed metrics are published."

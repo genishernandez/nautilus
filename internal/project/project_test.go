@@ -246,6 +246,41 @@ sparkplug:
 	}
 }
 
+// primary-host-offline: buffer (the default) or disconnect, the latter only
+// with a primary host to watch.
+func TestSparkplugPrimaryHostOffline(t *testing.T) {
+	section := func(extra string) string {
+		return manifest + "\nsparkplug:\n  broker: tcp://x:1883\n  group-id: Joy\n" + extra
+	}
+	for _, ok := range []string{
+		"",
+		"  primary-host: ScadaHost\n",
+		"  primary-host: ScadaHost\n  primary-host-offline: buffer\n",
+		"  primary-host: ScadaHost\n  primary-host-offline: disconnect\n",
+	} {
+		p, err := Load(fsys(section(ok)), "")
+		if err != nil {
+			t.Fatalf("%q: %v", ok, err)
+		}
+		rt, err := runtime.New(p.Runtime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := p.Sparkplug(rt); err != nil || n == nil {
+			t.Fatalf("%q: node %v, %v", ok, n, err)
+		}
+	}
+	for extra, want := range map[string]string{
+		"  primary-host-offline: disconnect\n":                        "needs primary-host",
+		"  primary-host: ScadaHost\n  primary-host-offline: ndeath\n": `"ndeath" is not buffer or disconnect`,
+	} {
+		_, err := Load(fsys(section(extra)), "")
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: error %v, want one containing %q", extra, err, want)
+		}
+	}
+}
+
 func TestEIPStatusStates(t *testing.T) {
 	// Connected → connected; connected-but-failing → degraded; error state.
 	connected := eipStatus(eipHealthLike(true, "", 5, 0))

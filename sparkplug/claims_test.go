@@ -366,9 +366,10 @@ func TestStoreForwardBuffersWhileThePrimaryHostIsOffline(t *testing.T) {
 	if got := len(sc.published("NDATA")); got != 0 {
 		t.Fatalf("%d NDATA published while the primary host was offline, want 0", got)
 	}
-	// The node keeps its session: no NDEATH, still born. (Sparkplug 3.0 has
-	// the node disconnect here instead; see #333. A Disconnect would panic
-	// through the fake client's nil embedded interface.)
+	// By default (HostOfflineBuffer) the node keeps its session: no NDEATH,
+	// still born. (HostOfflineDisconnect ends it instead, as Sparkplug 3.0
+	// has it; see hostoffline_test.go. A Disconnect would panic through the
+	// fake client's nil embedded interface.)
 	if got := len(sc.published("NDEATH")); got != 0 {
 		t.Fatalf("%d NDEATH published when the primary host went offline, want 0", got)
 	}

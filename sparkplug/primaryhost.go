@@ -3,6 +3,7 @@ package sparkplug
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
@@ -13,17 +14,41 @@ import (
 //
 // Primary-host STATE gating. When a PrimaryHostID is configured the edge node
 // tracks that host's STATE birth-certificate: it defers its own birth until
-// the host is ONLINE. When the host goes offline the node keeps its session
-// (no NDEATH, still born) and stops publishing data, which buffers under
-// store-and-forward until the host returns, so the node buffers exactly when
-// its consumer isn't listening. Sparkplug 3.0 has the node disconnect here
-// instead; whether to follow it is open (#333).
+// the host is ONLINE. What it does when the host goes offline is
+// Config.PrimaryHostOffline:
+//   - HostOfflineBuffer (the default): it keeps its session (no NDEATH,
+//     still born) and stops publishing data, which buffers under
+//     store-and-forward until the host returns.
+//   - HostOfflineDisconnect, the Sparkplug 3.0 behaviour: it publishes
+//     NDEATH, disconnects, connects again with the next bdSeq and waits for
+//     the host to be ONLINE before it births (endSession).
+//
+// Either way the node buffers exactly when its consumer isn't listening.
 // With no primary host these are no-ops and the node births on connect.
 //
 // Two STATE encodings coexist in the wild and we accept both:
 //   - Sparkplug 2.x: topic "STATE/<host>", retained payload "ONLINE"/"OFFLINE".
 //   - Sparkplug 3.0: topic "spBv1.0/STATE/<host>", retained JSON
 //     {"online":bool,"timestamp":ms}.
+
+// HostOfflineAction is what an edge node with a primary host does when that
+// host's STATE goes offline.
+type HostOfflineAction int
+
+const (
+	// HostOfflineBuffer keeps the MQTT session and the birth: no NDEATH,
+	// no DATA until the host returns, and with store-and-forward the data
+	// from meanwhile replays as historical. The default.
+	HostOfflineBuffer HostOfflineAction = iota
+	// HostOfflineDisconnect ends the session as Sparkplug 3.0 specifies
+	// (tck-id-message-flow-edge-node-birth-publish-phid-offline): publish
+	// NDEATH, disconnect, connect again and birth once the host is back.
+	HostOfflineDisconnect
+)
+
+// hostReconnectInterval is how long a client made by endSession waits
+// between connect attempts while the broker refuses it.
+const hostReconnectInterval = 5 * time.Second
 
 type hostState struct {
 	Online    bool  `json:"online"`
@@ -32,17 +57,23 @@ type hostState struct {
 
 // subscribeHost subscribes to the primary host's STATE topics. Safe to call on
 // every (re)connect; no-op without a primary host.
-func (n *Node) subscribeHost() {
+func (n *Node) subscribeHost(c mqtt.Client) {
 	if n.cfg.PrimaryHostID == "" {
 		return
 	}
-	n.cli.Subscribe("STATE/"+n.cfg.PrimaryHostID, 1, n.handleState)
-	n.cli.Subscribe("spBv1.0/STATE/"+n.cfg.PrimaryHostID, 1, n.handleState)
+	c.Subscribe("STATE/"+n.cfg.PrimaryHostID, 1, n.handleState)
+	c.Subscribe("spBv1.0/STATE/"+n.cfg.PrimaryHostID, 1, n.handleState)
+}
+
+// disconnectsOnHostOffline reports whether the node ends its session when
+// its primary host goes offline (HostOfflineDisconnect with a host set).
+func (n *Node) disconnectsOnHostOffline() bool {
+	return n.cfg.PrimaryHostID != "" && n.cfg.PrimaryHostOffline == HostOfflineDisconnect
 }
 
 // handleState processes a primary-host STATE message and drives birth/death on
 // transitions. A monotonic-timestamp guard ignores stale retained replays.
-func (n *Node) handleState(_ mqtt.Client, msg mqtt.Message) {
+func (n *Node) handleState(c mqtt.Client, msg mqtt.Message) {
 	online, ts, ok := parseState(msg.Payload())
 	if !ok {
 		return
@@ -69,9 +100,97 @@ func (n *Node) handleState(_ mqtt.Client, msg mqtt.Message) {
 		}
 		// If already born, the next scan will drain any store-forward backlog.
 	} else if !online && was {
+		if n.disconnectsOnHostOffline() {
+			n.log.Warn("sparkplug: primary host offline, ending the session", "host", n.cfg.PrimaryHostID)
+			// Not here: a paho message handler must not block on a publish
+			// or on Disconnect (OrderMatters).
+			go n.endSession(c)
+			return
+		}
 		n.log.Warn("sparkplug: primary host offline", "host", n.cfg.PrimaryHostID)
 		// Data now buffers (store-and-forward) until the host returns.
 	}
+}
+
+// endSession is HostOfflineDisconnect's answer to an offline primary host,
+// per Sparkplug 3.0: "it MUST immediately publish an NDEATH message and
+// disconnect from the MQTT Server and start the connection establishment
+// process over" (tck-id-message-flow-edge-node-birth-publish-phid-offline).
+//
+// The NDEATH is published, not left to the will: a clean MQTT DISCONNECT
+// makes the broker discard the will, and under MQTT 3.1.1 the edge node
+// MUST publish NDEATH before it sends DISCONNECT
+// (tck-id-payloads-ndeath-will-message-publisher-disconnect-mqtt311). It
+// carries this session's bdSeq, like the will it replaces.
+//
+// Then a new session: bdSeq moves on by one (it increments on every new
+// MQTT CONNECT, tck-id-topics-nbirth-bdseq-increment), so the will needs a
+// new client, which connects with retry. Its onConnect subscribes to the
+// host's STATE and births only once the host is ONLINE again. Meanwhile the
+// node is unborn: with store-and-forward it keeps sampling into the buffer
+// (bufferingLocked), and the first tick after the new birth replays it as
+// historical, exactly as after a broker outage.
+//
+// It holds the wire (pubMu) from the NDEATH until the new client is in
+// place, so no tick or birth publishes in between, and registers as
+// in-flight so Stop waits for it rather than racing the client swap.
+//
+// c is the client the offline STATE arrived on. If it is no longer n.cli,
+// an earlier endSession has already ended that session (offline, online,
+// offline in quick succession), and this one does nothing.
+func (n *Node) endSession(c mqtt.Client) {
+	if !n.beginInflight() {
+		return // Stop is in progress; it sends the NDEATH itself
+	}
+	defer n.inflight.Done()
+
+	n.pubMu.Lock()
+	n.mu.Lock()
+	if n.cli != c {
+		n.mu.Unlock()
+		n.pubMu.Unlock()
+		return
+	}
+	born := n.born
+	n.born = false
+	if n.rebirthTimer != nil {
+		n.rebirthTimer.Stop()
+		n.rebirthTimer = nil
+	}
+	old := n.cli
+	n.mu.Unlock()
+
+	if born && old.IsConnectionOpen() {
+		if p, err := n.deathPayload(); err == nil {
+			if err := n.publish(n.topic("NDEATH"), 1, false, p); err != nil {
+				n.log.Warn("sparkplug: NDEATH not confirmed", "error", err)
+			}
+		}
+	}
+	old.Disconnect(250)
+
+	n.mu.Lock()
+	n.bdSeq = (n.bdSeq + 1) % 256
+	n.mu.Unlock()
+	opts, err := n.clientOptions()
+	if err != nil {
+		n.pubMu.Unlock()
+		n.log.Error("sparkplug: new session", "error", err)
+		return
+	}
+	// Retry the first connect too: the broker may be the reason the host
+	// went offline. Later losses are auto-reconnect's, as for the first
+	// client.
+	opts.SetConnectRetry(true).SetConnectRetryInterval(hostReconnectInterval)
+	cli := mqtt.NewClient(opts)
+	n.mu.Lock()
+	n.cli = cli
+	n.mu.Unlock()
+	n.pubMu.Unlock()
+
+	// Not waited on: with connect retry the token completes only once the
+	// broker accepts, and Stop must not wait that long. onConnect births.
+	cli.Connect()
 }
 
 // parseState decodes either STATE encoding. Returns online, timestamp (0 if
