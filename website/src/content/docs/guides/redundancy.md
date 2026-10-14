@@ -53,8 +53,10 @@ retain:
 - **A deploy wins:** an online edit is reloaded only by the same build it
   was made on. A build whose program for that task differs replaces the
   edit (logged, and named in `retainDiscardedEdits`), so pull the edit into
-  git before you deploy over it. A build that already contains the edit
-  just clears it from the store.
+  git before you deploy over it. The replaced source stays in the store
+  under `discardedPrograms` (the last one per task, never applied) for
+  recovery. A build that already contains the edit just clears it from the
+  store.
 
 Store failures surface in the dashboard's diagnostics (`retainErrors`,
 `lastRetainError`) — a save that keeps failing is invisible exactly until

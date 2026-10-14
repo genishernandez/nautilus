@@ -406,7 +406,7 @@ func TestOnlineEditSurvivesARestartOfTheSameBuild(t *testing.T) {
 // (named in diagnostics), and the next save drops it from the store.
 func TestNewDeployReplacesARetainedOnlineEdit(t *testing.T) {
 	store := &fakeStore{}
-	editAndSave(t, store)
+	edited := editAndSave(t, store)
 
 	deployed := strings.Replace(counterProgram, "n := n + 1;", "n := n + 5;", 1)
 	rt := newBuild(t, store, deployed)
@@ -426,14 +426,37 @@ func TestNewDeployReplacesARetainedOnlineEdit(t *testing.T) {
 	}
 	rt.saveRetained(nil)
 	if len(store.state.Programs) != 0 || len(store.state.ProgramBases) != 0 {
-		t.Fatalf("the discarded edit is still in the store: %v %v", store.state.Programs, store.state.ProgramBases)
+		t.Fatalf("the discarded edit is still applied from the store: %v %v", store.state.Programs, store.state.ProgramBases)
+	}
+	// The safety net: the edit's source is kept, never applied, so an edit
+	// nobody pulled into git before the deploy can still be recovered.
+	if got := store.state.DiscardedPrograms[MainTaskName]; got != edited {
+		t.Fatalf("discardedPrograms[%s] = %q, want the discarded edit's source", MainTaskName, got)
 	}
 
-	// And a restart of the new build stays on the deployed program.
+	// A restart of the new build stays on the deployed program, and the
+	// discarded source survives its load and save.
 	rt2 := newBuild(t, store, deployed)
 	rt2.Scan()
 	if got := rt2.Tags().vals["Count"].v.I; got != 5 {
 		t.Fatalf("Count = %d after restarting the new build, want 5", got)
+	}
+	rt2.saveRetained(nil)
+	if got := store.state.DiscardedPrograms[MainTaskName]; got != edited {
+		t.Fatal("a later save lost the discarded edit's source")
+	}
+
+	// A newer discard for the same task overwrites the older one.
+	second := strings.Replace(deployed, "n := n + 5;", "n := n + 7;", 1)
+	if _, err := rt2.Program().SwapWarm(second); err != nil {
+		t.Fatal(err)
+	}
+	rt2.saveRetained(nil)
+	rt3 := newBuild(t, store, counterProgram)
+	rt3.Scan()
+	rt3.saveRetained(nil)
+	if got := store.state.DiscardedPrograms[MainTaskName]; got != second {
+		t.Fatalf("discardedPrograms[%s] = %q, want the newest discarded edit", MainTaskName, got)
 	}
 }
 

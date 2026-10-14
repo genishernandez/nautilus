@@ -26,6 +26,11 @@ type State struct {
 	// written before bases existed still decodes, and an older binary
 	// reading a newer store ignores it.
 	ProgramBases map[string]string `json:"programBases,omitempty"`
+	// DiscardedPrograms keeps, per task, the source of the last online edit
+	// a deploy replaced — never applied, only kept so an edit that was not
+	// pulled into git before the deploy can still be recovered from the
+	// store. Each discard for a task overwrites the previous one.
+	DiscardedPrograms map[string]string `json:"discardedPrograms,omitempty"`
 	// Alarms is operator alarm state — acknowledgement and shelf — keyed by
 	// alarm definition id. Retained for the same reason setpoints are: an
 	// ack is a decision a person made, and a restart or a standby takeover

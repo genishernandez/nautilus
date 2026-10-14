@@ -216,6 +216,20 @@ func (r *Runtime) loadRetained() error {
 	if a := r.alarmRetainer(); a != nil {
 		a.RestoreAlarms(st.Alarms)
 	}
+	// Earlier discards ride along until a newer one for the same task
+	// replaces them, so a save never loses a recoverable edit.
+	if len(st.DiscardedPrograms) > 0 {
+		r.mu.Lock()
+		if r.discardedPrograms == nil {
+			r.discardedPrograms = map[string]string{}
+		}
+		for task, src := range st.DiscardedPrograms {
+			if _, newer := r.discardedPrograms[task]; !newer {
+				r.discardedPrograms[task] = src
+			}
+		}
+		r.mu.Unlock()
+	}
 	for task, src := range st.Programs {
 		p := r.TaskProgram(task)
 		if p == nil {
@@ -238,7 +252,7 @@ func (r *Runtime) loadRetained() error {
 			// leaves the entry out. An entry with no base (a store written
 			// before bases were recorded) cannot prove it was made against
 			// this build, so it is treated as one that was not.
-			r.discardRetainedEdit(task, edit, base, build)
+			r.discardRetainedEdit(task, src, base, build)
 			continue
 		case p.Hash() == edit:
 			continue // already running it (a takeover in the same process)
@@ -250,18 +264,26 @@ func (r *Runtime) loadRetained() error {
 	return errors.Join(errs...)
 }
 
-// discardRetainedEdit logs a retained online edit dropped because a
-// different build was deployed, and names its task in the diagnostics
+// discardRetainedEdit drops a retained online edit because a different
+// build was deployed: it keeps the source as the task's discarded program
+// (saved under discardedPrograms, never applied) so it can be recovered,
+// logs where to find it, and names the task in the diagnostics
 // (ScanStats.RetainDiscardedEdits) so the dashboard and /api/state show it.
-func (r *Runtime) discardRetainedEdit(task, edit, base, build string) {
+func (r *Runtime) discardRetainedEdit(task, src, base, build string) {
 	reason := "the deployed program for this task changed since the edit was made"
 	if base == "" {
 		reason = "the edit was saved without its base build, so it may predate this deploy"
 	}
 	slog.Warn("runtime: retained online edit discarded: a different build was deployed",
-		"task", task, "edit", edit, "editBase", base, "build", build, "reason", reason)
+		"task", task, "edit", sourceHash(src), "editBase", base, "build", build, "reason", reason,
+		"recover", fmt.Sprintf("the edited source is kept in the %s retain store under discardedPrograms[%q]",
+			r.retainStore.Kind(), task))
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.discardedPrograms == nil {
+		r.discardedPrograms = map[string]string{}
+	}
+	r.discardedPrograms[task] = src
 	for _, t := range r.stats.RetainDiscardedEdits {
 		if t == task {
 			return
@@ -378,6 +400,14 @@ func (r *Runtime) retainState() retain.State {
 	for _, tr := range r.tasks {
 		record(tr.name, tr.prog)
 	}
+	r.mu.Lock()
+	if len(r.discardedPrograms) > 0 {
+		st.DiscardedPrograms = make(map[string]string, len(r.discardedPrograms))
+		for task, src := range r.discardedPrograms {
+			st.DiscardedPrograms[task] = src
+		}
+	}
+	r.mu.Unlock()
 	// Only ack and shelf: active and return-to-normal re-derive from the
 	// field on the next scan, and a retained "active" would be a claim
 	// about the plant made by a file. The map is omitted when empty, so a

@@ -34,10 +34,20 @@ is saved and reloaded before the first scan. A deploy of a different build
 replaces them, as a download does on a PLC: when the binary's program for a
 task has changed since the edit was made, the edit is discarded (logged, and
 named in the diagnostics as `retainDiscardedEdits`) and the deployed program
-runs. So pull an edit into git before you deploy over it; **committing the
-program to git is the only way an edit becomes permanent**. The rule of
-thumb falls out of the two planes: logic you want to tune online, write in
-IEC; infrastructure, write in Go.
+runs. The discarded source is kept in the retain store under
+`discardedPrograms.<task>` (the last one per task, never applied), so an
+edit deployed over by mistake can still be recovered:
+
+```bash
+jq -r '.discardedPrograms.main' retain.json                       # file store
+kubectl get configmap <name>-retain -o jsonpath='{.data.state}' \
+  | jq -r '.discardedPrograms.main'                                # in a cluster
+```
+
+Pull an edit into git before you deploy over it; **committing the program
+to git is the only way an edit becomes permanent**. The rule of thumb falls
+out of the two planes: logic you want to tune online, write in IEC;
+infrastructure, write in Go.
 
 Tag values are the other half of the hot plane: **Set Live Value** writes a
 tag once, and a **force** holds one against the field and the logic until it

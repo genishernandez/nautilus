@@ -132,12 +132,20 @@ claims:
       Rollback is asserted; activating the built sha as the way back to the shipped baseline is not.
   - id: PH-013
     claim: >-
-      Activation is ephemeral: a restart boots the binary's embedded
-      programs.
+      An activation follows the online-edit restart rule: without a retain
+      store a restart boots the binary's embedded programs; with one, a
+      restart of the same build keeps the activated programs and a deploy of
+      a different build replaces them.
     source: "#activating-a-revision"
-    tests: []
+    tests:
+      - go ./internal/project TestOnlineEditDoesNotSurviveARestart
+      - go ./runtime TestOnlineEditSurvivesARestartOfTheSameBuild
+      - go ./runtime TestNewDeployReplacesARetainedOnlineEdit
+    partial: true
     note: >-
-      Gap. Same as the online-edit ephemerality claim; no restart is simulated.
+      The tests restart after a warm swap (SwapWarm), the operation an
+      activation performs on each task's program; no test restarts after a
+      POST /api/program/activate itself.
   - id: PH-014
     claim: >-
       After an activation the history reports active: <sha>, and a hand edit

@@ -65,8 +65,9 @@ claims:
     claim: >-
       A deploy wins: an online edit is reloaded only by the same build it was
       made on; a build whose program for that task differs replaces the edit
-      and names it in retainDiscardedEdits, and a build that already contains
-      the edit clears it from the store.
+      and names it in retainDiscardedEdits, keeping the last replaced source
+      per task under discardedPrograms (never applied), and a build that
+      already contains the edit clears it from the store.
     source: "#retained-state"
     tests:
       - go ./runtime TestOnlineEditSurvivesARestartOfTheSameBuild

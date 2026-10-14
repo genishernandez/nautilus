@@ -189,6 +189,11 @@ type Runtime struct {
 	// each one once rather than on every tick.
 	retainSkipped sync.Map
 
+	// discardedPrograms is, per task, the source of the last retained online
+	// edit a deploy replaced (see loadRetained), carried in every save as
+	// retain.State.DiscardedPrograms so the edit stays recoverable. Under mu.
+	discardedPrograms map[string]string
+
 	// alwaysWrite / outGen / outSent implement the output push rule (see
 	// Options.AlwaysWriteOutputs): outGen is the tag store's output-write
 	// generation at the last SUCCESSFUL WriteOutputs, so a scan that finds
