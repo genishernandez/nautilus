@@ -228,7 +228,7 @@ func flattenLeaves(name string, v any, out map[string]float64) {
 // (path.Match syntax — "*", "?", "[...]"; "*" matches "." since
 // path.Match only treats "/" as a separator, which is what lets a pattern
 // like "*.VALUE" or "*_FIT_*" match a dotted leaf name such as
-// "RTU9_WEL15_FIT_001.VALUE"). A malformed pattern never matches rather
+// "RTU9_ZONE15_FIT_001.VALUE"). A malformed pattern never matches rather
 // than erroring, since a typo'd -tags/-exclude flag shouldn't crash the
 // collector loop.
 func matchesAny(name string, patterns []string) bool {

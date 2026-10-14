@@ -407,7 +407,7 @@ export class RealtimeClient<T = unknown> {
 	 * on the control instead of pretending the command landed.
 	 *
 	 * `name` is a whole tag (`'TempSP'`) or a dotted MEMBER path of a UDT tag
-	 * (`'WEL15_SUP_015.START'`, `'AI_001.LVL.CTL1HSP'`) — the same paths the
+	 * (`'ZONE15_PMP_015.START'`, `'AI_001.LVL.HSP'`) — the same paths the
 	 * frame's nested tag objects are read with, so a bound control writes back
 	 * exactly what it displays. `value` may also be an object to set several
 	 * members of one struct tag at once; members it omits keep their current

@@ -34,7 +34,7 @@ func oneDriver(state, msg string, online bool, msgs float64) []DriverStatus {
 			{Label: "bdSeq", Value: 3},
 			{Label: "last publish", AtMs: 1_700_000_009_000, Text: "0.4s"},
 		},
-		Devices: []DriverDevice{{ID: "WEL15", Online: online, Detail: "812 tags"}},
+		Devices: []DriverDevice{{ID: "ZONE15", Online: online, Detail: "812 tags"}},
 		Extra:   map[string]any{"born": true, "primaryHost": "SCADA"},
 	}}
 }
@@ -276,7 +276,7 @@ func TestHashDriversIgnoresWhatFreeRuns(t *testing.T) {
 		{"a device going offline", func(d *DriverStatus) { d.Devices[0].Online = false }},
 		{"a device's detail", func(d *DriverStatus) { d.Devices[0].Detail = "0 tags" }},
 		{"a device appearing", func(d *DriverStatus) {
-			d.Devices = append(d.Devices, DriverDevice{ID: "WEL16", Online: true})
+			d.Devices = append(d.Devices, DriverDevice{ID: "ZONE16", Online: true})
 		}},
 		{"a non-volatile metric", func(d *DriverStatus) { d.Metrics[1].Value = 4 }},
 		{"extra", func(d *DriverStatus) { d.Extra["born"] = false }},

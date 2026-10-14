@@ -87,7 +87,7 @@ claims:
   - id: ALM-008
     claim: >-
       site-from and area-from patterns set each definition's site and area
-      from the tag name (RTU9_WEL15_FIT_001 gives site RTU9, area WEL15).
+      from the tag name (RTU9_ZONE15_FIT_001 gives site RTU9, area ZONE15).
     source: "#the-shape"
     tests:
       - go ./internal/project TestRulesExpandAgainstComposedTags

@@ -96,8 +96,8 @@ tests:
 }
 
 // TestExpressionAddressesStructField is a regression test: an ST boolean
-// expression like "WEL15_FIT_001.VALUE < WellFlowGpm + 5.0" used to fail
-// with `undeclared identifier "WEL15_FIT_001"`, because ExternalsOf left
+// expression like "ZONE15_FIT_001.VALUE < WellFlowGpm + 5.0" used to fail
+// with `undeclared identifier "ZONE15_FIT_001"`, because ExternalsOf left
 // every struct-typed (UDT) tag out of the expression's generated
 // VAR_EXTERNAL block entirely — only the matcher form
 // (`P101.Speed: {gt: 800}`) reached a struct field. A struct-typed tag now

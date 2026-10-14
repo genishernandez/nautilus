@@ -543,9 +543,9 @@ func (t *Tags) setAny(name string, v any) {
 // see ir.SetField). Leaves are coerced to the member's own type and never
 // retype it. Errors name the tag and the member path:
 //
-//	undefined tag WEL15_SUP_015
-//	tag WEL15_SUP_015: unknown member STRAT (did you mean START?)
-//	tag WEL15_SUP_015.START: want BOOL, got a number
+//	undefined tag ZONE15_PMP_015
+//	tag ZONE15_PMP_015: unknown member STRAT (did you mean START?)
+//	tag ZONE15_PMP_015.START: want BOOL, got a number
 //	tag TempSP is a REAL, not a struct — it has no member Hi
 //
 // No path ever creates a tag: an unknown root is an error, which is what
@@ -605,7 +605,7 @@ func (t *Tags) setFieldLocked(root string, cur ir.Value, path []string, v any) e
 // ReadPath resolves a tag or a member path — "Tag" or "Tag.Member.Sub" — the
 // read counterpart of SetPath's address space, and the walk the acceptance
 // harness's `expect:`/`given:` and ST expressions already do to reach a
-// struct field like RTU9_WEL15_FIT_001.HH. As SetPath does, a tag whose own
+// struct field like RTU9_ZONE15_FIT_001.HH. As SetPath does, a tag whose own
 // NAME contains a dot wins over member resolution; failing that, the first
 // segment names the tag and every remaining segment steps into one struct
 // field or, written [n], one array element (ir.PathSegments).

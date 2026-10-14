@@ -84,7 +84,7 @@ command landed:
 
 ```ts
 const err = await rt.writeTag('P101.START', true); // POST /api/tags
-await rt.writeTag('P101', { LVL: { CTL1HSP: 60 } }); // several members at once (a merge)
+await rt.writeTag('P101', { LVL: { HSP: 60 } }); // several members at once (a merge)
 await rt.writeTag('TempSP', 65, { token }); // cross-origin writer
 ```
 
@@ -114,8 +114,8 @@ detects a tag's *absence* but a published-yet-stale value looked exactly like a
 live one:
 
 ```ts
-rt.isGood('RTU9_WEL15_LIT_001'); // false when stale / bad / never-connected
-rt.quality('AI_001.LVL.CTL1HSP'); // 'good' | 'stale' | 'bad' | 'notConnected'
+rt.isGood('RTU9_ZONE15_LIT_001'); // false when stale / bad / never-connected
+rt.quality('AI_001.LVL.HSP'); // 'good' | 'stale' | 'bad' | 'notConnected'
 ```
 
 `quality()` resolves a dotted member path to its root tag — a UDT arrives from
@@ -409,7 +409,7 @@ trend.
 ```svelte
 <script>
 	import { useTrend, Sparkline } from '@joyautomation/nautilus-hmi';
-	const flow = useTrend(rt, 'WEL15_FIT_001.VALUE', { history: true, windowS: 3600 });
+	const flow = useTrend(rt, 'ZONE15_FIT_001.VALUE', { history: true, windowS: 3600 });
 </script>
 
 <Sparkline values={flow.points.map((p) => p.v)} />

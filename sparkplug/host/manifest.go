@@ -185,7 +185,7 @@ func MemberPath(member string) []string { return strings.Split(member, MemberSep
 // the metric's own tag name plus the sanitized member path.
 //
 //	MemberTagName("W6", "", "Pump1", "Speed")     → "W6_Pump1_Speed"
-//	MemberTagName("W6", "", "LVL", "CTL1.HSP")    → "W6_LVL_CTL1_HSP"
+//	MemberTagName("W6", "", "LVL", "HI.SP")       → "W6_LVL_HI_SP"
 func MemberTagName(prefix, device, metric, member string) string {
 	base := TagName(prefix, device, metric)
 	if member == "" {

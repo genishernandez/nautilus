@@ -175,7 +175,7 @@ name to value, nested for a member that is itself a struct:
 
 ```yaml
 tags:
-  - name: WEL15_FIT_001
+  - name: ZONE15_FIT_001
     role: state
     type: AnalogInput
     init:
@@ -183,12 +183,12 @@ tags:
       RAWMAX: 32767.0
       HHSP: 2800.0
       ALMDLY: 5
-  - name: WEL15_SUP_015
+  - name: ZONE15_PMP_015
     role: state
     type: Motor1Speed
     init:
       STRTTMRSP: 30
-      LVL: { CTL1HSP: 60.0, CTL1LSP: 40.0 } # nested struct member
+      LVL: { HSP: 60.0, LSP: 40.0 } # nested struct member
 ```
 
 A `TIME` member (a recipe's step times) seeds from the ST literal
@@ -211,7 +211,7 @@ plain field assignments: the same setpoints, declared once where the tag
 already is, instead of duplicated as ST in every program that uses the type.
 
 An unknown member name is a load error naming the tag and the member path
-(`tag WEL15_FIT_001: init: unknown member RAWMN (did you mean RAWMIN?)`), and
+(`tag ZONE15_FIT_001: init: unknown member RAWMN (did you mean RAWMIN?)`), and
 a struct-typed tag given a scalar `init:` — rather than a mapping — is an
 error too. A generator (`naut eip tags`, `naut tags import-csv`)
 round-trips the same nested shape through a `tag-files:` entry.
@@ -224,15 +224,15 @@ you — `name` takes a dotted member path, to any depth:
 
 ```sh
 curl -X POST localhost:8080/api/tags \
-  -d '{"name": "WEL15_SUP_015.START", "value": true}'
+  -d '{"name": "ZONE15_PMP_015.START", "value": true}'
 curl -X POST localhost:8080/api/tags \
-  -d '{"name": "WEL15_SUP_015.LVL.CTL1HSP", "value": 60}'
+  -d '{"name": "ZONE15_PMP_015.LVL.HSP", "value": 60}'
 ```
 
 `value` may also be an object, to set several members of one tag at once:
 
 ```json
-{ "name": "WEL15_SUP_015", "value": { "START": true, "LVL": { "CTL1HSP": 60 } } }
+{ "name": "ZONE15_PMP_015", "value": { "START": true, "LVL": { "HSP": 60 } } }
 ```
 
 That is a **merge**: members the object doesn't name keep their **current**
@@ -242,12 +242,12 @@ plant is already running on.
 
 - **Nothing is created.** An unknown tag, a misspelled member, or a member
   path into a scalar tag is a `400` carrying the reason
-  (`tag WEL15_SUP_015: unknown member STRAT (did you mean START?)`), never a
-  new top-level tag literally named `WEL15_SUP_015.STRAT` — which no program
+  (`tag ZONE15_PMP_015: unknown member STRAT (did you mean START?)`), never a
+  new top-level tag literally named `ZONE15_PMP_015.STRAT` — which no program
   reads and a Sparkplug edge would publish as a bogus metric.
 - **The leaf keeps its type.** A number lands on a `REAL` member as a REAL
   and on a `DINT` member as an integer; a mismatch is
-  `tag WEL15_SUP_015.START: want BOOL, got a number`, not a silent retype.
+  `tag ZONE15_PMP_015.START: want BOOL, got a number`, not a silent retype.
 - **An enumerated member takes its name** — `{"name": "Recipe.Mode",
   "value": "Run"}`, any case, `Mode#Run` qualified, or the member's integer —
   and stores the named value, exactly as a write of a whole enumerated tag
@@ -270,7 +270,7 @@ The same dotted (and indexed) paths work everywhere else a tag is
 addressed: a test manifest's `given:`/`expect:`, a force, the built-in
 dashboard's tag table (expand a
 writable struct tag and each leaf is editable), and the HMI kit's
-`rt.writeTag('WEL15_SUP_015.START', true)`, which resolves to `null` on
+`rt.writeTag('ZONE15_PMP_015.START', true)`, which resolves to `null` on
 success or the controller's reason when it refuses.
 
 ## Observing scans: `Runtime.OnScan`

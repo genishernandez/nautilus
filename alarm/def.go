@@ -97,7 +97,7 @@ func (d Duration) MarshalYAML() (any, error) { return time.Duration(d).String(),
 //
 // Tag is a condition PATH, not necessarily a tag name — a Sparkplug Template
 // lands as one struct tag, so the fleet's conditions are overwhelmingly
-// "RTU9_WEL15_FIT_001.HH" rather than a flat BOOL. It must resolve to a
+// "RTU9_ZONE15_FIT_001.HH" rather than a flat BOOL. It must resolve to a
 // BOOL; true means in alarm.
 type Def struct {
 	// Source names where the definition was declared ("manifest" or an

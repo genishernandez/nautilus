@@ -790,7 +790,7 @@
         },
         "site-from": {
           "type": "string",
-          "description": "Regexp over the TAG NAME whose first capture group becomes a definition's site, e.g. \"^([A-Z]+[0-9]+)_\" turns RTU9_WEL15_FIT_001 into site RTU9. Site is the alarm table's sort and filter axis and the `{site}` placeholder in a rule's templates. Omit it and site is empty."
+          "description": "Regexp over the TAG NAME whose first capture group becomes a definition's site, e.g. \"^([A-Z]+[0-9]+)_\" turns RTU9_ZONE15_FIT_001 into site RTU9. Site is the alarm table's sort and filter axis and the `{site}` placeholder in a rule's templates. Omit it and site is empty."
         },
         "area-from": {
           "type": "string",

@@ -42,7 +42,7 @@
 //
 // `desc:` and `unit:` are optional and purely descriptive: they ride through
 // the manifest into the generated tag file's `desc:`/`unit:`, so an alarm
-// named "{desc} high" reads "Well 6 level high" instead of "RTU9_WEL15_FIT_001
+// named "{desc} high" reads "Zone 15 flow high" instead of "RTU9_ZONE15_FIT_001
 // high". Member tags inherit the metric's description. The BROKER path reads
 // the same two from a birth's `documentation`/`engUnit` properties, which a
 // nautilus edge states for any tag that has them; a birth without them leaves
@@ -114,7 +114,7 @@ type MetricSpec struct {
 	// list of dotted member paths:
 	//
 	//	- {name: Pump/SpeedSP, type: Double, writable: true}
-	//	- {name: Motor1,       type: Motor,  writable: [START, LVL.CTL1HSP]}
+	//	- {name: Motor1,       type: Motor,  writable: [START, LVL.HSP]}
 	//
 	// Each member becomes its own scalar output tag, and a write publishes a
 	// partial template carrying only that member.

@@ -41,7 +41,7 @@ function headers(token?: string): Record<string, string> {
 /**
  * Fetch archived points for a set of dotted tag paths over `[fromMs, toMs]`.
  *
- * Struct members archive under their full dotted path — `WEL15_FIT_001.VALUE`
+ * Struct members archive under their full dotted path — `ZONE15_FIT_001.VALUE`
  * — the same name the live frame and every faceplate already use, so a pen
  * needs no translation between live and historical.
  */
