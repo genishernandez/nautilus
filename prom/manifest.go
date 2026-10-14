@@ -54,7 +54,7 @@ type Source struct {
 	// docs/design/it-drivers.md §3.3).
 	Interval time.Duration
 	// StaleAfter: a source whose last complete scrape is older than this
-	// reports Stale even while "connected" (default 3×Interval).
+	// reports Stale even while "connected" (default 3× the fastest class).
 	StaleAfter time.Duration
 	// Enable optionally names a BOOL tag; false parks the source.
 	Enable string

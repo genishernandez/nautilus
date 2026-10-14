@@ -533,6 +533,35 @@ func TestBaseWriteGateBehindMulti(t *testing.T) {
 	}
 }
 
+// The default StaleAfter follows the cadence the source is actually polled
+// at: a source whose members all sit in a slow class must not go Stale
+// between two of its own polls.
+func TestBaseDefaultStaleAfterFollowsPolledClasses(t *testing.T) {
+	w := newFakeWire()
+	cfg := switchConfig(w)
+	cfg.ClassRates["slow"] = 500 * time.Millisecond
+	cfg.Sources = append(cfg.Sources, SourceConfig{ID: "SW2", Interval: 20 * time.Millisecond}, SourceConfig{ID: "SW3", Interval: 20 * time.Millisecond, StaleAfter: time.Second})
+	slowOnly := func(name, src string) TagDecl {
+		return TagDecl{Name: name, Type: "SwitchPort", Source: src, Members: map[string]Binding{
+			"Index": {Const: 1}, "Name": {ScanClass: "slow"}, "OperUp": {ScanClass: "slow"},
+		}}
+	}
+	cfg.Tags = append(cfg.Tags, slowOnly("SW2_Port01", "SW2"), slowOnly("SW3_Port01", "SW3"))
+	b, err := NewBase(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]time.Duration{
+		"SW1": 60 * time.Millisecond,   // polls default (20ms) and slow: the faster sets the cadence
+		"SW2": 1500 * time.Millisecond, // polls only slow (500ms)
+		"SW3": time.Second,             // explicit stale-after wins
+	} {
+		if got := b.bySource[id].cfg.StaleAfter; got != want {
+			t.Errorf("%s StaleAfter = %v, want %v", id, got, want)
+		}
+	}
+}
+
 func TestBaseClassAssignments(t *testing.T) {
 	w := newFakeWire()
 	cfg := switchConfig(w)
