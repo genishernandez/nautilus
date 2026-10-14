@@ -179,6 +179,10 @@ func TestProgramsDisagreeingOnAnUntypedTag(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "give it a type: in the manifest") {
 		t.Fatalf("err = %v, want a disagreement naming the fix", err)
 	}
+	// ...and naming both tasks that disagree.
+	if !strings.Contains(err.Error(), "in task main") || !strings.Contains(err.Error(), "in task b") {
+		t.Errorf("err = %v, want it to name both tasks (main and b)", err)
+	}
 	files["nautilus.yaml"] = "tasks:\n  - program: a.st\n  - name: b\n    program: b.st\ntags:\n  - { name: Count, role: state, type: DINT, init: 0 }\n"
 	files["b.st"] = "PROGRAM B\nVAR\n    x : DINT;\nEND_VAR\nx := Count;\nEND_PROGRAM\n"
 	loadRuntime(t, files)
