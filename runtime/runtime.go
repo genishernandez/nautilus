@@ -183,6 +183,11 @@ type Runtime struct {
 	cpus        []int // main task thread placement, see Options.CPUs
 	prio        int
 
+	// retainSkipped remembers which retained tags retainState has already
+	// logged as unretainable (see retainable), so the 2-second saver names
+	// each one once rather than on every tick.
+	retainSkipped sync.Map
+
 	// alwaysWrite / outGen / outSent implement the output push rule (see
 	// Options.AlwaysWriteOutputs): outGen is the tag store's output-write
 	// generation at the last SUCCESSFUL WriteOutputs, so a scan that finds

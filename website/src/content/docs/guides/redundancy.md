@@ -33,6 +33,16 @@ retain:
   inputs re-read from the field, state re-seeds, outputs re-derive from
   logic. The PID does not persist its integral; it warm-starts from live
   field values, the way a real changeover does.
+- **Any shape:** a setpoint can be a scalar, a struct (UDT), or an array —
+  an array of scalars, an array of structs, or a multi-dimensional array.
+  A setpoint table in an `ARRAY` survives a restart or a failover like a
+  single setpoint does. A struct or array comes back member by member
+  onto the current tag, so if the project has since grown an array, the
+  new elements keep their `init:` seeds; if it has shrunk one, the array
+  keeps its seeds and the mismatch shows in `lastRetainError`. The one
+  exception is an array of function-block instances (`ARRAY OF TON`): an
+  FB instance is program state, not a value, so it is not saved, and the
+  log names the tag once.
 - **When:** every 2 seconds, only when something changed, and only by the
   leader. A hard kill can lose at most 2 seconds of operator input.
 - **Load order:** retained values are applied before the first scan and
