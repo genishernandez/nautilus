@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/joyautomation/nautilus/hw"
@@ -211,6 +212,18 @@ func VarbindOf(cur walk.Varbind, raw hw.Raw) (walk.Varbind, error) {
 			out.Uint &= 1<<32 - 1
 		}
 	case walk.OctetString, walk.Opaque:
+		if _, double, isFloat := walk.OpaqueFloat(cur.Bytes); isFloat && cur.Type == walk.Opaque {
+			f, err := strconv.ParseFloat(raw.Key(), 64)
+			if err != nil {
+				return out, fmt.Errorf("%s: Opaque float from %q", cur.OID, raw.Key())
+			}
+			if double {
+				out.Bytes = walk.OpaqueDoubleBytes(f)
+			} else {
+				out.Bytes = walk.OpaqueFloatBytes(float32(f))
+			}
+			break
+		}
 		out.Bytes = []byte(raw.Key())
 		if len(cur.Bytes) > 0 && (!walk.Printable(cur.Bytes) || allZero(cur.Bytes)) {
 			// A binary string (a MAC, a PortList) is delivered as "00:1A:…":

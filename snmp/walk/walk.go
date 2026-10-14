@@ -17,9 +17,11 @@ package walk
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"regexp"
 	"sort"
@@ -240,6 +242,43 @@ func HexString(b []byte) string {
 	return strings.Join(parts, ":")
 }
 
+// Opaque floats are net-snmp's extension (UCD-SNMP-MIB laLoadFloat and
+// friends): an Opaque whose content is itself BER — 9F 78 04 and an IEEE
+// float32, or 9F 79 08 and a float64. A Varbind keeps the content as Bytes,
+// so a recording serves back exactly what the agent sent; these read and
+// write the two shapes.
+const (
+	opaqueExt    = 0x9F
+	opaqueFloat  = 0x78
+	opaqueDouble = 0x79
+)
+
+// OpaqueFloatBytes is the Opaque content carrying a net-snmp Float.
+func OpaqueFloatBytes(f float32) []byte {
+	b := []byte{opaqueExt, opaqueFloat, 4, 0, 0, 0, 0}
+	binary.BigEndian.PutUint32(b[3:], math.Float32bits(f))
+	return b
+}
+
+// OpaqueDoubleBytes is the Opaque content carrying a net-snmp Double.
+func OpaqueDoubleBytes(f float64) []byte {
+	b := []byte{opaqueExt, opaqueDouble, 8, 0, 0, 0, 0, 0, 0, 0, 0}
+	binary.BigEndian.PutUint64(b[3:], math.Float64bits(f))
+	return b
+}
+
+// OpaqueFloat decodes an Opaque's content as a net-snmp Float or Double;
+// double reports which. ok is false for any other Opaque.
+func OpaqueFloat(b []byte) (f float64, double, ok bool) {
+	switch {
+	case len(b) == 7 && b[0] == opaqueExt && b[1] == opaqueFloat && b[2] == 4:
+		return float64(math.Float32frombits(binary.BigEndian.Uint32(b[3:]))), false, true
+	case len(b) == 11 && b[0] == opaqueExt && b[1] == opaqueDouble && b[2] == 8:
+		return math.Float64frombits(binary.BigEndian.Uint64(b[3:])), true, true
+	}
+	return 0, false, false
+}
+
 // ValueString is the varbind's value as `naut snmp browse` prints it.
 func (v Varbind) ValueString() string {
 	switch v.Type {
@@ -248,6 +287,9 @@ func (v Varbind) ValueString() string {
 	case Counter32, Gauge32, TimeTicks, Counter64:
 		return strconv.FormatUint(v.Uint, 10)
 	case OctetString, Opaque:
+		if f, double, ok := OpaqueFloat(v.Bytes); ok && v.Type == Opaque {
+			return formatOpaqueFloat(f, double)
+		}
 		if Printable(v.Bytes) {
 			return strconv.Quote(string(bytes.TrimRight(v.Bytes, "\x00")))
 		}
@@ -293,11 +335,26 @@ func (v Varbind) Line() string {
 	case Counter64:
 		val = "Counter64: " + strconv.FormatUint(v.Uint, 10)
 	case Opaque:
-		val = "Opaque: Hex-STRING: " + hexSpaced(v.Bytes)
+		if f, double, ok := OpaqueFloat(v.Bytes); ok && double {
+			val = "Opaque: Double: " + formatOpaqueFloat(f, true)
+		} else if ok {
+			val = "Opaque: Float: " + formatOpaqueFloat(f, false)
+		} else {
+			val = "Opaque: Hex-STRING: " + hexSpaced(v.Bytes)
+		}
 	default:
 		val = v.Type.String()
 	}
 	return "." + v.OID + " = " + val
+}
+
+// formatOpaqueFloat is the shortest text that parses back to the same
+// float32 (or float64) — net-snmp prints %f, which can lose a float32.
+func formatOpaqueFloat(f float64, double bool) string {
+	if double {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	return strconv.FormatFloat(f, 'f', -1, 32)
 }
 
 func hexSpaced(b []byte) string {
@@ -531,7 +588,20 @@ func (p *pending) decode() (vb Varbind, skip bool, err error) {
 		vb.Uint, err = parseUint(val, 64)
 	case "Opaque":
 		vb.Type = Opaque
-		vb.Bytes, err = parseHex(strings.TrimPrefix(val, "Hex-STRING:"))
+		switch sub, num, _ := strings.Cut(val, ":"); strings.TrimSpace(sub) {
+		case "Float":
+			var f float64
+			if f, err = strconv.ParseFloat(strings.TrimSpace(num), 32); err == nil {
+				vb.Bytes = OpaqueFloatBytes(float32(f))
+			}
+		case "Double":
+			var f float64
+			if f, err = strconv.ParseFloat(strings.TrimSpace(num), 64); err == nil {
+				vb.Bytes = OpaqueDoubleBytes(f)
+			}
+		default:
+			vb.Bytes, err = parseHex(strings.TrimPrefix(val, "Hex-STRING:"))
+		}
 	default:
 		return vb, false, fmt.Errorf("unsupported type %q", typ)
 	}
