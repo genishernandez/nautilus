@@ -854,17 +854,38 @@ func runLoop(ctx context.Context, period time.Duration, scan func(due time.Time)
 	if setup != nil {
 		setup() // on the locked thread: affinity and priority stick to it
 	}
-	start := time.Now()
+	runSchedule(ctx, period, wallLoopClock{}, scan, missed)
+}
+
+// loopClock is the time runSchedule keeps its schedule against: the wall
+// clock and the platform sleep in production, a virtual one under test so
+// the schedule's arithmetic is checked exactly rather than within a
+// shared runner's jitter.
+type loopClock interface {
+	Now() time.Time
+	SleepUntil(ctx context.Context, deadline time.Time) bool
+}
+
+type wallLoopClock struct{}
+
+func (wallLoopClock) Now() time.Time { return time.Now() }
+func (wallLoopClock) SleepUntil(ctx context.Context, deadline time.Time) bool {
+	return sleepUntil(ctx, deadline)
+}
+
+// runSchedule is runLoop's schedule on a given clock.
+func runSchedule(ctx context.Context, period time.Duration, clk loopClock, scan func(due time.Time), missed func(uint64)) {
+	start := clk.Now()
 	for n := int64(1); ; n++ {
 		next := start.Add(time.Duration(n) * period)
-		if behind := -time.Until(next); behind > 0 {
+		if behind := clk.Now().Sub(next); behind > 0 {
 			if k := int64(behind / period); k > 0 {
 				n += k
 				next = start.Add(time.Duration(n) * period)
 				missed(uint64(k))
 			}
 		}
-		if !sleepUntil(ctx, next) {
+		if !clk.SleepUntil(ctx, next) {
 			return
 		}
 		scan(next)

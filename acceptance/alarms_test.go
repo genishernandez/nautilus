@@ -111,7 +111,9 @@ tests:
 
 // ack: is the operator's side, and it moves alarm state without touching
 // the tag store — the claim the design makes about ack never reaching the
-// edge, asserted here rather than argued.
+// edge, asserted here rather than argued. The ack step runs no scan
+// (`scans: 0`): the program rewrites FIT_001.L every scan, so after one
+// the bit would read TRUE again whatever the ack had written to it.
 func TestAlarmAckVerb(t *testing.T) {
 	mustPass(t, runAlarmSuite(t, `
 tests:
@@ -121,11 +123,13 @@ tests:
         scans: 1
         alarms: { state: { FIT_001.L: unack-active } }
       - ack: { ids: ["FIT_001.L"], by: test }
-        scans: 1
-        expect: { FIT_001.L: true }
+        scans: 0
+        expect: { FIT_001.L: true, FIT_001.PV: 5.0, FIT_001.HH: false, Online: true }
         alarms:
           state: { FIT_001.L: ack-active }
           unacked: 0
+      - scans: 1
+        alarms: { state: { FIT_001.L: ack-active } }
       - given: { FIT_001.PV: 50.0 }
         scans: 1
         alarms:
@@ -206,6 +210,36 @@ tests:
 	// ...and it points at the `alarms:` key, not the top of the test.
 	if f := results[0].Failure; f.Line != 6 || f.StepLine != 3 {
 		t.Errorf("failure at line %d (step line %d), want the alarms: key on 6 (step on 3)", f.Line, f.StepLine)
+	}
+
+	// Every matcher, not only active:, fails on a wrong expectation and
+	// says what it saw. The engine here holds one alarm, FIT_001.L,
+	// unacked and active at medium priority, journalled once — so each
+	// matcher below is handed a value that is wrong in exactly one way. A
+	// matcher that ignored its argument would pass its case.
+	for _, c := range []struct{ matcher, alarms, detail string }{
+		{"unacked", `{ unacked: 0 }`, "alarms.unacked = 1, want 0"},
+		{"shelved", `{ shelved: ["FIT_001.L"] }`, "alarms.shelved = [], want [FIT_001.L]"},
+		{"state", `{ state: { FIT_001.L: ack-active } }`, "alarms.state[FIT_001.L] = unack-active, want ack-active"},
+		{"priority", `{ priority: { medium: 2 } }`, "alarms.priority[medium] = 1, want 2"},
+		{"priority absent", `{ priority: { high: 1 } }`, "alarms.priority[high] = 0, want 1"},
+		{"journal", `{ journal: [active, ack] }`, "alarms.journal = [active], want [active ack]"},
+	} {
+		t.Run(c.matcher, func(t *testing.T) {
+			results := runAlarmSuite(t, `
+tests:
+  - name: this one is meant to fail
+    given: { FIT_001.PV: 5.0 }
+    scans: 1
+    alarms: `+c.alarms+`
+`)
+			if results[0].Passed {
+				t.Fatalf("alarms: %s passed against an engine that disagrees", c.alarms)
+			}
+			if d := results[0].Failure.Detail; !strings.Contains(d, c.detail) {
+				t.Errorf("failure detail = %q, want it to say %q", d, c.detail)
+			}
+		})
 	}
 }
 

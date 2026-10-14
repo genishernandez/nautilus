@@ -85,18 +85,13 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		return 1
 	}
 
-	// Alarms before the scan loop starts: the engine registers itself on
-	// the runtime's post-scan hook, and SetAlarms hands it to the retain
-	// saver, so the first takeover restores the acknowledgements the last
-	// leader saved rather than re-annunciating them.
-	alarms, err := proj.NewAlarms(rt)
+	alarms, err := startAlarms(proj, rt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "naut run: alarms:", err)
 		return 1
 	}
 	if alarms != nil {
 		defer alarms.Close()
-		rt.SetAlarms(alarms.Engine)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -210,6 +205,21 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 	fmt.Println(banner + " — Ctrl+C to stop")
 	<-ctx.Done()
 	return 0
+}
+
+// startAlarms builds the project's alarm engine over rt, before the scan
+// loop starts: the engine registers itself on the runtime's post-scan
+// hook, and SetAlarms hands it to the retain saver, so the first takeover
+// restores the acknowledgements the last leader saved rather than
+// re-annunciating them. Nil when the project has no alarms. Split out of
+// runProject, which blocks on Ctrl+C, so the wiring has a test.
+func startAlarms(proj *project.Project, rt *runtime.Runtime) (*project.Alarms, error) {
+	alarms, err := proj.NewAlarms(rt)
+	if err != nil || alarms == nil {
+		return nil, err
+	}
+	rt.SetAlarms(alarms.Engine)
+	return alarms, nil
 }
 
 // hmiBannerSuffix decides what runProject's banner says about the
