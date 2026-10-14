@@ -506,3 +506,81 @@ END_PROGRAM`
 		t.Fatalf("rung = %+v", m.Rungs[0])
 	}
 }
+
+// Power continues from ENO when the block declares it, not from the first
+// BOOL output: Guard's Q is always TRUE, so only the ENO path can let the
+// coil drop when the permissive fails.
+func TestLadderFunctionBlockPowerOutOfENO(t *testing.T) {
+	lib := `FUNCTION_BLOCK Guard
+VAR_INPUT  EN : BOOL; Val : REAL; Limit : REAL; END_VAR
+VAR_OUTPUT Q : BOOL; ENO : BOOL; END_VAR
+Q := TRUE;
+ENO := EN AND (Val < Limit);
+END_FUNCTION_BLOCK`
+	src := `PROGRAM p
+VAR_EXTERNAL A : BOOL; V : REAL; L : REAL; Out : BOOL; END_VAR
+VAR g1 : Guard; END_VAR
+LD
+  RUNG r  A g1:Guard(Val := V, Limit := L) ( Out )
+END_LD
+END_PROGRAM`
+	got := toST(t, src, lib)
+	if !strings.Contains(got, "g1(EN := A, Val := V, Limit := L, ENO => g1__ENO);") || !strings.Contains(got, "Out := g1__ENO;") {
+		t.Fatalf("power must enter on EN and leave on ENO:\n%s", got)
+	}
+	prog := compileST(t, lib+"\n"+got)
+	h := newHost()
+	frame := ir.NewFrame(prog)
+	scan := func(a bool, v float64) bool {
+		t.Helper()
+		h.vals["A"], h.vals["V"], h.vals["L"] = ir.BoolVal(a), ir.RealVal(v), ir.RealVal(5)
+		if err := ir.Run(prog, frame, h); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		return h.vals["Out"].B
+	}
+	if !scan(true, 1) {
+		t.Error("power in, permissive met: the coil must pull in")
+	}
+	if scan(true, 9) {
+		t.Error("permissive failed: ENO is FALSE, so the coil must drop")
+	}
+	if scan(false, 1) {
+		t.Error("no power in: ENO is FALSE, so the coil must stay off")
+	}
+}
+
+// An edge block placed in a rung takes the rung's power on CLK: its Q is a
+// one-scan pulse on the rung's rising edge.
+func TestLadderRTrigClockIsRungPower(t *testing.T) {
+	src := `PROGRAM p
+VAR_EXTERNAL A : BOOL; Pulse : BOOL; END_VAR
+VAR rt : R_TRIG; END_VAR
+LD
+  RUNG r  A rt:R_TRIG() ( Pulse )
+END_LD
+END_PROGRAM`
+	got := toST(t, src)
+	if !strings.Contains(got, "rt(CLK := A);") {
+		t.Fatalf("the rung's power must land on CLK:\n%s", got)
+	}
+	prog := compileST(t, got)
+	h := newHost()
+	frame := ir.NewFrame(prog)
+	scan := func(a bool) bool {
+		t.Helper()
+		h.vals["A"] = ir.BoolVal(a)
+		if err := ir.Run(prog, frame, h); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		return h.vals["Pulse"].B
+	}
+	for i, c := range []struct {
+		a    bool
+		want bool
+	}{{false, false}, {true, true}, {true, false}, {false, false}, {true, true}} {
+		if got := scan(c.a); got != c.want {
+			t.Fatalf("scan %d (A=%v): Pulse=%v, want %v", i+1, c.a, got, c.want)
+		}
+	}
+}

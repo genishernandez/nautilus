@@ -16,6 +16,7 @@ tasks:
 tags:
   # Shared inputs.
   - { name: Go,   role: state, init: false, desc: "Idle -> A" }
+  - { name: Fork, role: state, init: false, desc: "Idle -> A and Hold together (a fork)" }
   - { name: Next, role: state, init: false, desc: "A -> B" }
   - { name: Back, role: state, init: false, desc: "B -> Idle" }
   - { name: Rst,  role: state, init: false, desc: "B -> Clear (R on SD, DS, SL), then Clear -> Idle" }

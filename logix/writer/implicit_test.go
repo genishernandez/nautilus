@@ -12,19 +12,33 @@ import (
 // gets its controller tag, typed from Options.Tags; a declared one is not
 // written twice, and a tag no rung names is not written at all.
 func TestImplicitTagsBecomeControllerTags(t *testing.T) {
-	src := "PROGRAM P\nVAR_EXTERNAL\n    Start : BOOL;\nEND_VAR\nLD\n  RUNG r1\n    Start CNT_OK ( Motor )\nEND_LD\nEND_PROGRAM\n"
-	out, diags, err := Write(src, Options{Tags: map[string]string{"Start": "BOOL", "Motor": "BOOL", "cnt_ok": "BOOL", "Unused": "REAL"}})
+	src := "PROGRAM P\nVAR_EXTERNAL\n    Start : BOOL;\nEND_VAR\nLD\n  RUNG r1\n    Start CNT_OK GT(Level, 5.0) ( Motor )\nEND_LD\nEND_PROGRAM\n"
+	out, diags, err := Write(src, Options{Tags: map[string]string{"Start": "BOOL", "Motor": "BOOL", "cnt_ok": "BOOL", "Level": "REAL", "Unused": "REAL"}})
 	if err != nil || len(diags) > 0 {
 		t.Fatalf("err %v diags %v", err, diags)
 	}
 	s := string(out)
-	for _, want := range []string{`<Tag Name="Start"`, `<Tag Name="Motor"`, `<Tag Name="cnt_ok"`} {
+	for _, want := range []string{`<Tag Name="Start"`, `<Tag Name="Motor"`, `<Tag Name="cnt_ok"`, `<Tag Name="Level"`} {
 		if strings.Count(s, want) != 1 {
 			t.Errorf("want exactly one %s in:\n%s", want, s)
 		}
 	}
 	if strings.Contains(s, `Name="Unused"`) {
 		t.Error("a tag no rung names was written")
+	}
+	// Each is typed from the manifest, not just named: a REAL stays REAL.
+	f, err := l5x.Parse(out)
+	if err != nil {
+		t.Fatalf("does not parse: %v\n%s", err, s)
+	}
+	types := map[string]string{}
+	for _, tg := range f.Controller.Tags {
+		types[tg.Name] = tg.DataType
+	}
+	for name, want := range map[string]string{"Start": "BOOL", "Motor": "BOOL", "cnt_ok": "BOOL", "Level": "REAL"} {
+		if types[name] != want {
+			t.Errorf("tag %s has DataType %q, want %q (all: %v)", name, types[name], want, types)
+		}
 	}
 }
 

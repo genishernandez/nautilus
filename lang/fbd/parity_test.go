@@ -411,6 +411,16 @@ END_PROGRAM`
 	if m := mustGraph(t, src); len(m.Networks) != 0 {
 		t.Fatal("Network := A is a coil")
 	}
+	// ...and it is a coil that runs: the tag follows A.
+	sc := newScanner(t, src)
+	sc.scan(0, map[string]ir.Value{"A": ir.BoolVal(true)})
+	if !sc.h.vals["Network"].B {
+		t.Fatal("Network := A must write the Network tag")
+	}
+	sc.scan(0, map[string]ir.Value{"A": ir.BoolVal(false)})
+	if sc.h.vals["Network"].B {
+		t.Fatal("Network := A must follow A back to false")
+	}
 	bad := strings.Replace(src, "  Network := A", "  NETWORK 'x' Network := A", 1)
 	if _, err := Graph(bad); err == nil || !strings.Contains(err.Error(), "only the word NETWORK") {
 		t.Fatalf("a statement on the NETWORK line: %v", err)
@@ -478,5 +488,101 @@ func TestUserFunctionPinNames(t *testing.T) {
 	}
 	if out := apply(t, src, edits); !strings.Contains(out, "s = ScaleAnalog(3, _, 1.0)") {
 		t.Fatalf("disconnect by the declared name:\n%s", out)
+	}
+}
+
+// MOD, like DIV, reports a zero divisor through ENO (the result follows the
+// documented ÷0 rule, 0).
+func TestENOModByZero(t *testing.T) {
+	src := `PROGRAM Modulo
+VAR_EXTERNAL A : DINT; B : DINT; R : DINT; ModOk : BOOL; END_VAR
+FBD
+  m = MOD(EN := TRUE, A, B)
+  R := m
+  ModOk := m.ENO
+END_FBD
+END_PROGRAM`
+	h := run(t, src, map[string]ir.Value{"A": ir.IntVal(17), "B": ir.IntVal(5)})
+	if h.vals["R"].I != 2 || !h.vals["ModOk"].B {
+		t.Fatalf("17 MOD 5: R=%v ModOk=%v, want 2 true", h.vals["R"].I, h.vals["ModOk"].B)
+	}
+	h = run(t, src, map[string]ir.Value{"A": ir.IntVal(17), "B": ir.IntVal(0), "R": ir.IntVal(99)})
+	if h.vals["ModOk"].B {
+		t.Fatal("MOD by zero: ENO must be FALSE")
+	}
+	if h.vals["R"].I != 0 {
+		t.Fatalf("MOD by zero: R=%v, want 0 (the ÷0 rule)", h.vals["R"].I)
+	}
+}
+
+// A wire cannot read itself: it is a combinational loop, not a latch (a
+// latch reads a variable, which a scan keeps).
+func TestWireReadingItselfRejected(t *testing.T) {
+	src := `PROGRAM Selfie
+VAR_EXTERNAL X : BOOL; Y : BOOL; END_VAR
+FBD
+  w = OR(w, X)
+  Y := w
+END_FBD
+END_PROGRAM`
+	if _, err := Compile(src); err == nil || !strings.Contains(err.Error(), "combinational loop") {
+		t.Fatalf("expected combinational-loop error, got %v", err)
+	}
+	if _, err := Graph(src); err == nil || !strings.Contains(err.Error(), "combinational loop") {
+		t.Fatalf("Graph: expected combinational-loop error, got %v", err)
+	}
+}
+
+// A struct member is a valid coil target: it writes the member and leaves
+// its siblings alone.
+func TestStructMemberCoil(t *testing.T) {
+	src := `TYPE
+  Motor_Type : STRUCT
+    Speed : REAL;
+    Run : BOOL;
+  END_STRUCT;
+END_TYPE
+PROGRAM Drive
+VAR_EXTERNAL M : Motor_Type; Hot : REAL; END_VAR
+FBD
+  M.Run := GT(Hot, 50.0)
+END_FBD
+END_PROGRAM`
+	seed := map[string]ir.Value{
+		"M":   {Kind: ir.TypeStruct, Fld: []ir.Value{ir.RealVal(75), ir.BoolVal(false)}},
+		"Hot": ir.RealVal(60),
+	}
+	h := run(t, src, seed)
+	m := h.vals["M"]
+	if len(m.Fld) != 2 || !m.Fld[1].B || m.Fld[0].F != 75 {
+		t.Fatalf("M = %+v, want Run true and Speed still 75", m.Fld)
+	}
+	seed["Hot"] = ir.RealVal(10)
+	seed["M"] = ir.Value{Kind: ir.TypeStruct, Fld: []ir.Value{ir.RealVal(75), ir.BoolVal(true)}}
+	h = run(t, src, seed)
+	if m := h.vals["M"]; len(m.Fld) != 2 || m.Fld[1].B || m.Fld[0].F != 75 {
+		t.Fatalf("M = %+v, want Run false and Speed still 75", m.Fld)
+	}
+}
+
+// An FB input the call omits keeps its declared initial value.
+func TestOmittedFBInputKeepsInitial(t *testing.T) {
+	src := `FUNCTION_BLOCK Offset
+VAR_INPUT X : INT; Bias : INT := 7; END_VAR
+VAR_OUTPUT Y : INT; END_VAR
+Y := X + Bias;
+END_FUNCTION_BLOCK
+PROGRAM Main
+VAR_EXTERNAL In : INT; Out : INT; END_VAR
+FBD
+  o : Offset(X := In)
+  Out := o.Y
+END_FBD
+END_PROGRAM`
+	sc := newScanner(t, src)
+	sc.scan(0, map[string]ir.Value{"In": ir.IntVal(1)})
+	sc.scan(0, map[string]ir.Value{"In": ir.IntVal(2)})
+	if got := sc.h.vals["Out"]; got.I != 9 {
+		t.Fatalf("Out = %+v, want 9 (X 2 + the omitted Bias 7)", got)
 	}
 }

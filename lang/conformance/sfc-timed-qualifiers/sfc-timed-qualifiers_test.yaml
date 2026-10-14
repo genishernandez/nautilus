@@ -126,3 +126,14 @@ tests:
         expect: { sfc_SL: true, sfc_SD: false, sfc_DS: false, sfc_L: true }
       - advance: 100ms
         expect: { sfc_SL: false, sfc_SD: true, sfc_DS: true, sfc_L: false, sfc_D: true }
+
+  - name: R acts once on its step's activation, not on every scan the step is active
+    given: { Fork: true } # Idle -> A and Hold together; Hold's R DS acts on scan 1
+    steps:
+      - scans: 1
+        expect: { sfc_DS: false, sfc_L: true }
+      - given: { Fork: false }
+        advance: 100ms # scan 101: A has been active 100ms, DS latches while Hold is still active
+        expect: { sfc_DS: true, sfc_D: true }
+      - advance: 1s # Hold is still active: DS is not cleared again
+        expect: { sfc_DS: true, sfc_D: true }

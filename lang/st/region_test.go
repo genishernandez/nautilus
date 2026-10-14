@@ -70,14 +70,30 @@ END_PROGRAM`
 	}
 }
 
-// A region declares nothing: a variable is not scoped to it.
+// A region declares nothing and hides nothing: its name is not a variable,
+// and a variable declared outside it is read and written inside it, the
+// value surviving END_REGION.
 func TestRegionOpensNoScope(t *testing.T) {
 	lowerExpectErr(t, `
 PROGRAM P
 REGION a
-  y := 1;
+  a := 1;
 END_REGION
-END_PROGRAM`, `undeclared identifier "y"`)
+END_PROGRAM`, `undeclared identifier "a"`)
+
+	src := `
+PROGRAM P
+VAR_EXTERNAL Out : INT; END_VAR
+VAR y : INT := 4; END_VAR
+REGION a
+  y := y + 1;
+END_REGION
+Out := y;
+END_PROGRAM`
+	h, _, _ := scanN(t, src, 1, map[string]ir.Value{"Out": ir.IntVal(0)})
+	if got := h.globals["Out"].I; got != 5 {
+		t.Errorf("Out = %d, want 5 (y read and written inside the region, visible after it)", got)
+	}
 }
 
 func TestRegionErrors(t *testing.T) {

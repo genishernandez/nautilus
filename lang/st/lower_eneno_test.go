@@ -116,23 +116,27 @@ func TestENOnUserFunctionStatementAndOwnEN(t *testing.T) {
 	src := `
 FUNCTION_BLOCK Gate
 VAR_INPUT EN : BOOL; END_VAR
-VAR_OUTPUT ENO : BOOL; Runs : INT; END_VAR
+VAR_OUTPUT ENO : BOOL; Runs : INT; Calls : INT; END_VAR
+Calls := Calls + 1;
 IF EN THEN Runs := Runs + 1; END_IF;
 ENO := EN;
 END_FUNCTION_BLOCK
 PROGRAM p
-VAR_GLOBAL en : BOOL; runs : INT; ok : BOOL; END_VAR
+VAR_GLOBAL en : BOOL; runs : INT; calls : INT; ok : BOOL; END_VAR
 VAR g : Gate; END_VAR
-g(EN := en, Runs => runs, ENO => ok);
+g(EN := en, Runs => runs, Calls => calls, ENO => ok);
 END_PROGRAM`
 	h := newFakeHost()
 	p, f := runFrame(t, src)
 	scan(t, p, f, h) // EN FALSE: the block still runs (its own EN), counts nothing
+	if h.vals["calls"].I != 1 || h.vals["runs"].I != 0 || h.vals["ok"].B {
+		t.Fatalf("EN FALSE: the body must still run: calls=%v runs=%v ok=%v", h.vals["calls"].I, h.vals["runs"].I, h.vals["ok"].B)
+	}
 	h.vals["en"] = ir.BoolVal(true)
 	scan(t, p, f, h)
 	scan(t, p, f, h)
-	if h.vals["runs"].I != 2 || !h.vals["ok"].B {
-		t.Fatalf("own EN: runs=%v ok=%v", h.vals["runs"].I, h.vals["ok"].B)
+	if h.vals["runs"].I != 2 || h.vals["calls"].I != 3 || !h.vals["ok"].B {
+		t.Fatalf("own EN: runs=%v calls=%v ok=%v", h.vals["runs"].I, h.vals["calls"].I, h.vals["ok"].B)
 	}
 }
 

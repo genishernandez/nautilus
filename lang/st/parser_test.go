@@ -112,15 +112,26 @@ func TestParseTimePrefixAliasesToTimeLit(t *testing.T) {
 // ─── Time literals ─────────────────────────────────────────────────────────
 
 func TestParseTimeLiterals(t *testing.T) {
-	cases := []string{"5s", "100ms", "1h30m", "2d4h"}
-	for _, raw := range cases {
-		prog := mustParse(t, "delay := T#"+raw+";")
+	cases := []struct {
+		raw string
+		ms  int
+	}{
+		{"5s", 5000},
+		{"100ms", 100},
+		{"1h30m", 5400000},
+		{"2d4h", 187200000},
+	}
+	for _, c := range cases {
+		prog := mustParse(t, "delay := T#"+c.raw+";")
 		tl, ok := prog.Statements[0].(*AssignStmt).Value.(*TimeLit)
 		if !ok {
-			t.Fatalf("T#%s: want TimeLit, got %T", raw, prog.Statements[0].(*AssignStmt).Value)
+			t.Fatalf("T#%s: want TimeLit, got %T", c.raw, prog.Statements[0].(*AssignStmt).Value)
 		}
-		if tl.Raw != raw {
-			t.Errorf("T#%s: raw=%q, want %q", raw, tl.Raw, raw)
+		if tl.Raw != c.raw {
+			t.Errorf("T#%s: raw=%q, want %q", c.raw, tl.Raw, c.raw)
+		}
+		if got := ParseTimeMs(tl.Raw); got != c.ms {
+			t.Errorf("T#%s: %d ms, want %d", c.raw, got, c.ms)
 		}
 	}
 }

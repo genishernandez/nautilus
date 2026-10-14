@@ -635,8 +635,36 @@ END_PROGRAM`
 	if !strings.Contains(out, "ET => Elapsed") {
 		t.Fatalf("binding must pass through:\n%s", out)
 	}
-	if _, err := fbd.Compile(out); err != nil {
+	prog, err := fbd.Compile(out)
+	if err != nil {
 		t.Fatalf("does not compile: %v", err)
+	}
+	// The binding runs: the variable holds the timer's ET, which a
+	// contact downstream reads.
+	frame := ir.NewFrame(prog)
+	h := &ldHost{vals: map[string]ir.Value{"Run": ir.BoolVal(true)}, now: 1_700_000_000_000}
+	scan := func() {
+		t.Helper()
+		if err := ir.Run(prog, frame, h); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	}
+	scan()
+	if h.vals["Warm"].B {
+		t.Fatal("Warm must be off at 0 s")
+	}
+	h.now += 3000
+	scan()
+	if got := h.vals["Elapsed"]; got.I != 3000 {
+		t.Fatalf("Elapsed = %+v, want 3000 (ET bound to the variable)", got)
+	}
+	if !h.vals["Warm"].B || h.vals["Done"].B {
+		t.Fatalf("at 3 s Warm=%v Done=%v, want true false", h.vals["Warm"].B, h.vals["Done"].B)
+	}
+	h.now += 3000
+	scan()
+	if got := h.vals["Elapsed"]; got.I != 5000 || !h.vals["Done"].B {
+		t.Fatalf("at 6 s Elapsed=%+v Done=%v, want 5000 true", got, h.vals["Done"].B)
 	}
 }
 
@@ -776,7 +804,10 @@ END_PROGRAM`
 
 // ldHost is a minimal ir.Host that lets a test drive several scans and
 // watch retained state (here, an edge trigger's one-shot pulse) evolve.
-type ldHost struct{ vals map[string]ir.Value }
+type ldHost struct {
+	vals map[string]ir.Value
+	now  int64
+}
 
 func (h *ldHost) ReadGlobal(name string) (ir.Value, error) {
 	if v, ok := h.vals[name]; ok {
@@ -785,7 +816,7 @@ func (h *ldHost) ReadGlobal(name string) (ir.Value, error) {
 	return ir.Value{}, nil
 }
 func (h *ldHost) WriteGlobal(name string, v ir.Value) error { h.vals[name] = v; return nil }
-func (h *ldHost) NowMs() int64                              { return 0 }
+func (h *ldHost) NowMs() int64                              { return h.now }
 
 // A rising-edge contact fires for exactly one scan on 0->1, a falling-edge
 // contact for exactly one scan on 1->0, and holding the input steady fires

@@ -184,3 +184,39 @@ END_PROGRAM`
 		t.Errorf("Out = %+v", o)
 	}
 }
+
+// Numbering, ordering and the initial value are told apart from position:
+// a member without ":= n" takes the previous value plus one (also after an
+// explicit one), < and > compare member values, not declaration order, and
+// the initial value after the list need not be the first member.
+func TestEnumNumberingOrderingInit(t *testing.T) {
+	src := `
+TYPE
+    Level : (Low := 5, Mid, High := 1, Top) := Mid;
+END_TYPE
+PROGRAM P
+VAR_EXTERNAL MidV : INT; TopV : INT; HighBelowLow : BOOL; TopAboveMid : BOOL; Cur : Level; END_VAR
+VAR l : Level; END_VAR
+MidV := TO_INT(Level#Mid);
+TopV := TO_INT(Level#Top);
+HighBelowLow := Level#High < Level#Low;
+TopAboveMid := Level#Top > Level#Mid;
+Cur := l;
+END_PROGRAM`
+	h, _, _ := scanN(t, src, 1, nil)
+	if got := h.globals["MidV"].I; got != 6 {
+		t.Errorf("Mid = %d, want 6 (Low := 5, plus one)", got)
+	}
+	if got := h.globals["TopV"].I; got != 2 {
+		t.Errorf("Top = %d, want 2 (High := 1, plus one)", got)
+	}
+	if !h.globals["HighBelowLow"].B {
+		t.Error("High (1) < Low (5) must be TRUE: ordering is by value")
+	}
+	if h.globals["TopAboveMid"].B {
+		t.Error("Top (2) > Mid (6) must be FALSE: ordering is by value")
+	}
+	if c := h.globals["Cur"]; c.I != 6 || c.S != "Mid" {
+		t.Errorf("initial = %d %q, want 6 Mid (the value after the list, not the first member)", c.I, c.S)
+	}
+}

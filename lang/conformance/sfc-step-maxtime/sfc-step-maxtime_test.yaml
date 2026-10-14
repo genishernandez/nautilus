@@ -63,5 +63,22 @@ tests:
 
   - name: the step's time does not run while it is inactive
     steps:
-      - advance: 1s
+      - advance: 1s # Fill has never been active: nothing is flagged
         expect: { sfc_FillErr: false, sfc_Fill: false }
+      - given: { Go: true }
+        scans: 1 # Idle -> Fill
+      - given: { Go: false, Full: true }
+        advance: 50ms # Fill -> Done at 50ms, well within the limit
+        expect: { sfc_Fill: false, sfc_FillErr: false }
+      - given: { Full: false, Reset: true }
+        scans: 1 # Done -> Idle
+      - given: { Reset: false }
+        advance: 1s # Fill is inactive for ten times its limit
+      - given: { Go: true }
+        scans: 1 # Idle -> Fill again
+        expect: { sfc_Fill: true, sfc_FillErr: false }
+      - given: { Go: false }
+        advance: 100ms # 100ms into the second visit: within the limit, the idle second did not count
+        expect: { sfc_Fill: true, sfc_FillErr: false, sfc_Aborted: false }
+      - advance: 1ms # 101ms: now it overruns
+        expect: { sfc_FillErr: true }
