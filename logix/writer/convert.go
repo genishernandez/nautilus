@@ -442,6 +442,41 @@ func (w *stWriter) intDivision(v *st.BinaryExpr) bool {
 	return true
 }
 
+// realDivision reports an integer / in e that Logix divides in REAL: its
+// quotient meets a REAL the writer can see (inReal: e is stored into a
+// REAL, or has a REAL operand). A comparison's operands and an index are
+// computations of their own. It is intDivision's test for an expression
+// written as a whole, as a rung's DIV, CPT and CMP are (#368).
+func (w *stWriter) realDivision(e st.Expression, inReal bool) bool {
+	switch v := e.(type) {
+	case *st.BinaryExpr:
+		if isCompare(v.Op) {
+			inReal = w.knownReal(v.Left) || w.knownReal(v.Right)
+		} else if v.Op == "/" && inReal && !isRealType(w.typeOf(v.Left)) && !isRealType(w.typeOf(v.Right)) {
+			return true
+		}
+		return w.realDivision(v.Left, inReal) || w.realDivision(v.Right, inReal)
+	case *st.UnaryExpr:
+		return w.realDivision(v.Operand, inReal)
+	case *st.CallExpr:
+		for _, a := range v.Args {
+			if w.realDivision(a, inReal) {
+				return true
+			}
+		}
+	case *st.IndexExpr:
+		for _, i := range v.Indices {
+			if w.realDivision(i, w.knownReal(i)) {
+				return true
+			}
+		}
+		return w.realDivision(v.Array, false)
+	case *st.MemberExpr:
+		return w.realDivision(v.Object, false)
+	}
+	return false
+}
+
 // typeOf is what the writer knows of an expression's type: an elementary
 // type by name (BOOL, SINT, INT, DINT, REAL, LREAL, TIME, or one outside
 // the subset), anyInt, or "" when it cannot tell. An enumeration is DINT.

@@ -247,14 +247,35 @@ claims:
       another type, an integer `/` whose quotient meets a REAL (stored into
       a REAL, beside a REAL operand, compared with a REAL), and unsigned,
       bit-string, LINT, LTIME and STRING conversions; an all-integer
-      division is written unchanged.
+      division is written unchanged. On a rung the same integer `/` is
+      refused in a DIV or CPT into a REAL, a CPT beside a REAL and a CMP
+      against a REAL; into an integer it is written as DIV or CPT.
     source: "#rejected-at-check-time-by-name"
     tests:
       - go ./logix/writer TestConversionsRefused
       - go ./logix/writer TestIntegerDivisionUnchanged
+      - go ./logix/writer TestLadderIntegerDivision
     note: >-
       That Logix divides integers in REAL beside a REAL (7 / 2 = 3.5) was
-      observed on an Echo v38 controller (#361), not in CI.
+      observed on an Echo v38 controller, in ST (#361) and in ladder DIV,
+      CPT and CMP (#368), not in CI.
+
+  - id: LGA-040
+    claim: >-
+      In an ST call to a user block, each input must be a tag, a member or
+      element of one, or a literal; an expression bound to an input is
+      refused by `logix/fb-pin` at check time. A negative number is written
+      as one (`-5`), and a conversion that is a plain store (`DINT_TO_REAL(a)`
+      into a REAL input) is written as its argument.
+    source: "#rejected-at-check-time-by-name"
+    tests:
+      - go ./logix/writer TestSTBlockCallInputs
+    note: >-
+      That the Logix SDK build refuses any expression as an Add-On
+      Instruction operand in ST (`(a / b)`, `(a)`, `-a`; RxSTX_E_UNEXPECTED_TOKEN)
+      while it takes `a`, `p.y`, `-5` and `2.5` was observed on the v38 SDK
+      (#368), not in CI. An element with a tag index (`arr[k]`) is accepted
+      by the writer but was not built.
 
   - id: LGA-018
     claim: >-

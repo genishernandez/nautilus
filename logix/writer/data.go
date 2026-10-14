@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/joyautomation/nautilus/lang/ld"
+	"github.com/joyautomation/nautilus/lang/st"
 )
 
 // Data instructions: a ladder assignment `{ y := expr }` is the Logix box
@@ -150,6 +151,10 @@ func (c *rungCtx) assign(e ld.Element) ([]string, bool) {
 			c.lw.diag(ruleDataOp, c.r.Line, c.r.Name, "{ %s := %s }: a comparison or boolean operator in an assignment has no Logix data instruction; drive the BOOL with a coil", a.Target, a.Value.IEC())
 			return nil, false
 		}
+		if c.realQuotient(a.Target, a.Value.IEC()) {
+			c.lw.diag(ruleConversion, c.r.Line, c.r.Name, "{ %s := %s }: %s", a.Target, a.Value.IEC(), realQuotientMsg)
+			return nil, false
+		}
 		switch v := a.Value.(type) {
 		case *ld.Lit, *ld.Ref:
 			s, ok := c.simple(v)
@@ -253,7 +258,51 @@ func (c *rungCtx) cmpExpr(fn string, args []string, e ld.Element) (string, bool)
 		}
 		sides = append(sides, stripOuter(s))
 	}
+	if c.realQuotient("", "("+args[0]+") < ("+args[1]+")") {
+		c.lw.diag(ruleConversion, c.r.Line, c.r.Name, "%s(%s): %s", e.Fn, e.Args, realQuotientMsg)
+		return "", false
+	}
 	return "CMP(" + sides[0] + " " + cmpOp[fn] + " " + sides[1] + ")", true
+}
+
+// realQuotientMsg is the refusal of an integer / on a rung whose quotient
+// meets a REAL (#368).
+const realQuotientMsg = "integer division (/): Logix divides integers in REAL once the quotient meets a REAL (DIV or CPT into a REAL destination, a REAL operand beside it, a CMP against a REAL), so 7 / 2 gives 3.5 where nautilus gives 3; compute the quotient into a DINT tag of its own first ({ q := a / b }) and use the tag, or divide by a REAL (a / 2.0) if a REAL quotient is meant"
+
+// realQuotient reports an integer / in a rung's expression that Logix
+// divides in REAL (#368): a DIV or CPT into a REAL destination (target),
+// a CPT with a REAL operand, a CMP against a REAL. Verified on a v38
+// controller: DIV(a,b,r) and CPT(r,(a / b) + c) with DINT a = 7, b = 2
+// store 3.5 and 6.5, CMP(a / b > x) with x = 3.25 is true; nautilus
+// truncates first (3, 6, false). Into an integer, and against an integer,
+// Logix truncates as nautilus does. The expression is typed as ST, which
+// spells it the same way.
+func (c *rungCtx) realQuotient(target, value string) bool {
+	e := parseSTExpr(value)
+	if e == nil {
+		return false
+	}
+	w := &stWriter{lw: c.lw}
+	inReal := w.knownReal(e)
+	if target != "" {
+		if t := parseSTExpr(target); t != nil && isRealType(w.typeOf(t)) {
+			inReal = true
+		}
+	}
+	return w.realDivision(e, inReal)
+}
+
+// parseSTExpr reads an IEC expression with the ST parser, or nil.
+func parseSTExpr(src string) st.Expression {
+	p, err := st.Parse("PROGRAM nautilus_expr\nnautilus_x := " + src + ";\nEND_PROGRAM\n")
+	if err != nil || len(p.Statements) != 1 {
+		return nil
+	}
+	a, ok := p.Statements[0].(*st.AssignStmt)
+	if !ok {
+		return nil
+	}
+	return a.Value
 }
 
 // boolTarget reports an assignment target that is a BOOL: a bit of an

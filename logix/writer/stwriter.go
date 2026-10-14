@@ -2,6 +2,7 @@ package writer
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -582,7 +583,16 @@ func (w *stWriter) aoiCall(c *st.CallExpr, typ string, depth int) {
 			w.diag(ruleFBPin, w.line, "%s:%s: no input parameter %s (inputs: %s)", c.Name, typ, na.Name, a.paramNames("Input"))
 			return
 		}
-		bound[strings.ToLower(p.Name)] = w.expr(na.Value)
+		// The input is stored into the parameter, as an assignment stores
+		// into a tag: DINT_TO_REAL(a) is written as a.
+		w.rhs, w.dest = na.Value, p.DataType
+		arg, ok := w.aoiArg(na.Value)
+		w.rhs, w.dest = nil, ""
+		if !ok {
+			w.diag(ruleFBPin, w.line, "%s:%s: input %s is bound to an expression; a Logix ST call takes a tag or a literal for each input (an expression fails the build with RxSTX_E_UNEXPECTED_TOKEN), so compute it into a tag first (t := ...;) and bind the tag", c.Name, typ, na.Name)
+			return
+		}
+		bound[strings.ToLower(p.Name)] = arg
 	}
 	operands := []string{c.Name}
 	for _, p := range a.Params {
@@ -611,4 +621,28 @@ func (w *stWriter) aoiCall(c *st.CallExpr, typ string, depth int) {
 		}
 		w.emitf(depth, "%s := %s.%s;", w.expr(ob.Target), c.Name, p.Name)
 	}
+}
+
+// aoiOperand is what a Logix ST call takes for an input: a tag, a member
+// or element of one, or a number. Anything else, even (a) or -a, fails the
+// SDK build with RxSTX_E_UNEXPECTED_TOKEN (verified on v38, #368).
+var aoiOperand = regexp.MustCompile(`^(-?[0-9][0-9.]*([eE][-+]?[0-9]+)?|[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+|\[([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\])*)$`)
+
+// aoiArg renders an input bound in an ST call to a user block, and reports
+// whether Logix takes it as an operand. A negative number is written as
+// one (-5), not as a negation; an operator expression is refused without
+// rendering it, so the refusal is the call's, not the expression's.
+func (w *stWriter) aoiArg(e st.Expression) (string, bool) {
+	switch v := e.(type) {
+	case *st.UnaryExpr:
+		n, ok := v.Operand.(*st.NumberLit)
+		if !ok || v.Op != "-" {
+			return "", false
+		}
+		e = &st.NumberLit{Value: "-" + numberText(n), Base: 10, Pos: n.Pos}
+	case *st.BinaryExpr:
+		return "", false
+	}
+	s := w.expr(e)
+	return s, aoiOperand.MatchString(s)
 }

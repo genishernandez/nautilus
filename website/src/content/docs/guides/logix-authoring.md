@@ -159,7 +159,7 @@ message:
 |---|---|
 | `logix/type` | the types in the table above; an AOI takes structures and arrays only as `VAR_IN_OUT` |
 | `logix/fb` | no `TP`, `CTD`, `CTUD`, `R_TRIG`/`F_TRIG` instances (IEC and Logix semantics differ) |
-| `logix/fb-pin` | timers bind `PT` (TONR also `Reset`), counters `PV` and `R`; the rung's power drives `IN` |
+| `logix/fb-pin` | timers bind `PT` (TONR also `Reset`), counters `PV` and `R`; the rung's power drives `IN`; in an ST call to a user block each input is a tag, a member or element of one, or a literal (`p(x := a / b)` does not build on Logix; compute it into a tag first) |
 | `logix/function-block` | user FUNCTIONs have no Logix form (inline them); an AOI cannot reach a controller tag |
 | `logix/var-section` | a program takes no parameters: only `VAR` and `VAR_EXTERNAL` |
 | `logix/time` | `TIME` only where it feeds a preset |
@@ -176,7 +176,7 @@ message:
 | `logix/member` | member access only into timers, counters, user blocks and STRUCTs |
 | `logix/st` | no `RETURN`, `CONTINUE`, `STRING`, `MIN`/`MAX`/`LIMIT`/`SEL`/`MUX`, `ATAN2`, user calls |
 | `logix/data-op` | an assignment Logix has a data instruction or a `CPT` for |
-| `logix/conversion` | a conversion the controller would compute differently: REAL to an integer inside an expression or into a tag of another type (as the whole right-hand side into a tag of its own type it is written as a store), an integer `/` whose quotient meets a REAL (`r := a / 2`, `a / 2 > x` with `x` REAL: the controller divides in REAL, 3.5 where nautilus gives 3; compute it into a DINT tag first), unsigned, bit-string, `LINT`, `LTIME` and `STRING` conversions, a BOOL or `LREAL` conversion inside an expression, an integer *expression* converted to REAL |
+| `logix/conversion` | a conversion the controller would compute differently: REAL to an integer inside an expression or into a tag of another type (as the whole right-hand side into a tag of its own type it is written as a store), an integer `/` whose quotient meets a REAL, in ST or on a rung (`r := a / 2`, `a / 2 > x` with `x` REAL, `{ r := a / 2 }`, `GT(a / 2, x)`: the controller divides in REAL, 3.5 where nautilus gives 3; compute it into a DINT tag first), unsigned, bit-string, `LINT`, `LTIME` and `STRING` conversions, a BOOL or `LREAL` conversion inside an expression, an integer *expression* converted to REAL |
 
 ## Vendor idioms: `dialect: logix`
 
