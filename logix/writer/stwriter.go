@@ -45,6 +45,17 @@ var stMemberRewrite = map[string]map[string]string{
 	"FBD_COUNTER": {"Q": "DN", "CV": "ACC", "CU": "CUEnable", "PV": "PRE"},
 }
 
+// stOutputs are the outputs an ST call can capture with =>.
+var stOutputs = map[string]string{"FBD_TIMER": "Q and ET", "FBD_COUNTER": "Q and CV"}
+
+// stMembersOf lists the members an ST routine reads, and their Logix names.
+func stMembersOf(structType string) string {
+	if structType == "FBD_TIMER" {
+		return "Q (DN), ET (ACC), IN (TimerEnable), PT (PRE)"
+	}
+	return "Q (DN), CV (ACC), CU (CUEnable), PV (PRE)"
+}
+
 // stFuncs are the functions Logix ST spells the same way.
 var stFuncs = map[string]bool{"ABS": true, "SQRT": true, "LN": true, "LOG": true, "EXP": true, "SIN": true, "COS": true, "TAN": true, "TRUNC": true}
 
@@ -361,7 +372,7 @@ func (w *stWriter) call(c *st.CallExpr, depth int) {
 	for _, ob := range c.OutputBindings {
 		member, ok := stMemberRewrite[structType][strings.ToUpper(ob.Name)]
 		if !ok {
-			w.diag(ruleFBPin, w.line, "%s:%s: output %s has no Logix member", inst, typ, ob.Name)
+			w.diag(ruleFBPin, w.line, "%s:%s: output %s has no Logix member; the outputs are %s", inst, typ, ob.Name, stOutputs[structType])
 			return
 		}
 		w.emitf(depth, "%s := %s.%s;", w.expr(ob.Target), inst, member)
@@ -395,7 +406,7 @@ func (w *stWriter) expr(e st.Expression) string {
 	case *st.TimeLit:
 		ms, ok := parseTime("T#" + v.Raw)
 		if !ok {
-			w.diag(ruleInit, w.line, "T#%s is not a TIME literal the writer reads", v.Raw)
+			w.diag(ruleInit, w.line, "T#%s is not a TIME literal the writer reads; write T#10S, T#1h30m or T#500ms", v.Raw)
 			return "0"
 		}
 		return strconv.FormatInt(ms, 10)
@@ -403,7 +414,7 @@ func (w *stWriter) expr(e st.Expression) string {
 		if id, ok := v.Inner.(*st.IdentExpr); ok && w.lw.enumOf(v.TypeName) != nil {
 			n, ok := w.lw.enumLiteral(v.TypeName + "#" + id.Name)
 			if !ok {
-				w.diag(ruleST, w.line, "%s#%s: %s has no member %s", v.TypeName, id.Name, w.lw.enumOf(v.TypeName).Name, id.Name)
+				w.diag(ruleST, w.line, "%s#%s: %s has no member %s (members: %s)", v.TypeName, id.Name, w.lw.enumOf(v.TypeName).Name, id.Name, enumMembers(w.lw.enumOf(v.TypeName)))
 				return "0"
 			}
 			return strconv.FormatInt(n, 10)
@@ -424,7 +435,7 @@ func (w *stWriter) expr(e st.Expression) string {
 		return w.member(v)
 	case *st.IndexExpr:
 		if len(v.Indices) != 1 {
-			w.diag(ruleArrayShape, w.line, "multi-dimensional arrays are not in the v1 subset")
+			w.diag(ruleArrayShape, w.line, "multi-dimensional arrays are not in the v1 subset; declare one array per dimension")
 			return "0"
 		}
 		return w.expr(v.Array) + "[" + w.expr(v.Indices[0]) + "]"
@@ -454,7 +465,7 @@ func (w *stWriter) member(m *st.MemberExpr) string {
 				if to, ok := stMemberRewrite[structType][strings.ToUpper(m.Member)]; ok {
 					return w.ref(base.Name) + "." + to
 				}
-				w.diag(ruleMember, w.line, "%s.%s: %s has no %s member the Logix %s carries", base.Name, m.Member, v.Type, m.Member, structType)
+				w.diag(ruleMember, w.line, "%s.%s: %s has no %s member the Logix %s carries; the readable members are %s", base.Name, m.Member, v.Type, m.Member, structType, stMembersOf(structType))
 				return base.Name + "." + m.Member
 			}
 		}
@@ -488,7 +499,7 @@ func (w *stWriter) callExpr(c *st.CallExpr) string {
 		w.diag(ruleFB, w.line, "%s(): user functions and blocks are not in the Logix v1 subset; inline the logic", c.Name)
 		return "0"
 	}
-	w.diag(ruleST, w.line, "%s(): not a function the Logix ST subset knows", c.Name)
+	w.diag(ruleST, w.line, "%s(): not a function the Logix ST subset knows; it has ABS, SQRT, LN, LOG, EXP, SIN, COS, TAN, TRUNC, EXPT and the X_TO_Y conversions", c.Name)
 	return "0"
 }
 
@@ -507,7 +518,7 @@ func (w *stWriter) aoiCall(c *st.CallExpr, typ string, depth int) {
 	for _, na := range c.NamedArgs {
 		p := a.param(na.Name)
 		if p == nil || p.Usage == "Output" {
-			w.diag(ruleFBPin, w.line, "%s:%s: no input parameter %s", c.Name, typ, na.Name)
+			w.diag(ruleFBPin, w.line, "%s:%s: no input parameter %s (inputs: %s)", c.Name, typ, na.Name, a.paramNames("Input"))
 			return
 		}
 		bound[strings.ToLower(p.Name)] = w.expr(na.Value)
@@ -524,7 +535,7 @@ func (w *stWriter) aoiCall(c *st.CallExpr, typ string, depth int) {
 		case "InOut":
 			v, ok := bound[strings.ToLower(p.Name)]
 			if !ok {
-				w.diag(ruleFBPin, w.line, "%s:%s: VAR_IN_OUT %s must be bound", c.Name, typ, p.Name)
+				w.diag(ruleFBPin, w.line, "%s:%s: VAR_IN_OUT %s must be bound; add %s := a tag", c.Name, typ, p.Name, p.Name)
 				return
 			}
 			operands = append(operands, v)
@@ -534,7 +545,7 @@ func (w *stWriter) aoiCall(c *st.CallExpr, typ string, depth int) {
 	for _, ob := range c.OutputBindings {
 		p := a.param(ob.Name)
 		if p == nil || p.Usage != "Output" {
-			w.diag(ruleFBPin, w.line, "%s:%s: no output parameter %s", c.Name, typ, ob.Name)
+			w.diag(ruleFBPin, w.line, "%s:%s: no output parameter %s (outputs: %s)", c.Name, typ, ob.Name, a.paramNames("Output"))
 			return
 		}
 		w.emitf(depth, "%s := %s.%s;", w.expr(ob.Target), c.Name, p.Name)

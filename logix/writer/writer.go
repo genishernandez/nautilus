@@ -470,7 +470,7 @@ func (lw *lowered) declare(v ld.VarDecl) {
 	case lw.enumOf(typ) != nil:
 		val, ok := lw.enumInit(lw.enumOf(typ), init)
 		if !ok {
-			lw.diag(ruleInit, v.Line, "", "%s: initial value %q is not a member of %s", v.Name, init, lw.enumOf(typ).Name)
+			lw.diag(ruleInit, v.Line, "", "%s: initial value %q is not a member of %s (members: %s)", v.Name, init, lw.enumOf(typ).Name, enumMembers(lw.enumOf(typ)))
 			return
 		}
 		lw.addTag(tagDef{Name: v.Name, DataType: "DINT", Dim: dim, Value: val, Scope: scope, Line: v.Line})
@@ -531,15 +531,36 @@ func (lw *lowered) addTag(t tagDef) {
 func (lw *lowered) checkName(name string, line int, rung string) bool {
 	switch {
 	case !nameRe.MatchString(name):
-		lw.diag(ruleName, line, rung, "%s: a Logix tag name is letters, digits and underscores, starting with a letter or underscore", name)
+		lw.diag(ruleName, line, rung, "%s: a Logix tag name is letters, digits and underscores, starting with a letter or underscore; rename it", name)
 	case len(name) > 40:
-		lw.diag(ruleName, line, rung, "%s: a Logix tag name is at most 40 characters, this one is %d", name, len(name))
+		lw.diag(ruleName, line, rung, "%s: a Logix tag name is at most 40 characters, this one is %d; rename it shorter", name, len(name))
 	case strings.Contains(name, "__") || strings.HasSuffix(name, "_"):
-		lw.diag(ruleName, line, rung, "%s: a Logix tag name cannot have consecutive or trailing underscores", name)
+		lw.diag(ruleName, line, rung, "%s: a Logix tag name cannot have consecutive or trailing underscores; rename it, e.g. %s", name, tidyUnderscores(name))
 	default:
 		return true
 	}
 	return false
+}
+
+// tidyUnderscores is name with each run of underscores collapsed to one and
+// the trailing ones dropped: the rename a logix/name diagnostic suggests.
+func tidyUnderscores(name string) string {
+	for strings.Contains(name, "__") {
+		name = strings.ReplaceAll(name, "__", "_")
+	}
+	if t := strings.TrimRight(name, "_"); t != "" {
+		return t
+	}
+	return name
+}
+
+// enumMembers lists an enumeration's members, for a diagnostic.
+func enumMembers(e *ir.EnumDef) string {
+	names := make([]string, len(e.Members))
+	for i, m := range e.Members {
+		names[i] = m.Name
+	}
+	return strings.Join(names, ", ")
 }
 
 // genTag declares a generated program tag (edge storage, edge output). The

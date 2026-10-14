@@ -7,9 +7,10 @@ package writer
 // the construct and never for the first time at import or build
 // (logix-authoring.md §5.1).
 //
-// A rule's message always names the construct and the alternative. When a
-// failure first shows up at SDK import or build instead of here, the fix is
-// a new row in this table, not a workaround (§7a, "errors surface late").
+// A rule's message names the construct and, where Logix has one, the
+// alternative (TestRefusalsNameTheAlternative). When a failure first shows
+// up at SDK import or build instead of here, the fix is a new row in this
+// table, not a workaround (§7a, "errors surface late").
 const (
 	ruleFunctionBlock = "logix/function-block" // user FUNCTION_BLOCK defined in the file
 	ruleVarSection    = "logix/var-section"    // VAR_INPUT & co. in a program

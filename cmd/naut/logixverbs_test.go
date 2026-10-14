@@ -118,7 +118,8 @@ func TestLogixBrowseListsWhatFTLinxDiscovered(t *testing.T) {
 }
 
 // LGX-018: a wrong token is answered the way logixd answers it (HTTP 401,
-// {"error":"unauthorized"}), and the CLI says so.
+// {"error":"unauthorized"}), and the CLI says so in the words the Logix
+// guide quotes, naming the agent and where the token comes from.
 func TestLogixAgentReportsAWrongToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -130,10 +131,10 @@ func TestLogixAgentReportsAWrongToken(t *testing.T) {
 	if code == 0 {
 		t.Error("a refused token should be an error")
 	}
-	for _, want := range []string{"HTTP 401", "unauthorized"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("stderr missing %q:\n%s", want, out)
-		}
+	want := "logixd: unauthorized: " + srv.URL + " refused the token; check --token or NAUTILUS_LOGIXD_TOKEN against " +
+		`%ProgramData%\logixd\logixd.token on the agent's machine`
+	if !strings.Contains(out, want) {
+		t.Errorf("stderr missing %q:\n%s", want, out)
 	}
 }
 

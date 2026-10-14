@@ -58,6 +58,21 @@ type aoiParam struct {
 	Struct   *udt
 }
 
+// paramNames lists the block's parameters of one usage (Input, Output,
+// InOut), or all of them for "", for a diagnostic.
+func (a *aoiDef) paramNames(usage string) string {
+	var names []string
+	for _, p := range a.Params {
+		if usage == "" || p.Usage == usage {
+			names = append(names, p.Name)
+		}
+	}
+	if len(names) == 0 {
+		return "none"
+	}
+	return strings.Join(names, ", ")
+}
+
 func (a *aoiDef) param(name string) *aoiParam {
 	for i := range a.Params {
 		if strings.EqualFold(a.Params[i].Name, name) {
@@ -184,7 +199,7 @@ func (c *lowered) aoiParams(block string, vars []ld.VarDecl, line int) ([]aoiPar
 			good = false
 			continue
 		default:
-			c.diag(ruleVarSection, v.Line, "", "block %s: %s %s has no place in an Add-On Instruction", block, v.Section, v.Name)
+			c.diag(ruleVarSection, v.Line, "", "block %s: %s %s has no place in an Add-On Instruction; declare it VAR, VAR_INPUT, VAR_OUTPUT or VAR_IN_OUT", block, v.Section, v.Name)
 			good = false
 			continue
 		}
@@ -197,7 +212,7 @@ func (c *lowered) aoiParams(block string, vars []ld.VarDecl, line int) ([]aoiPar
 		if m := arrayRe.FindStringSubmatch(typ); m != nil {
 			lo, hi := atoiSafe(m[1]), atoiSafe(m[2])
 			if m[3] != "" || lo != 0 {
-				c.diag(ruleArrayShape, v.Line, "", "block %s: parameter %s: a Logix array is one-dimensional from 0", block, v.Name)
+				c.diag(ruleArrayShape, v.Line, "", "block %s: parameter %s: a Logix array is one-dimensional from 0; declare ARRAY [0..%d]", block, v.Name, max(hi-lo, 0))
 				good = false
 				continue
 			}
@@ -218,7 +233,7 @@ func (c *lowered) aoiParams(block string, vars []ld.VarDecl, line int) ([]aoiPar
 			}
 			p.DataType, p.Struct = udt.Name, udt
 		default:
-			c.diag(ruleType, v.Line, "", "block %s: parameter %s: type %s cannot be an Add-On Instruction parameter", block, v.Name, v.Type)
+			c.diag(ruleType, v.Line, "", "block %s: parameter %s: type %s cannot be an Add-On Instruction parameter; use BOOL, SINT, INT, DINT, REAL, LREAL, TIME or a library STRUCT", block, v.Name, v.Type)
 			good = false
 			continue
 		}
@@ -385,12 +400,12 @@ func (c *rungCtx) aoiCall(e ld.Element, partsBefore []string, top bool) (text, c
 		}
 		p := a.param(pin)
 		if p == nil {
-			c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: no parameter %s", e.Inst, e.Type, pin)
+			c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: no parameter %s (parameters: %s)", e.Inst, e.Type, pin, a.paramNames(""))
 			return "", "", false
 		}
 		if isOut {
 			if p.Usage != "Output" {
-				c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: %s is not an output", e.Inst, e.Type, pin)
+				c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: %s is not an output; capture one of %s with =>", e.Inst, e.Type, pin, a.paramNames("Output"))
 				return "", "", false
 			}
 			target, ok := c.ref(val)
@@ -460,7 +475,7 @@ func (c *rungCtx) aoiCall(e ld.Element, partsBefore []string, top bool) (text, c
 		case "InOut":
 			v, ok := bound[strings.ToLower(p.Name)]
 			if !ok {
-				c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: VAR_IN_OUT %s must be bound", e.Inst, e.Type, p.Name)
+				c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: VAR_IN_OUT %s must be bound; add %s := a tag", e.Inst, e.Type, p.Name, p.Name)
 				return "", "", false
 			}
 			operands = append(operands, v)

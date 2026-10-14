@@ -86,7 +86,9 @@ tags, with their initial values and descriptions. The `VAR_EXTERNAL` block
 is optional: every program sees the project's tags without declaring them
 ([the tag model](/guides/tag-model/)), and a ladder or ST program that names
 one undeclared gets its controller tag all the same, typed from the
-manifest. A tag no program names is not written. A program's `VAR` become
+manifest. A tag no program names is not written. A manifest tag with no
+`role:` stops `naut logix deploy` and `naut logix write` with an error
+naming the tag, as it stops the runtime. A program's `VAR` become
 program tags. The task
 becomes a periodic Logix task at the task's scan rate, the program a Logix
 program, and the rungs its `MainRoutine`. `program`, `routine` and `task`
@@ -113,9 +115,9 @@ programs are not in the subset.
 | coils `( X )` `( S X )` `( R X )` | `OTE` `OTL` `OTU` |
 | edges `+X` `-X`, edge coils `( P X )` `( N X )` | `ONS` `OSF` with generated storage bits |
 | compares `GT GE LT LE EQ NE` | the compare instructions; an expression operand becomes `CMP` |
-| `{ y := expr }` | `MOVE`, `ADD`, `SUB`, `MUL`, `DIV`, `MOD`, `NEG`, `ABS`, `SQR`, `XPY`, or `CPT` |
+| `{ y := expr }` | `MOVE`, `ADD`, `SUB`, `MUL` or `DIV` for one operation on plain operands, `ABS` for `ABS(x)`, and `CPT` for anything else: `MOD`, unary `-`, `SQRT` (as `SQR`), `**` or `EXPT`, and nested expressions |
 | `t:TON` `t:TOF`, `c:CTU` | `TON` `TOF` `CTU` on `TIMER` / `COUNTER` tags; `t.Q`→`t.DN`, `t.ET`→`t.ACC` |
-| `t:TONR` (with `dialect: logix`) | a `TON` with a `RES(t)` rung ahead of it |
+| `t:TONR` (with `dialect: logix`) | ladder: a `TON` with a `RES(t)` rung ahead of it; ST: `TONR(t);` on an `FBD_TIMER` |
 | `FIRST_SCAN()`, `/FIRST_SCAN()` | `XIC(S:FS)`, `XIO(S:FS)`; `S:FS` in ST |
 | `clk:LOCAL_TIME()`, `clk.SECOND` | `GSV(WallClockTime,,LocalDateTime,clk[0])` into a `DINT[7]`, `clk[5]` |
 | `Word.3` | bit 3 of the word, as Logix spells it |
@@ -134,8 +136,10 @@ dialects](https://github.com/joyautomation/nautilus/blob/main/docs/functions.md)
 ### Rejected at check time, by name
 
 What the target cannot express is a `naut check` diagnostic that names the
-construct and the alternative, before anything is written, never a
-surprise at download:
+construct and, where Logix has one, the alternative, before anything is
+written, never a surprise at download. A few constructs have no Logix
+alternative to name (`STRING`, a type that contains itself), and a
+binding the compiler cannot read is reported as the compiler reports it:
 
 ```text
 MainProgram.ld:11:1: logix target: pulse: type TP is not in the Logix v1 subset;
@@ -186,7 +190,7 @@ dialect: logix
 
 | Block | Semantics | On the controller |
 |---|---|---|
-| `TONR` (`IN`, `PT`, `Reset` → `Q`, `ET`) | a TON whose `Reset` clears it while TRUE; `t:TONR(PT := T#1S, Reset := t.Q)` is a free-running pulse | a `TON` with a `RES(t)` rung ahead of the timer's rung |
+| `TONR` (`IN`, `PT`, `Reset` → `Q`, `ET`) | a TON whose `Reset` clears it while TRUE; `t:TONR(PT := T#1S, Reset := t.Q)` is a free-running pulse | in ladder, a `TON` with a `RES(t)` rung ahead of the timer's rung; in ST, an `FBD_TIMER` run by `TONR(t);`, its `.Reset` TRUE while `Reset` is TRUE or `IN` is FALSE |
 
 The default dialect is `nautilus`, which adds nothing. An idiom with a
 standard equivalent needs no dialect: the first-scan flag `S:FS` is

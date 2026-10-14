@@ -240,12 +240,17 @@ func scalarGlobal(globals map[string]*ir.Type, name string) *ir.Type {
 // knownTypes lists what the project does declare, so a misspelled type name
 // is one message rather than a hunt through the library files.
 func knownTypes(types map[string]*ir.Type) string {
-	if len(types) == 0 {
-		return "none — this project declares no TYPE"
-	}
 	names := make([]string, 0, len(types))
-	for n := range types {
+	for n, t := range types {
+		// st.Types lists the project's FUNCTION_BLOCKs too, so that one
+		// is refused by name; they are not types a tag can take.
+		if t != nil && t.Kind == ir.TypeFB {
+			continue
+		}
 		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return "none — this project declares no TYPE"
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")

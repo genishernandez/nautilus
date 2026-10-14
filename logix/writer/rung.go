@@ -243,7 +243,7 @@ func (c *rungCtx) ref(ref string) (string, bool) {
 	}
 	typ := strings.ToUpper(strings.TrimSpace(v.Type))
 	if strings.EqualFold(typ, "TIME") {
-		c.lw.diag(ruleTime, c.r.Line, c.r.Name, "%s: a TIME variable can only feed a timer preset in the Logix target", ref)
+		c.lw.diag(ruleTime, c.r.Line, c.r.Name, "%s: a TIME variable can only feed a timer preset in the Logix target; compare or compute with a DINT of milliseconds", ref)
 		return "", false
 	}
 	if isLocalTime(typ) && strings.HasPrefix(rest, ".") {
@@ -316,7 +316,7 @@ func (c *rungCtx) ref(ref string) (string, bool) {
 			if p := a.param(member); p != nil && !strings.Contains(member, ".") && !strings.Contains(member, "[") {
 				return base + "." + p.Name, true
 			}
-			c.lw.diag(ruleMember, c.r.Line, c.r.Name, "%s: %s has no parameter %s", ref, v.Type, member)
+			c.lw.diag(ruleMember, c.r.Line, c.r.Name, "%s: %s has no parameter %s (parameters: %s)", ref, v.Type, member, a.paramNames(""))
 			return "", false
 		}
 		return "", false
@@ -584,7 +584,7 @@ func (c *rungCtx) block(e ld.Element, top, isLast bool) (text, cont string, ok b
 			// moves into a DINT.
 			member, ok := memberRewrite[st][up]
 			if !ok {
-				c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: output %s has no Logix member", e.Inst, e.Type, pin)
+				c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: output %s has no Logix member; the readable members are %s", e.Inst, e.Type, pin, membersOf(st))
 				return "", "", false
 			}
 			target, ok := c.ref(val)

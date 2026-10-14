@@ -575,7 +575,10 @@ func runLogixWrite(args []string) int {
 	var tags map[string]string
 	if dir, ok := projectDirOf(path); ok {
 		if m, err := project.ReadManifest(os.DirFS(dir), ""); err == nil {
-			tags = logixTagTypes(m)
+			if tags, err = logixTagTypes(m); err != nil {
+				fmt.Fprintf(os.Stderr, "naut logix write: %s: %v\n", filepath.Join(dir, project.ManifestName), err)
+				return 2
+			}
 		}
 	}
 	doc, diags, err := writer.WriteProgram(path, string(raw), writer.Options{

@@ -86,7 +86,10 @@ func loadLogixProject(dir string) (*logixProject, error) {
 	}
 	_, libs, _ := stproject.PreludeSources(progPath, nil)
 	inits, descs, aliases := map[string]any{}, map[string]string{}, map[string]string{}
-	tags := logixTagTypes(m)
+	tags, err := logixTagTypes(m)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, project.ManifestName), err)
+	}
 	for _, tg := range m.Tags {
 		if tg.Init != nil {
 			inits[tg.Name] = tg.Init
@@ -223,11 +226,13 @@ func runLogixDeploy(args []string) int {
 // logixTagTypes is the manifest's tags with the IEC type each has in scope
 // in a program (runtime.ResolveTagScope's rule: type:, else what init:
 // implies), for writer.Options.Tags. A tag with neither is left out: the
-// compiler already refuses a program that names it undeclared.
-func logixTagTypes(m *project.Manifest) map[string]string {
+// compiler already refuses a program that names it undeclared. A manifest
+// the runtime would refuse (a tag with no role:, say) is an error naming
+// the tag, never a write with every manifest tag untyped.
+func logixTagTypes(m *project.Manifest) (map[string]string, error) {
 	defs, err := project.TagDefs(m)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	scope, _ := runtime.ResolveTagScope(defs, nil)
 	out := map[string]string{}
@@ -240,5 +245,5 @@ func logixTagTypes(m *project.Manifest) map[string]string {
 			out[d.Name] = t.String()
 		}
 	}
-	return out
+	return out, nil
 }

@@ -206,22 +206,21 @@ claims:
   - id: LGX-018
     claim: >-
       An agent that is not running is reported as `logixd: unreachable ...
-      connection refused`; a wrong bearer token as `logixd: unauthorized` /
-      HTTP 401.
+      connection refused`; a wrong bearer token (HTTP 401) as `logixd:
+      unauthorized: <agent URL> refused the token; check --token or
+      NAUTILUS_LOGIXD_TOKEN against %ProgramData%\logixd\logixd.token on the
+      agent's machine`, and no token at all as `... wants a token and none
+      was sent`.
     source: "#when-something-isnt-working"
     tests:
       - go ./logix/logixd TestClientUnreachableIsFatalAndNamesTheURL
       - go ./cmd/naut TestLogixAgentReportsAnUnreachableAgentHelpfully
       - go ./cmd/naut TestLogixAgentReportsAWrongToken
-    partial: true
+      - go ./logix/logixd TestUnauthorizedNamesTheAgentAndTheToken
     note: >-
-      An unreachable agent reads `logixd: unreachable` ... refused and names
-      the URL. Page and code disagree on the wrong-token wording: given
-      logixd's own 401 reply ({"error":"unauthorized"}), naut prints `logixd:
-      bad_reply: HTTP 401: {"error":"unauthorized"}`, not the `logixd:
-      unauthorized` the page quotes. The test asserts what is printed (HTTP
-      401, unauthorized); the 401 itself comes from the C# agent and is
-      verified on hardware only (LGX-031).
+      Asserted against a fake agent that answers as logixd does (HTTP 401,
+      {"error":"unauthorized"}); that the C# agent sends that 401 is
+      LGX-031, verified on hardware only.
 
   - id: LGX-019
     claim: >-

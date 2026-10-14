@@ -301,6 +301,37 @@ func TestEventString(t *testing.T) {
 	}
 }
 
+// The agent's 401 ({"error":"unauthorized"}, not its envelope) is an
+// unauthorized error naming the agent and where the token comes from, on
+// the JSON verbs and the file transfers alike, and says when no token was
+// sent at all.
+func TestUnauthorizedNamesTheAgentAndTheToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "unauthorized"})
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	wrong := New(srv.URL, "wrong")
+	_, healthErr := wrong.Health(ctx)
+	_, getErr := wrong.GetFile(ctx, "a.L5X")
+	putErr := wrong.PutFile(ctx, "a.L5X", []byte("x"))
+	want := "logixd: unauthorized: " + srv.URL + " refused the token; check --token or NAUTILUS_LOGIXD_TOKEN against " +
+		`%ProgramData%\logixd\logixd.token on the agent's machine`
+	for name, err := range map[string]error{"Health": healthErr, "GetFile": getErr, "PutFile": putErr} {
+		var e *Error
+		if err == nil || err.Error() != want || !asError(err, &e) || e.Status != http.StatusUnauthorized || !e.Fatal {
+			t.Errorf("%s: err = %v\nwant %s (fatal, status 401)", name, err, want)
+		}
+	}
+	t.Setenv("NAUTILUS_LOGIXD_TOKEN", "")
+	_, err := New(srv.URL, "").Health(ctx)
+	if Kind(err) != "unauthorized" || !strings.Contains(err.Error(), "wants a token and none was sent") {
+		t.Errorf("no token: err = %v", err)
+	}
+}
+
 // A reply that is not the agent's envelope (a proxy's HTML error page, say)
 // must be a clear failure naming what came back, not a nil-data success.
 func TestNonEnvelopeReplyIsAnError(t *testing.T) {
