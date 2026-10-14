@@ -27,18 +27,17 @@ committed file.
 
 <Clip id="08-online-edit" />
 
-What a restart does with an edit depends on whether the controller has a
-[retain store](/guides/redundancy/#retained-state). Without one, an edit lives
-only in the running process: a restart goes back to the program the binary
-embeds. With `retain:` configured, the source of every online-edited program
-is saved with the retained state and reloaded before the first scan, the way
-a PLC keeps its online edits through a power cycle. The reloaded edit replaces
-the binary's program for that task even when the binary is newer, and keeps
-doing so until a build whose program matches the edit ships, so pull it into
-git before you deploy over it. Either way, **committing the program to git is
-the only way an edit reaches the next build**. The rule of thumb falls out of
-the two planes: logic you want to tune online, write in IEC; infrastructure,
-write in Go.
+Without a [retain store](/guides/redundancy/#retained-state), a restart
+reverts to the program the binary embeds. With `retain:` configured, online
+edits survive a restart (or a failover) of the same build: the edited source
+is saved and reloaded before the first scan. A deploy of a different build
+replaces them, as a download does on a PLC: when the binary's program for a
+task has changed since the edit was made, the edit is discarded (logged, and
+named in the diagnostics as `retainDiscardedEdits`) and the deployed program
+runs. So pull an edit into git before you deploy over it; **committing the
+program to git is the only way an edit becomes permanent**. The rule of
+thumb falls out of the two planes: logic you want to tune online, write in
+IEC; infrastructure, write in Go.
 
 Tag values are the other half of the hot plane: **Set Live Value** writes a
 tag once, and a **force** holds one against the field and the logic until it

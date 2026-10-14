@@ -1,5 +1,7 @@
-// Package retain is a controller's retained memory: operator setpoints and
-// online-edited programs survive restarts, failovers, and redeploys. In a
+// Package retain is a controller's retained memory: operator setpoints
+// survive restarts, failovers, and redeploys; online-edited programs survive
+// restarts and failovers of the same build (a deploy of a different build
+// replaces them). In a
 // cluster the backing store is a ConfigMap, read and written through
 // internal/k8sapi (the same pattern the leader package uses for its Lease);
 // standalone it's a JSON file next to the project.
@@ -15,6 +17,15 @@ type State struct {
 	// edit made through the runtime API survives a pod restart until
 	// `naut pull` lands it in git.
 	Programs map[string]string `json:"programs,omitempty"`
+	// ProgramBases are, per task in Programs, the hash of the program the
+	// deployed binary embedded when the edit was saved — the build the edit
+	// was made against. A load reapplies an edit only when the running
+	// binary embeds that same program (a restart or failover of the same
+	// build); a different build is a deploy, and a deploy replaces the edit.
+	// A separate map rather than a field of Programs' values so a store
+	// written before bases existed still decodes, and an older binary
+	// reading a newer store ignores it.
+	ProgramBases map[string]string `json:"programBases,omitempty"`
 	// Alarms is operator alarm state — acknowledgement and shelf — keyed by
 	// alarm definition id. Retained for the same reason setpoints are: an
 	// ack is a decision a person made, and a restart or a standby takeover

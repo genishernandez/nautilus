@@ -129,7 +129,9 @@ func (r *Runtime) dropForces(why string) {
 }
 
 // loadRetained applies the store's state: retained tag values, then any
-// online-edited program sources. Tag names outside the retained set are
+// online-edited program sources — an edit only when this binary embeds the
+// program it was edited from (a restart or failover of the same build); a
+// different build was a deploy, and the deploy wins. Tag names outside the retained set are
 // ignored — the store is not a back door for writing arbitrary tags. A
 // program that no longer compiles (a library moved under it) is reported
 // but does not block the rest of the load; the current program keeps
@@ -220,14 +222,52 @@ func (r *Runtime) loadRetained() error {
 			errs = append(errs, fmt.Errorf("retained program for unknown task %q", task))
 			continue
 		}
-		if p.Hash() == sourceHash(src) {
+		edit, base, build := sourceHash(src), st.ProgramBases[task], p.BootHash()
+		switch {
+		case edit == build:
+			// The build already contains the edit (it was pulled into git
+			// and shipped): nothing to swap. The program is clean, so the
+			// next save leaves the entry out.
+			slog.Info("runtime: retained online edit is in this build; clearing it",
+				"task", task, "edit", edit)
 			continue
+		case base != build:
+			// A deploy wins, as a download does on a PLC: the binary's
+			// program for this task changed since the edit was made, so the
+			// edit is dropped and the deployed program runs. The next save
+			// leaves the entry out. An entry with no base (a store written
+			// before bases were recorded) cannot prove it was made against
+			// this build, so it is treated as one that was not.
+			r.discardRetainedEdit(task, edit, base, build)
+			continue
+		case p.Hash() == edit:
+			continue // already running it (a takeover in the same process)
 		}
 		if err := p.Swap(src); err != nil {
 			errs = append(errs, fmt.Errorf("retained program for task %q: %w", task, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// discardRetainedEdit logs a retained online edit dropped because a
+// different build was deployed, and names its task in the diagnostics
+// (ScanStats.RetainDiscardedEdits) so the dashboard and /api/state show it.
+func (r *Runtime) discardRetainedEdit(task, edit, base, build string) {
+	reason := "the deployed program for this task changed since the edit was made"
+	if base == "" {
+		reason = "the edit was saved without its base build, so it may predate this deploy"
+	}
+	slog.Warn("runtime: retained online edit discarded: a different build was deployed",
+		"task", task, "edit", edit, "editBase", base, "build", build, "reason", reason)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.stats.RetainDiscardedEdits {
+		if t == task {
+			return
+		}
+	}
+	r.stats.RetainDiscardedEdits = append(r.stats.RetainDiscardedEdits, task)
 }
 
 // retainSaver flushes changed state on a fixed cadence, only while leading —
@@ -272,7 +312,8 @@ func (r *Runtime) saveRetained(lastSaved []byte) []byte {
 
 // retainState assembles what this controller persists: the retained tags'
 // current values, and the source of every program that has drifted from
-// what it compiled from (an online edit not yet pulled into git). A struct
+// what it compiled from (an online edit not yet pulled into git), with the
+// hash of the build program it was edited from (see loadRetained). A struct
 // (UDT) tag persists as its plain JSON form (see plainNumeric) — the same
 // shape GET /api/state already sends an HMI — and an ARRAY tag as a JSON
 // list of its elements, lower bound first (an array of structs as a list of
@@ -328,8 +369,10 @@ func (r *Runtime) retainState() retain.State {
 		}
 		if st.Programs == nil {
 			st.Programs = map[string]string{}
+			st.ProgramBases = map[string]string{}
 		}
 		st.Programs[task] = p.Source()
+		st.ProgramBases[task] = p.BootHash()
 	}
 	record(MainTaskName, r.prog)
 	for _, tr := range r.tasks {
