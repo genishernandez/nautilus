@@ -4,11 +4,25 @@ VAR_EXTERNAL
     fbd_Bit3   : BOOL;
     fbd_Byte1  : INT;
     fbd_Packed : WORD;
+    Small      : LINT;
+    Wide       : LINT;
+    fbd_HiByte : LINT;
+    fbd_HiWord : LINT;
+    fbd_Dw0    : LINT;
+    fbd_L0     : LINT;
+    fbd_Mix    : LINT;
 END_VAR
 FBD
   fbd_Bit3 := Alarms.%X3
   fbd_Byte1 := Alarms.%B1
   fbd_Packed.%X0 := Alarms.%X3
   fbd_Packed.%X15 := Alarms.%X31
+  fbd_HiByte := Alarms.%B3
+  fbd_HiWord := Alarms.%W1
+  fbd_Dw0 := Alarms.%D0
+  fbd_L0 := Wide.%L0
+  fbd_Mix := 0
+  fbd_Mix.%D1 := Small.%D0
+  fbd_Mix.%W0 := Alarms.%W0
 END_FBD
 END_PROGRAM

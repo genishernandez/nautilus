@@ -552,8 +552,7 @@ claims:
     source: "#types"
     tests:
       - go ./lang/st TestLowerIntToRealPromotion
-    partial: true
-    note: Promotion is asserted. The STRING-versus-number error has no test.
+      - go ./lang/st TestMixedNumericArgsPromoteStringNumberRefused
 
   - id: FN-043
     claim: >-
@@ -566,8 +565,10 @@ claims:
       - go ./lang/st TestLowerNestedAggregateAssign
       - go ./lang/st TestFBStructPins
       - go ./lang/st TestEnumInStructsPinsArrays
-    partial: true
-    note: FUNCTION argument/return of a UDT type is not separately tested.
+      - go ./lang/st TestUserTypeAsFunctionArgLocalReturnAndBlockVar
+    note: >-
+      TestUserTypeAsFunctionArgLocalReturnAndBlockVar passes a nested UDT to a
+      FUNCTION, uses one as its local and returns one (the argument is a copy).
 
   - id: FN-044
     claim: >-
@@ -578,8 +579,10 @@ claims:
     tests:
       - go ./lang/st TestStructAssignmentIsACopy
       - go ./lang/st TestFBStructInputIsCopied
-    partial: true
-    note: Struct copy is tested; array copy-on-assign is not.
+      - go ./lang/st TestArrayAssignmentIsACopy
+    note: >-
+      TestArrayAssignmentIsACopy: b := a; b[1] := 99 leaves a[1], also for an
+      array inside a struct.
 
   - id: FN-045
     claim: >-
@@ -686,8 +689,12 @@ claims:
     tests:
       - go ./lang/st TestConstantCannotBeWritten
       - go ./lang/conformance TestConstantsAndMembersAreNotWritable
-    partial: true
-    note: Whole-constant and FOR-variable writes are tested; field/element/bit of a constant is not.
+      - go ./lang/st TestConstantFoldsAndPartsCannotBeWritten
+    note: >-
+      TestConstantFoldsAndPartsCannotBeWritten asserts the read lowers to a
+      literal (folded) and that writing a field, an element, a bit (.3, .%X3), a
+      partial (.%B0) or the whole constant, or using it as a FOR variable, is
+      the "is a constant" error.
 
   - id: FN-053
     claim: >-
@@ -1046,16 +1053,15 @@ claims:
     source: "#bit-operations"
     tests:
       - go ./lang/st TestBitAccess
-      - go ./lang/ld TestBitAccessInLadder
+      - go ./lang/st TestBitAccessInIfCompareArrayAndStruct
       - go ./lang/conformance TestConformance/st-partial-access
-    partial: true
     note: >-
-      Asserted: reading and writing w.0 / w.1 (LSB is bit 0), .3 and .%X3
-      reading the same bit, and a ladder contact and coil on a bit (run in
-      the conformance corpus; TestBitAccessInLadder checks lowering only).
-      Not asserted: a bit read in an IF condition or a compare argument, and
-      bits of an array element or a structure member (Words[2].15,
-      P101.Status.12).
+      TestBitAccessInIfCompareArrayAndStruct reads a bit in an IF and as a
+      compare argument, and reads and writes bits of an array element
+      (Words[2].15) and a structure member (P101.Status.12) in both spellings.
+      The st-partial-access corpus runs a ladder contact and coil on a bit in
+      both the .%X3 and the Logix .3 spelling. TestBitAccessInLadder was
+      removed: it checks lowering text only.
 
   - id: FN-082
     claim: >-
@@ -1066,11 +1072,15 @@ claims:
     tests:
       - go ./lang/conformance TestConformance/st-partial-access
       - go ./lang/st TestPartialAccessReadWrite
-    partial: true
+      - go ./lang/st TestPartialAccessUnsignedAndL
     note: >-
-      %X, %B, %W and %D read and write back only their bits. Not asserted:
-      %L; reading as unsigned (no part that is read has its top bit set);
-      and the ladder and FBD forms beyond %X (ladder) and %X / %B (FBD).
+      %X, %B, %W, %D and %L read and write back only their own bits, and parts
+      with their top bit set read unsigned (128, 32768, 2147486216), in ST and
+      FBD wires. Ladder contacts and coils take %X and .n, and a function
+      contact's argument takes %B unsigned (GT(Alarms.%B3, 100) passes power
+      at 16#80). A ladder assignment element { x := w.%W1 } does not parse;
+      the page promises partial access in contacts, coils and FBD wires, not in
+      assignment elements.
 
   - id: FN-083
     claim: >-
@@ -1172,12 +1182,10 @@ claims:
       - go ./lang/conformance TestConversionRangeFaults/NaN bit pattern
       - go ./lang/st TestConversionCompileErrors
       - go ./lang/ir TestConversionSemantics
-    partial: true
+      - go ./lang/ir TestConversionInfinitePatternFaults
     note: >-
-      REAL <-> DWORD and LREAL <-> LWORD bit patterns, the NaN-pattern fault
-      and the REAL_TO_WORD message (REAL_TO_UINT / REAL_TO_DWORD) are
-      asserted. A pattern that is infinite (e.g. 16#7F800000) faulting is
-      not.
+      TestConversionInfinitePatternFaults: +/-Inf patterns fault for
+      DWORD_TO_REAL and LWORD_TO_LREAL.
 
   - id: FN-093
     claim: >-
@@ -1188,11 +1196,12 @@ claims:
     tests:
       - go ./lang/conformance TestConformance/st-conversions-matrix/integers to REAL - REAL holds LREAL precision here
       - go ./lang/ir TestConversionSemantics
-    partial: true
+      - go ./lang/ir TestConversionExactUnsignedAndRealLreal
     note: >-
-      Exactness (16777217), ULINT read unsigned (ULINT_TO_LREAL, ULINT_TO_STRING)
-      and LREAL_TO_REAL keeping 0.1 are asserted. LWORD converting unsigned
-      and REAL_TO_LREAL are not.
+      TestConversionExactUnsignedAndRealLreal: 16777217 and 2^53-1 exact as
+      REAL, REAL_TO_LREAL / LREAL_TO_REAL keep 0.1 and 16777217 and are typed
+      LREAL / REAL, ULINT and LWORD all-ones read as 2^64-1 (LWORD_TO_STRING,
+      TO_STRING of an LWORD, ULINT_TO_REAL).
 
   - id: FN-094
     claim: >-
@@ -1230,13 +1239,11 @@ claims:
       - go ./lang/conformance TestConformance/fn-conversions/parsing from STRING
       - go ./lang/conformance TestConformance/st-conversions-matrix/STRING formatting, parsing and round trips
       - go ./lang/ir TestConversionSemantics
-      - go ./lang/ir TestConversionStringRoundTrip
-    partial: true
+      - go ./lang/ir TestStringParsesEveryDocumentedForm
     note: >-
-      Asserted: trimming, decimal, 16# and 2# with _, decimal REALs (and
-      1e+21 back through the round trip), T#1m30s, and TRUE/true/1/FALSE/0.
-      Not asserted: the 8# prefix, and bare durations without T# ("90s",
-      "500ms").
+      TestStringParsesEveryDocumentedForm: 8#17 (with _), 16#FF, 2#1010,
+      exponent REALs (1.5e3, 2E-2), bare durations 90s / 500ms / 1m30s, and BOOL
+      in mixed case (True, fAlSe), each after trimming.
 
   - id: FN-097
     claim: >-
@@ -1271,21 +1278,28 @@ claims:
       - go ./lang/ir TestConversionSemantics
       - go ./lang/st TestConversionMatrixThroughST
       - go ./lang/st TestEnumConversions
-    partial: true
+      - go ./lang/st TestToTypeOfIntegerExpressionIsLINT
     note: >-
-      "An expression's integer converts as LINT" is not asserted: the one
-      case (TO_UINT of an untyped integer 65536 = 0) gives 0 whether the
-      value is read as LINT, DINT or INT first, and no test passes an
-      integer expression to TO_<type>. The enumeration case, TRUNC_<int>,
-      <real>_TRUNC_<int> and TO_<Enum> are asserted.
+      TestToTypeOfIntegerExpressionIsLINT: TO_DINT(x + x) with INT x = 30000 is
+      60000 (an INT variable holding it converts to -5536), TO_LINT of a DINT
+      product keeps all its bits, TO_STRING of an expression is the LINT's text.
 
   - id: FN-100
     claim: >-
       DATE, TIME_OF_DAY and DATE_AND_TIME are not run-time types yet and
       have no conversions.
     source: "#type-conversions"
-    tests: []
-    note: Gap (a negative; no test asserts they are rejected).
+    tests:
+      - go ./lang/st TestDateTypesAreNotRuntimeTypes
+    partial: true
+    note: >-
+      Every spelling of the three (DATE, TIME_OF_DAY, TOD, DATE_AND_TIME, DT) is
+      refused as a type, and no typed or TO_<type> conversion to or from them
+      exists. Not covered, a disagreement: TOD#12:00:00, TIME_OF_DAY#12:00:00
+      and D#20 compile as integer literals (x := TOD#12:00:00 into a DINT
+      is accepted), so a TOD or DATE literal reaches the run time as an
+      integer; #307 tracks the TOD# case, and D# with a bare number is the
+      same gap.
 
   # ── Standard function blocks ────────────────────────────────────────
   - id: FN-101
@@ -1795,12 +1809,11 @@ claims:
       - go ./lang/st TestFBStructPinFromLibraryFile
       - go ./lang/st TestFBUnknownPinTypeStillErrors
       - go ./lang/st TestVarInOutStructLocal
-    partial: true
+      - go ./lang/st TestUserTypeAsFunctionArgLocalReturnAndBlockVar
     note: >-
-      VAR_INPUT, VAR_OUTPUT and VAR_IN_OUT pins of a nested user TYPE (also
-      from a library), and the unknown-type error, are asserted. A
-      FUNCTION's input, local or return of a user TYPE, and a block VAR of a
-      user TYPE, are not.
+      TestUserTypeAsFunctionArgLocalReturnAndBlockVar: a FUNCTION's input, local
+      and return of a nested user TYPE declared in a library joined ahead, and a
+      FUNCTION_BLOCK VAR of that TYPE retaining its value across scans.
 
   - id: FN-144
     claim: >-
@@ -1811,12 +1824,11 @@ claims:
     tests:
       - go ./lang/st TestENOOnlyAndPositional
       - go ./lang/st TestUserFB_UnboundInputKeepsInitial
-    partial: true
+      - go ./lang/st TestUnboundInputKeepsTheWrittenValue
     note: >-
-      Unbound EN reading TRUE (on a standard function) and an omitted user
-      block VAR_INPUT holding its declared initial value across scans are
-      asserted. An input bound on one call and omitted on a later one keeping
-      the written value is not.
+      TestUnboundInputKeepsTheWrittenValue: an omitted input reads its initial
+      7, then 100 after one call writes it, and keeps 100 on later calls that
+      omit it; a user block called with EN unbound runs and reports ENO TRUE.
 
   - id: FN-145
     claim: >-
@@ -1838,8 +1850,11 @@ claims:
     source: "#var_in_out-is-a-reference-pin"
     tests:
       - go ./lang/st TestVarInOutRejectsNonLValue
-    partial: true
-    note: Rejection is covered; acceptance of an array-element argument is not separately shown.
+      - go ./lang/st TestVarInOutAcceptsEveryAssignableForm
+    note: >-
+      TestVarInOutAcceptsEveryAssignableForm binds a variable, a struct field,
+      array elements (literal and variable index), a VAR_EXTERNAL tag and a
+      tag's field, and each receives the block's write.
 
   - id: FN-147
     claim: >-
@@ -1868,16 +1883,23 @@ claims:
       Two calls in one scan bound to different variables each see and update
       their own.
     source: "#var_in_out-is-a-reference-pin"
-    tests: []
-    note: Gap. No test makes two calls to one block with different bound variables in the same scan.
+    tests:
+      - go ./lang/st TestVarInOutTwoCallsSameScanEachOwnVariable
+    note: >-
+      One instance called twice in a scan with a and c, and two instances with x
+      and y: each call sees its own variable's value on entry and writes back to
+      it, over two scans.
 
   - id: FN-151
     claim: >-
       FUNCTIONs have no VAR_IN_OUT or VAR_OUTPUT: an IEC function is a single
       return value, and the compiler says so.
     source: "#var_in_out-is-a-reference-pin"
-    tests: []
-    note: Gap.
+    tests:
+      - go ./lang/st TestFunctionRefusesInOutAndOutput
+    note: >-
+      Both VAR_IN_OUT and VAR_OUTPUT in a FUNCTION are compile errors naming the
+      section and "single return value".
 
   - id: FN-152
     claim: >-
@@ -1886,12 +1908,11 @@ claims:
     source: "#var_in_out-is-a-reference-pin"
     tests:
       - go ./lang/st TestVarInOutScalar
-      - go ./lang/st TestUserFB_OutputBindingRejectsInput
-    partial: true
+      - go ./lang/st TestVarInOutRefusesOutputBinding
     note: >-
-      Binding an IN_OUT with := works. The refusal of => is only shown on a
-      VAR_INPUT (and only that lowering fails, not which error), never on a
-      VAR_IN_OUT.
+      Binding an IN_OUT with := runs (TestVarInOutScalar); => on a VAR_IN_OUT is
+      refused at compile time, alone (unbound, "N := <variable>") and beside a
+      := binding ("is a VAR_IN_OUT - bind it with N := <variable>").
 
   # ── Function blocks in ladder ───────────────────────────────────────
   - id: FN-153
