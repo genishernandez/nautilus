@@ -13,18 +13,32 @@ import "time"
 // in any lifetime, so a negative delta there is a RESET — the device
 // rebooted or the exporter restarted — and no honest rate exists for that
 // interval: Observe reports ok=false and the caller keeps the last rate.
+//
+// A counter whose wire value changes between integer and float (an exporter
+// that formats 1e+06 one scrape and 1000001 the next) starts over on the
+// switch: the two paths keep separate last samples and different reset
+// rules, so a delta across them would be against the wrong baseline.
 type Counter struct {
-	seen  bool
+	seen  counterPath // which path holds the last sample; none before the first
 	last  uint64
 	lastF float64
 	at    time.Time
 }
 
+type counterPath uint8
+
+const (
+	pathNone counterPath = iota
+	pathInt
+	pathFloat
+)
+
 // Observe records one sample and returns the rate since the previous one.
-// ok is false on the first sample, on a reset, and when no time has passed.
+// ok is false on the first sample (or the first after an ObserveFloat), on
+// a reset, and when no time has passed.
 func (c *Counter) Observe(v uint64, width int, now time.Time) (rate float64, ok bool) {
-	defer func() { c.seen, c.last, c.at = true, v, now }()
-	if !c.seen {
+	defer func() { c.seen, c.last, c.at = pathInt, v, now }()
+	if c.seen != pathInt {
 		return 0, false
 	}
 	dt := now.Sub(c.at).Seconds()
@@ -48,8 +62,8 @@ func (c *Counter) Observe(v uint64, width int, now time.Time) (rate float64, ok 
 // Such a counter never wraps; the ecosystem rule is that ANY decrease means
 // the process or exporter restarted, so a step backwards is a reset.
 func (c *Counter) ObserveFloat(v float64, now time.Time) (rate float64, ok bool) {
-	defer func() { c.seen, c.lastF, c.at = true, v, now }()
-	if !c.seen {
+	defer func() { c.seen, c.lastF, c.at = pathFloat, v, now }()
+	if c.seen != pathFloat {
 		return 0, false
 	}
 	dt := now.Sub(c.at).Seconds()
