@@ -6,10 +6,15 @@ VAR_EXTERNAL
     R, RX, RY : REAL;
     T1, T2 : TIME;
     S : STRING;
+    D1, D2 : DINT;
     st_AND, st_OR, st_XOR, st_NOT, st_AND3, st_OR3, st_XOR3, st_MOVEB, st_GT, st_GE, st_LT, st_LE, st_EQ, st_NE, st_RGT, st_RGE, st_RLT, st_RLE, st_REQ, st_RNE, st_TGT, st_TGE, st_TLT, st_TLE, st_TEQ, st_TNE : BOOL;
     st_ADD3, st_MUL3, st_SUB, st_DIV, st_MOD, st_MOVEI : INT;
     st_ADDR, st_MULR, st_SUBR, st_MOVER : REAL;
     st_MOVES : STRING;
+    st_ADDD : DINT;
+    st_ADDDEQ : BOOL;
+    st_ADDDINT : INT;
+    st_ADDDLINT : LINT;
 END_VAR
 
 st_AND  := A AND B;
@@ -49,4 +54,8 @@ st_TLT := T1 < T2;
 st_TLE := T1 <= T2;
 st_TEQ := T1 = T2;
 st_TNE := T1 <> T2;
+st_ADDD     := D1 + D2;
+st_ADDDEQ   := D1 + D2 = 80000;
+st_ADDDINT  := TO_INT(D1 + D2);
+st_ADDDLINT := TO_LINT(D1 + D2);
 END_PROGRAM

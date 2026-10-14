@@ -1972,7 +1972,8 @@ func resolveBinType(op ir.BinKind, lt, rt *ir.Type) (*ir.Type, error) {
 		if lt.Kind == ir.TypeTime || rt.Kind == ir.TypeTime {
 			return nil, fmt.Errorf("TIME may only be combined with TIME")
 		}
-		return ir.IntT, nil
+		// The operands' common type: DINT + DINT is DINT (#326).
+		return ir.CommonInt(lt, rt), nil
 	case ir.OpEq, ir.OpNeq, ir.OpLt, ir.OpLte, ir.OpGt, ir.OpGte:
 		if lt.Kind == ir.TypeBool && rt.Kind == ir.TypeBool && (op == ir.OpEq || op == ir.OpNeq) {
 			return ir.BoolT, nil

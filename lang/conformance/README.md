@@ -170,7 +170,7 @@ Current table:
 | `fb-tp` | ✓ | ✓ | ✓ |   | 8 |
 | `fbd-en-eno` | ✓ |   | ✓ |   | 7 |
 | `fn-conversions` | ✓ |   |   |   | 8 |
-| `fn-ops` | ✓ |   | ✓ |   | 9 |
+| `fn-ops` | ✓ |   | ✓ |   | 10 |
 | `fn-select-numeric` | ✓ |   | ✓ |   | 5 |
 | `fn-trig-log` | ✓ |   |   |   | 8 |
 | `ld-assign` | ✓ | ✓ |   |   | 4 |
@@ -203,4 +203,4 @@ Current table:
 | `tag-alias` | ✓ | ✓ | ✓ |   | 1 |
 | `tag-implicit-scope` | ✓ | ✓ | ✓ | ✓ | 1 |
 
-46 features, 234 tests.
+46 features, 235 tests.
