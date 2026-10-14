@@ -39,10 +39,10 @@ retain:
   single setpoint does. A struct or array comes back member by member
   onto the current tag, so if the project has since grown an array, the
   new elements keep their `init:` seeds; if it has shrunk one, the array
-  keeps its seeds and the mismatch shows in `lastRetainError`. The one
-  exception is an array of function-block instances (`ARRAY OF TON`): an
-  FB instance is program state, not a value, so it is not saved, and the
-  log names the tag once.
+  keeps its seeds and the mismatch shows in `lastRetainError`. A setpoint
+  cannot hold a function-block instance: the tag model refuses an `ARRAY
+  OF TON`, or a struct with a TON member, as a tag's type, whether the
+  manifest or a program's `VAR_EXTERNAL` declares it.
 - **When:** every 2 seconds, only when something changed, and only by the
   leader. A hard kill can lose at most 2 seconds of operator input.
 - **Load order:** retained values are applied before the first scan and

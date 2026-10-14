@@ -344,11 +344,13 @@ func (r *Runtime) saveRetained(lastSaved []byte) []byte {
 // lose a faceplate's setpoints because they live inside a UDT, or a
 // setpoint table because it is an array.
 //
-// The one array not persisted is one with a function-block instance inside
-// it (an ARRAY OF TON): an FB is identity, not a value, and the load path
-// cannot write one back, so persisting it would be a promise loadRetained
-// could not keep. Such a tag is skipped and named in the log once (see
-// retainable).
+// An array or struct with a function-block instance inside it (an ARRAY
+// OF TON, a STRUCT with a TON member) is not persisted: an FB is identity,
+// not a value, and the load path cannot write one back, so persisting it
+// would be a promise loadRetained could not keep. Such a tag is skipped
+// and named in the log once (see retainable). The tag model refuses one as
+// a manifest tag's type, and as the type a program declares for a manifest
+// tag, so no project reaches this; the skip is defense in depth.
 //
 // Compatibility: arrays add no field and no version to retain.State — they
 // are one more JSON shape under Tags. A store written before arrays were
@@ -369,16 +371,16 @@ func (r *Runtime) retainState() retain.State {
 			continue
 		}
 		switch v.Kind {
-		case ir.TypeArray:
+		case ir.TypeArray, ir.TypeStruct:
 			if !retainable(v) {
 				if _, logged := r.retainSkipped.LoadOrStore(name, true); !logged {
-					slog.Warn("runtime: retained array not saved: it holds a function-block instance, which has no value to persist",
+					slog.Warn("runtime: retained tag not saved: it holds a function-block instance, which has no value to persist",
 						"tag", name)
 				}
 				continue
 			}
 			fallthrough
-		case ir.TypeBool, ir.TypeReal, ir.TypeInt, ir.TypeTime, ir.TypeString, ir.TypeStruct:
+		case ir.TypeBool, ir.TypeReal, ir.TypeInt, ir.TypeTime, ir.TypeString:
 			if st.Tags == nil {
 				st.Tags = map[string]any{}
 			}
@@ -421,7 +423,7 @@ func (r *Runtime) retainState() retain.State {
 	return st
 }
 
-// retainable reports whether an array round-trips through the retain
+// retainable reports whether an array or struct round-trips through the retain
 // store: scalars, and structs and arrays made of them, at any depth. A
 // function-block instance (or a value with no kind yet) anywhere inside
 // does not — loadRetained could not write it back.

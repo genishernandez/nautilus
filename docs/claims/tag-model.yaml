@@ -142,15 +142,33 @@ claims:
       - go ./internal/project TestUnknownTypeIsAnError
   - id: TAG-015
     claim: >-
-      A function-block type is refused as a tag type, since an instance is program state, not a tag.
+      A function-block type is refused as a tag type, since an instance is
+      program state, not a tag; so is a type that holds one: an array of a
+      standard or project block at any nesting, and a TYPE whose STRUCT has a
+      block member. A manifest tag with no type: that a program declares as
+      one of these is refused at load the same way.
     source: "#a-tags-type"
     tests:
       - go ./internal/project TestTagTypeAndInitMustAgree
       - go ./internal/project TestProjectFunctionBlockIsRefusedAsTagType
+      - go ./internal/project TestTypeHoldingAFunctionBlockIsRefusedAsTagType
+      - go ./lang/st TestResolveTypeNameRefusesFunctionBlocksInside
+      - go ./internal/project TestProgramDeclaringAManifestTagAsAFunctionBlockIsRefused
     note: >-
       A standard block (type: TON) and a project-declared FUNCTION_BLOCK are
       both refused with '<name> is a function block', not the unknown-type
-      message.
+      message. Also asserted: ARRAY[1..2] OF TON, an array of a project
+      FUNCTION_BLOCK, a nested and a two-dimensional array of blocks, a TYPE
+      that is an array of TON, a STRUCT with a TON member, a STRUCT reaching
+      one through an array member, and an array of that STRUCT are each
+      refused with a message naming the block (never the unknown-type one),
+      while arrays of INT and of arrays of REAL still load; the st test pins
+      the exact messages, the scalar one unchanged. An untyped input, output,
+      setpoint or state tag whose program's VAR_EXTERNAL declares it TON, a
+      project block, an array (1-D or 2-D) of either, or a STRUCT with a TON
+      member is refused naming the tag and the program; a GVL's block-typed
+      global and a program's own VAR_GLOBAL no manifest entry names still
+      load.
   - id: TAG-016
     claim: >-
       GET /api/meta reports each tag's declared type beside its desc, plus an

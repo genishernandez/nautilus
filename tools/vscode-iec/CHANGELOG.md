@@ -16,6 +16,20 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Changed
 
+- **Breaking: a manifest tag can no longer be an array of function
+  blocks.** `type: ARRAY[1..2] OF TON` used to load; it is now refused, as
+  `type: TON` already was, with `tag Timers: ARRAY[1..2] OF TON — TON is a
+  function block; an instance is program state, not a tag`. The same goes
+  for an array of a FUNCTION_BLOCK the project declares (which used to
+  read "unknown type"), an array of arrays of blocks, and a TYPE whose
+  STRUCT has a block member; and to a tag with no `type:` that a program
+  declares as any of these (`VAR_EXTERNAL Timers : ARRAY[1..2] OF TON;`),
+  refused as `tag Timers: program Main declares it ARRAY[1..2] OF TON — …`.
+  A project that declared one no longer loads
+  (`naut run`, `naut check`): move the instances into the program's `VAR`
+  and publish the values they produce as tags. Needs a `naut` newer than
+  0.17.0.
+
 - **A ladder rung with no coil must end at its last block.** In
   `Start t1:TON(PT := T#5S) Stop`, the `Stop` contact drove nothing and was
   dropped without a word; it is now an error that says to end the rung
