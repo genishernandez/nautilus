@@ -330,12 +330,14 @@ claims:
     source: "#sfc-action-qualifiers-and-step-supervision"
     tests:
       - go ./lang/sfc TestTimedLoweringStableSlots
-    partial: true
+      - go ./lang/sfc TestWarmMigration/timers-latches-pulses
     note: >-
-      One TON per association, and slot names that stay stable across an
-      edit (what a warm swap migrates by), are tested. No test shows a
-      running timed association's elapsed time surviving an edit.
-      TestWarmMigration was removed: it only migrates a step token.
+      One TON per association, with slot names stable across an edit, is
+      asserted on the transpiled chart. TestWarmMigration/timers-latches-pulses
+      edits a running chart (adds a step and a transition), migrates the
+      frame, and asserts the D and SL associations' timers carry 6 s of
+      elapsed time and fire at 10 s / 20 s after activation, not after the
+      swap.
 
   - id: FN-027
     claim: >-
