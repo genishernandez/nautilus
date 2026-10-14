@@ -33,7 +33,7 @@ HMI kit, and the `scan` block on `/api/state`) shows two different things:
 | `thresholdMs` | the late threshold: `late-threshold:` on the task, default a tenth of the period |
 | `overruns` | scans whose execution took longer than the period |
 | `missed` | slots the loop skipped because it had fallen more than a whole period behind (after an overrun or a stall) — scans that should have run and did not |
-| `p50Us`, `p99Us`, `p999Us`, `maxUs` | percentiles and worst case over every scan so far; percentiles are bucket upper edges, at most 3 % above the true value |
+| `p50Us`, `p99Us`, `p999Us`, `maxUs` | percentiles and worst case over every scan so far; percentiles are bucket upper edges, about 3 % above the true value (the bucket width is 1/32, 3.125 %) |
 | `histogram`, `bucketsUs` | a 1-2-5 log-spaced histogram from 1 µs to 100 ms |
 
 A task that is never late and never misses is doing what it promised. A

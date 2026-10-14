@@ -87,7 +87,7 @@ be on; MD5 and DES are accepted with a warning.
   no longer carries marks that tag Bad and leaves its siblings Good. A
   transport failure (timeout, refused, bad credentials) climbs a backoff
   ladder from 1 s to 60 s and shows on `/api/drivers` with the reason —
-  a wrong SNMPv3 key reads as `wrong credentials`, not as a timeout.
+  a wrong SNMPv3 auth pass phrase reads as `authentication failed — wrong auth pass phrase or protocol for user …`, and a wrong priv pass phrase as `authentication succeeded but privacy failed`, not as a timeout.
 
 ## Alarms by rule
 
