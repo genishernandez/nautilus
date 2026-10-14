@@ -26,13 +26,13 @@ claims:
       - go ./lang/fbd TestArrayTranspile
       - go ./lang/fbd TestArrayCompilesEndToEnd
       - go ./lang/fbd TestSharedTypes
-    partial: true
+      - go ./lang/fbd TestArrayElementFeedback
+      - go ./lang/fbd TestStructMemberCoil
     note: >-
-      Array elements as coil targets and inputs are asserted on the
-      transpiled ST, and a struct member as an input is run (TestSharedTypes);
-      no FBD test writes a struct member as a coil target. The graph-model
-      tests (struct-member chip, array feedback edge) were dropped: they test
-      the editor's render model, not evaluation.
+      Array elements as coil targets and inputs are run
+      (TestArrayElementFeedback) and a struct member as a coil target is run,
+      leaving its sibling alone (TestStructMemberCoil); a struct member as an
+      input is run (TestSharedTypes).
 
   - id: FBD-003
     claim: >-
@@ -58,12 +58,9 @@ claims:
     source: "#a-netlist-line-by-line"
     tests:
       - go ./lang/fbd TestOutputBinding
-    partial: true
     note: >-
-      The test asserts the binding transpiles verbatim, compiles, draws ET as
-      an output pin, and rejects a literal target. It never runs the program,
-      so nothing shows Elapsed receiving the timer's ET. The only FBD
-      binding that is run (fbd-en-eno) binds ENO, a BOOL.
+      TestOutputBinding runs the program: ET lands in Elapsed (2000 ms, then
+      5000 ms at PT).
 
   - id: FBD-005
     claim: >-
@@ -73,12 +70,12 @@ claims:
     tests:
       - go ./lang/fbd TestSealInLatch
       - go ./lang/fbd TestArithmeticAndFanout
+      - go ./lang/fbd TestFunctionBlockInstance
     partial: true
     note: >-
-      NOT on a pin is run in the seal-in test and REAL literals in the
-      arithmetic test; TIME, BOOL and STRING literal inputs are not asserted.
-      The editor-op tests (toggle NOT, set literal) were dropped: they test
-      text edits, not the language.
+      NOT on a pin (seal-in), REAL literals and a TIME literal (T#5S, run to
+      PT in TestFunctionBlockInstance) are asserted. BOOL and STRING literal
+      inputs are not.
 
   - id: FBD-006
     claim: >-
@@ -140,11 +137,11 @@ claims:
     source: "#how-a-diagram-evaluates"
     tests:
       - go ./lang/fbd TestCombinationalLoopRejected
-    partial: true
+      - go ./lang/fbd TestWireReadingItselfRejected
+      - go ./cmd/naut TestCheckRejects/FBD self-feeding wire
     note: >-
-      Only the indirect loop (a reads b, b reads a) is asserted; a wire that
-      reads itself directly is not tested. TestGraphCombinationalLoopRejected
-      (dropped) is the editor model's copy of the same case.
+      The indirect loop (a reads b, b reads a) and a wire reading itself
+      directly both fail with "combinational loop".
 
   - id: FBD-011
     claim: >-
@@ -156,10 +153,10 @@ claims:
       - go ./lang/fbd TestSealInLatch
       - naut examples/lift-station the high-level alarm latches at 90% and clears only at or below 85%
     note: >-
-      TestSealInLatch seeds Run on each fresh run, so it shows the latch logic
-      but not a value carried between scans. The lift-station test was added:
-      it runs level.fbd's own HighLevelAlm line across scans and holds the
-      alarm at 87 (inside the band), which only the carried value can do.
+      TestSealInLatch runs one program and tag store across scans with nothing
+      re-seeded, so Run stays on only through the carried value; the
+      lift-station test does the same for level.fbd's own HighLevelAlm line,
+      holding the alarm at 87 (inside the band).
 
   - id: FBD-012
     claim: >-
@@ -170,11 +167,12 @@ claims:
     tests:
       - go ./lang/fbd TestFunctionBlockInstance
       - go ./lang/fbd TestNetworksRunInOrder
-    partial: true
+      - go ./lang/fbd TestArrayElementFeedback
     note: >-
-      Ordering is asserted on transpiled text; no run shows a reader above the
-      call seeing this scan's value, and the "ties keep source order" rule is
-      not tested on its own.
+      TestFunctionBlockInstance runs a reader written above its TON call and
+      sees Q on the scan PT elapses (this scan's value); in
+      TestArrayElementFeedback a[2] := a[1] reads the value a[1] was given
+      earlier in the same scan (source order).
 
   - id: FBD-013
     claim: >-
@@ -214,8 +212,7 @@ claims:
     tests:
       - go ./lang/conformance TestConformance/fbd-en-eno/DIV's ENO is FALSE on a zero divisor, TRUE otherwise
       - go ./lang/conformance TestConformance/fbd-en-eno/DIV with EN FALSE holds its result and reports ENO FALSE
-    partial: true
-    note: Only DIV's zero-divisor ENO is tested; MOD's is not.
+      - go ./lang/fbd TestENOModByZero
 
   - id: FBD-017
     claim: >-
@@ -252,12 +249,13 @@ claims:
       An FB input left out of the call keeps its value (its declared initial
       value until something writes it).
     source: "#types-functions-and-blocks"
-    tests: []
+    tests:
+      - go ./lang/fbd TestOmittedFBInputKeepsInitial
+    partial: true
     note: >-
-      No run asserts an omitted input's kept value. The old refs did not
-      count: TestPickerLeavesDefaultedInputsUnbound only shows such a call
-      compiles (and the editor leaves the pin unbound), and
-      TestFBVarConstantWritesBack is an ST VAR CONSTANT / in-out test.
+      An omitted input holding its declared initial value across scans is run.
+      An input written by an earlier call and then omitted keeping that value
+      is not.
 
   - id: FBD-021
     claim: >-
@@ -265,11 +263,10 @@ claims:
     source: "#types-functions-and-blocks"
     tests:
       - go ./lang/fbd TestSharedTypes
-    partial: true
+      - go ./lang/fbd TestStructMemberCoil
     note: >-
-      A struct member as an input is run; a struct (or member) as a coil
-      target is not tested. TestGraphStructMemberIsInputChip (dropped) checks
-      the render model only.
+      A struct member as an input (TestSharedTypes) and as a coil target
+      (TestStructMemberCoil) are run.
 
   - id: FBD-022
     claim: >-
@@ -327,36 +324,48 @@ claims:
     claim: Authoring a FUNCTION in FBD is not supported; functions are ST.
     source: "#not-supported"
     tests: []
-    note: No test asserts the rejection.
+    note: >-
+      Not true as built: a FUNCTION with an FBD body is accepted by naut check
+      (#308). TestCheckRejects/FBD_FUNCTION pins the bug and skips until it is
+      fixed.
 
   - id: FBD-027
     claim: >-
       There are no execution-order overrides and no control flow (IF, CASE,
       loops) in the netlist.
     source: "#not-supported"
-    tests: []
-    note: No test asserts that IF/CASE/loops are rejected in an FBD body.
+    tests:
+      - go ./cmd/naut TestCheckRejects/FBD IF
+      - go ./cmd/naut TestCheckRejects/FBD CASE
+      - go ./cmd/naut TestCheckRejects/FBD FOR
+      - go ./cmd/naut TestCheckRejects/FBD WHILE
+    partial: true
+    note: >-
+      IF, CASE, FOR and WHILE in an FBD body are refused by naut check. No
+      test tries an execution-order override.
 
   - id: FBD-028
     claim: >-
       Inline arithmetic in an array index is not supported; the index is
       computed on a named wire first.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/FBD index arithmetic
 
   - id: FBD-029
     claim: Defining the same wire twice is a compile error.
     source: "#not-supported"
-    tests: []
-    note: Only the self-feeding half (combinational loop) is tested; see FBD-010.
+    tests:
+      - go ./cmd/naut TestCheckRejects/FBD duplicate wire
 
   - id: FBD-030
     claim: A wire that feeds itself is a compile error.
     source: "#not-supported"
     tests:
       - go ./lang/fbd TestCombinationalLoopRejected
-    partial: true
+      - go ./lang/fbd TestWireReadingItselfRejected
+      - go ./cmd/naut TestCheckRejects/FBD self-feeding wire
     note: >-
-      Asserted for a two-wire loop (a reads b, b reads a); a wire that reads
-      itself directly is not tested.
+      A two-wire loop (TestCombinationalLoopRejected) and a wire that reads
+      itself directly (TestWireReadingItselfRejected, and naut check) are
+      refused.

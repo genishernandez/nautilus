@@ -36,12 +36,9 @@ claims:
     source: "#delta-frames"
     tests:
       - go ./server TestDeltaIsPerClient
-    partial: true
     note: >-
-      The test's two clients are at the same point when the shared tick goes
-      out (A was ticked past SP=71, B's first full frame already holds it), so a
-      single fleet-wide generation would pass too; two clients genuinely at
-      different generations at one broadcast are not exercised.
+      Client A is a change behind when B connects; one broadcast then gives B
+      only the new change and A both.
 
   - id: STR-005
     claim: >-
@@ -99,11 +96,9 @@ claims:
     source: "#delta-frames"
     tests:
       - go ./server TestDeltaFrameKeepsDiagnostics
-    partial: true
     note: >-
-      Only one delta frame is checked, without ?blocks=delta and on the connect
-      repeat that carries the scan block anyway; ts/scans on a frame whose scan
-      block has been gated out is not asserted.
+      Checked on a later delta frame and on a frame whose scan block is gated
+      out (?blocks=delta).
 
   - id: STR-012
     claim: >-
@@ -186,12 +181,9 @@ claims:
     source: "#the-frame-floor"
     tests:
       - go ./server TestDeltaFrameCarriesQuality
-    partial: true
     note: >-
-      The test never ticks twice with the same Bad quality, so "sent whole on
-      every delta frame / not gated" is unasserted; the clear check (no quality
-      on the frame after Level returns to Good) would pass even if quality were
-      gated on change.
+      An unchanged Bad quality is on the next delta frame too, and the map
+      clears when the tag returns to Good.
 
   - id: STR-020
     claim: >-
@@ -293,11 +285,9 @@ claims:
     source: "#tag-filters"
     tests:
       - go ./server TestQualityIsFiltered
-    partial: true
     note: >-
-      Asserted on /api/state only, not on /api/stream; and the test only checks
-      that out-of-filter quality is dropped, so an implementation that dropped
-      all quality whenever a filter is set would also pass.
+      Asserted on /api/state and on /api/stream: a filter keeps exactly the
+      kept tag's quality and drops the others'.
 
   - id: STR-032
     claim: >-
@@ -342,11 +332,9 @@ claims:
     tests:
       - go ./server TestMetaAdvertisesQualityAndDeltas
       - go ./runtime TestReportsQuality
-    partial: true
     note: >-
-      /api/meta is only checked on a driver-bound controller (quality true);
-      the false case is asserted on runtime.ReportsQuality, not on the
-      /api/meta response.
+      /api/meta reports quality true on a driver-bound controller and false on
+      a driverless one with no inputs.
 
   - id: STR-037
     claim: >-

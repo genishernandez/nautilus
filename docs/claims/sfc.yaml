@@ -218,6 +218,7 @@ claims:
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/after an R, SL arms again on the next activation
       - go ./lang/conformance TestConformance/sfc-timed-qualifiers/R resets the stored qualifiers
       - go ./lang/sfc TestResetActsOnceThenActionMaySet
+      - go ./lang/conformance TestConformance/sfc-timed-qualifiers/R acts once on its step's activation, not on every scan the step is active
 
   - id: SFC-021
     claim: >-
@@ -326,6 +327,7 @@ claims:
       - go ./lang/conformance TestConformance/sfc-step-maxtime/within the limit nothing is flagged
       - go ./lang/conformance TestConformance/sfc-step-maxtime/the scan the step overruns sets the flag; the abort fires the scan after
       - go ./lang/conformance TestConformance/sfc-step-maxtime/leaving in time never sets the flag
+      - go ./lang/conformance TestConformance/sfc-step-maxtime/the step's time does not run while it is inactive
 
   - id: SFC-029
     claim: >-
@@ -459,21 +461,22 @@ claims:
     source: "#tooling"
     tests:
       - go ./lang/sfc TestWarmMigration
-    partial: true
     note: >-
-      TestWarmMigration asserts only the live token (Fill.X) across a
-      recompile; step timers, stored flags, pulse memories, timed-qualifier
-      timers/latches and overrun flags are not asserted across a swap.
-      (runtime TestSwapWarmCarriesRetainedState was dropped: it swaps a plain
-      ST program, no chart.)
+      TestWarmMigration/timers-latches-pulses migrates a chart with
+      ir.MigrateFrame (what SwapWarm runs): the token, Step.T, the MAXTIME
+      flag, the S latch, the P edge memory and the D and SL timers and latch
+      all carry and keep running on the edited program.
 
   - id: SFC-039
     claim: >-
       Renaming a step resets its token (the renamed step's slot is a new name),
       listed in the swap report.
     source: "#tooling"
-    tests: []
-    note: No test asserts the rename behaviour of a warm swap on a chart.
+    tests:
+      - go ./lang/sfc TestWarmMigration/renamed-step-resets
+    note: >-
+      Renaming the active step leaves the renamed step inactive and lists its
+      token in the migration's resets.
 
   - id: SFC-040
     claim: >-
@@ -490,8 +493,12 @@ claims:
       Macro steps and charts nested inside a step are not supported; charts
       are flat.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/SFC macro step
+    partial: true
+    note: >-
+      A MACRO_STEP is refused by naut check. A chart nested inside a step is
+      never tried.
 
   - id: SFC-042
     claim: >-
@@ -507,8 +514,8 @@ claims:
     claim: >-
       Instruction List action bodies are not supported; action bodies are ST.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/SFC IL action
 
   - id: SFC-044
     claim: >-
@@ -525,5 +532,9 @@ claims:
       Import of vendor SFC (Rockwell .L5X routines, Siemens GRAPH, CODESYS) is
       not supported.
     source: "#not-supported"
-    tests: []
-    note: No test asserts that an SFC routine in an L5X is refused.
+    tests:
+      - go ./lang/l5x TestVendorSFCRoutineIsRefused
+    partial: true
+    note: >-
+      A Logix SFC routine in an L5X is refused by the ladder import, which
+      names it as skipped. Siemens GRAPH and CODESYS SFC are never tried.

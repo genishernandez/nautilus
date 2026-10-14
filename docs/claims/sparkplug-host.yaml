@@ -155,11 +155,9 @@ claims:
     source: "#the-online-rebirth-companions"
     tests:
       - go ./sparkplug/host TestMqttRebirthTagRisingEdge
-    partial: true
     note: >-
-      The test only matches the NCMD topic; that the payload carries Node
-      Control/Rebirth is not decoded, and a held-true value not
-      re-commanding (edge, not level) is not asserted.
+      The NCMD is decoded (Node Control/Rebirth, Boolean true); held true and
+      a falling edge send nothing, and a second rising edge sends again.
   - id: SPH-017
     claim: >-
       A data tag stays absent from the driver's snapshot until its site has
@@ -362,10 +360,13 @@ claims:
       - go ./sparkplug/host TestMqttRebirthTagRisingEdge
     partial: true
     note: >-
-      The test (false baseline, then false, then true -> NCMD) passes under
-      the ordinary baseline rule too. Untested: TRUE in the first snapshot
-      still commanding (the "unaffected" part), and a held-true or falling
-      value not re-commanding.
+      Only a rising edge commanding, and held-true or falling values not
+      re-commanding, are asserted (TestMqttRebirthTagRisingEdge). The
+      "unaffected" half is not true as built: WriteOutputs records __Rebirth
+      in the baseline snapshot like any output, and
+      TestMqttRebirthTagTrueInFirstSnapshot pins that a __Rebirth already TRUE
+      in the first snapshot sends nothing, where a false baseline would
+      command it. The page or the code needs a decision.
   - id: SPH-035
     claim: >-
       `/api/drivers` reports Kind `sparkplug-host`, Name the host-id, state
@@ -427,9 +428,9 @@ claims:
     source: "#"
     tests:
       - go ./sparkplug/host TestStateGroupFilter
-    partial: true
     note: >-
-      A foreign group is shown rejected, but the configured group being consumed (and the plural group-ids form) is never shown, so a filter that drops everything would pass.
+      A foreign group is refused, the configured group is consumed, and with
+      two groups configured the second is consumed too.
 
   - id: SPH-043
     claim: >-

@@ -165,10 +165,13 @@ claims:
       function as a contact (ADD(TempC, 0.0)) is a compile error, not a
       pass-through.
     source: "#how-a-rung-evaluates"
-    tests: []
+    tests:
+      - go ./cmd/naut TestCheckRejects/numeric function contact
+    partial: true
     note: >-
-      Comparison contacts are used in tests; no test asserts the compile
-      error for a non-BOOL function contact.
+      A numeric function used as a contact (ADD(T, 0.0)) is a compile error.
+      The six comparisons working as contacts is not asserted as such: no test
+      runs each of them as a contact.
 
   - id: LD-016
     claim: >-
@@ -184,12 +187,11 @@ claims:
       - go ./lang/conformance TestConformance/fb-sr
       - go ./lang/conformance TestConformance/fb-rs
       - go ./lang/conformance TestConformance/ld-coils/FB-only rung (no coil) still runs, its outputs read elsewhere
-    partial: true
+      - go ./lang/ld TestLadderRTrigClockIsRungPower
     note: >-
-      Each fixture's ladder program drives the block from rung power and
-      reads Q/Q1 as the coil, run against ST; R_TRIG has no ladder fixture.
-      The palette/editor tests (TestCatalogListsStandardThenLibraryBlocks,
-      TestBlockPins) were dropped.
+      Each fixture's ladder program drives the block from rung power and reads
+      Q/Q1 as the coil, run against ST; TestLadderRTrigClockIsRungPower puts
+      rung power on R_TRIG's CLK and runs the one-scan pulse.
   - id: LD-017
     claim: >-
       Passing the power pin yourself (t1:TON(IN := x)) is an error, because
@@ -251,12 +253,14 @@ claims:
     tests:
       - go ./lang/ld TestLadderFunctionBlockPowerPins
       - go ./internal/project TestLadderLibraryProjectRuns
+      - go ./lang/ld TestLadderFunctionBlockPowerOutOfENO
     partial: true
     note: >-
-      Power onto EN is run (the ST library's Scale), onto the first BOOL input
-      and out of the first BOOL output is asserted. Power continuing from ENO
-      is not tested, nor skipping a first BOOL input bound by name to land on
-      the next one.
+      Power onto EN and out of ENO is run
+      (TestLadderFunctionBlockPowerOutOfENO, where only the ENO path can drop
+      the coil); onto the first BOOL input and out of the first BOOL output is
+      asserted. Skipping a first BOOL input bound by name to land on the next
+      one is not tested.
   - id: LD-023
     claim: >-
       Instance state persists across scans, and an online edit carries it by
@@ -265,10 +269,11 @@ claims:
     tests:
       - go ./lang/ld TestLadderFunctionBlockRuns
       - go ./runtime TestSwapWarmCarriesRetainedState
-    partial: true
+      - go ./runtime TestSwapWarmLadderCarriesRetainedState
     note: >-
-      Persistence across scans is tested for ladder blocks; warm-swap
-      carrying is tested for ST/FBD, not for a ladder program.
+      Persistence across scans is run for ladder blocks;
+      TestSwapWarmLadderCarriesRetainedState swaps a .ld program and carries a
+      ladder block's seal-in and TON, a program TON and a CTU.
 
   - id: LD-024
     claim: >-
@@ -301,28 +306,34 @@ claims:
       Online edits treat .ld as the program source; download, diff against the
       controller and naut pull move the ladder text itself.
     source: "#tooling"
-    tests: []
+    tests:
+      - go ./runtime TestSwapWarmLadderCarriesRetainedState
+    partial: true
     note: >-
-      Runtime online-edit tests cover ST and FBD sources only (TestLanguageDetection
-      checks fbd and st); no test for .ld download/pull.
+      A warm swap keeps the .ld text as the program of record. Download over
+      the controller API, diff against the controller and naut pull moving
+      ladder text are not tested.
 
   - id: LD-027
     claim: Jumps and labels (JMP, JMPC, LBL, RET) are not supported.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/JMP
+      - go ./cmd/naut TestCheckRejects/JMPC
+      - go ./cmd/naut TestCheckRejects/LBL
+      - go ./cmd/naut TestCheckRejects/RET
 
   - id: LD-028
     claim: Master control relay zones (MCR) are not supported.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/MCR
 
   - id: LD-029
     claim: Negated coils ( /Tag ) are rejected.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/negated coil
 
   - id: LD-030
     claim: >-
@@ -341,5 +352,7 @@ claims:
       The ladder vocabulary is the IEC built-ins only; vendor instruction
       sets are not accepted.
     source: "#not-supported"
-    tests: []
-    note: No test asserts that a vendor instruction is rejected.
+    tests:
+      - go ./cmd/naut TestCheckRejects/vendor instruction
+    note: >-
+      XIC, a Logix instruction, is refused as an unknown function.

@@ -49,12 +49,11 @@ claims:
     tests:
       - go ./cmd/naut TestBuildEmbedRoundTrip
       - go ./cmd/naut TestBuildEmbedsHMIAndBuiltBinaryServesIt
-    partial: true
+      - go ./cmd/naut TestBuiltControllerActivatesWarm
     note: >-
-      The tests append the project to a fake runner file and load it back
-      from the embedded archive with the same loader naut run uses; the
-      emitted file is never executed, so the real binary starting from its
-      own embedded project is not asserted.
+      TestBuiltControllerActivatesWarm builds the naut CLI, has it naut build
+      a project, and runs the emitted binary with an empty PATH (no Go
+      toolchain, no git): it boots the embedded project and serves it.
   - id: GS-005
     claim: >-
       naut run starts the scan loop, dashboard and tag API on

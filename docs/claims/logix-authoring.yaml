@@ -371,9 +371,8 @@ claims:
     note: >-
       Run against a stand-in controller (mechanics only); no test drives a
       real or emulated Logix controller through `naut test --target logix`.
-      The `always` case's violation persists to the end of the step, so it
-      cannot tell every-poll from end-of-step checking; `advance:` as wall
-      time is asserted only as a positive elapsed time.
+      always: catches a transient violation per poll; `advance:` as wall time
+      is asserted only as a positive elapsed time.
 
   - id: LGA-035
     claim: >-

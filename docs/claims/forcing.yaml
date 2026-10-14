@@ -16,13 +16,11 @@ claims:
     source: "#what-a-force-does"
     tests:
       - go ./acceptance TestForceHoldsAgainstPlantAndLogic
-    partial: true
+      - go ./runtime TestForceOutputReappliedAfterLogic
     note: >-
-      The acceptance test holds PumpRun FALSE while the logic writes TRUE
-      every scan, but checks the tag only; the driver being handed the
-      forced value is not asserted. TestForceOutputReappliedAfterLogic was
-      dropped: its seal-in reads Motor back, so a forced FALSE makes the
-      logic compute FALSE too and a one-time write would pass it.
+      TestForceOutputReappliedAfterLogic holds Alarm FALSE while the logic
+      writes TRUE every scan (it never reads itself back) and checks the tag
+      and the driver's output on each scan.
   - id: FRC-003
     claim: >-
       Forcing a struct member (P101.Speed, Recipe.Steps[2].Mode) holds only
@@ -49,13 +47,11 @@ claims:
     tests:
       - go ./runtime TestUnforceRestoresActual
       - go ./runtime TestForceInputOverridesDriver
-    partial: true
+      - go ./runtime TestForceOutputReappliedAfterLogic
     note: >-
-      The driver's latest reading as the actual value, and the restore at
-      once on unforce, are asserted for an input only. The logic's latest
-      write as the actual value is not: TestForceOutputReappliedAfterLogic
-      only checks actual is non-nil, which a table recording the forced
-      value would also pass.
+      The driver's latest reading (an input) and the logic's latest write (an
+      output) are each asserted as the actual value, and unforce restores it
+      at once for both.
   - id: FRC-006
     claim: >-
       A write to a forced tag through POST /api/tags is refused with 409

@@ -64,11 +64,11 @@ claims:
       reading a tag nothing has ever written faults the scan with "undefined
       tag".
     source: "#a-program-top-to-bottom"
-    tests: []
+    tests:
+      - go ./runtime TestScanReadOfUnwrittenTagFaults
     note: >-
-      Only the runtime's SetPath/force "undefined tag" errors are tested; no
-      test runs a program that reads a never-written tag and asserts the scan
-      fault.
+      A program reading a declared but never-written tag faults with
+      "undefined tag Level", and runs once the tag is written.
 
   - id: ST-006
     claim: >-
@@ -113,6 +113,7 @@ claims:
       - go ./lang/st TestConstantInBoundsAndInitialValues
       - go ./lang/st TestUserFB_InitialValues
       - go ./lang/st TestUserFunc_InitialValues
+      - go ./lang/st TestUserFB_UnboundInputKeepsInitial
     note: >-
       TestConstantInBoundsAndInitialValues asserts a PROGRAM VAR's initial
       value (start : INT := N + 1) in its result.
@@ -308,12 +309,10 @@ claims:
     tests:
       - go ./runtime TestSwapWarmCarriesRetainedState
       - go ./runtime TestSwapWarmTypeChangeResets
-    partial: true
     note: >-
-      Program VAR carry (Total) and the reset on a type change are asserted.
-      FB instance state is not: the test's Debounce : TON is never called, so
-      its carried state is indistinguishable from a reset; the only evidence
-      is its absence from the reset report.
+      Program VARs, a TON and a CTU, and a user FUNCTION_BLOCK instance's
+      internal Sum carry across the swap (TestSwapWarmCarriesRetainedState); a
+      type change resets (TestSwapWarmTypeChangeResets).
 
   - id: ST-026
     claim: >-
@@ -374,11 +373,12 @@ claims:
       - go ./lang/st TestRegionIsANoOpGrouping
       - go ./lang/st TestRegionInFBAndCase
       - go ./lang/conformance TestConformance/st-region
+      - go ./lang/st TestRegionOpensNoScope
     note: >-
-      TestRegionOpensNoScope was dropped: it names an undeclared variable
-      inside a region and expects "undeclared", which passes whether or not
-      a region opens a scope. TestRegionErrors (REGION syntax errors) is not
-      a promise of the page.
+      TestRegionOpensNoScope reads and writes an outer variable inside a
+      region and sees the value after END_REGION, and the region's name is not
+      a variable. TestRegionErrors (REGION syntax errors) is not a promise of
+      the page.
 
   - id: ST-031
     claim: >-
@@ -480,10 +480,11 @@ claims:
   - id: ST-040
     claim: An array index outside the declared bounds faults the scan.
     source: "#statements-and-expressions"
-    tests: []
+    tests:
+      - go ./runtime TestScanArrayIndexOutOfBoundsFaults
     note: >-
-      Only the runtime SetPath bounds error (lang/ir setfield) is tested; no
-      test runs an ST array access out of range and asserts the scan fault.
+      One past the end and a negative index both fault the scan with "out of
+      bounds"; the last valid index runs.
 
   - id: ST-041
     claim: >-
@@ -608,59 +609,74 @@ claims:
   - id: ST-050
     claim: Pointers and references (REF_TO, dereference) are not supported.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/REF_TO
+    partial: true
+    note: >-
+      A REF_TO declaration is refused by naut check. The dereference operator
+      (^) is never tried, so its rejection is not asserted.
 
   - id: ST-051
     claim: >-
       VAR_ACCESS, CONFIGURATION, RESOURCE and TASK declarations are not
       supported; tasks come from nautilus.yaml or Go composition.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/VAR_ACCESS
+      - go ./cmd/naut TestCheckRejects/CONFIGURATION
+      - go ./cmd/naut TestCheckRejects/RESOURCE
+      - go ./cmd/naut TestCheckRejects/TASK
 
   - id: ST-052
     claim: >-
       Subrange types are not supported; TYPE declares only a STRUCT, an
       enumeration, or an alias.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/subrange
 
   - id: ST-053
     claim: >-
       DATE, TOD, TIME_OF_DAY, DT and DATE_AND_TIME are rejected as unknown
       scalar types, and their literals do not evaluate.
     source: "#not-supported"
-    tests: []
+    tests:
+      - go ./cmd/naut TestCheckRejects/DATE
+      - go ./cmd/naut TestCheckRejects/TOD
+      - go ./cmd/naut TestCheckRejects/TIME_OF_DAY
+      - go ./cmd/naut TestCheckRejects/DT
+      - go ./cmd/naut TestCheckRejects/DATE_AND_TIME
+      - go ./cmd/naut TestCheckRejects/DATE literal
+      - go ./cmd/naut TestCheckRejects/DT literal
+    partial: true
     note: >-
-      No rejection test. (Checked by hand: `naut check` reports `unknown scalar
-      type "TOD"`; the name appearing in lang/st's IEC name table does not make
-      it a usable type.)
+      All five type names are refused as unknown scalar types, and DATE# and
+      DT# literals are refused. TOD# and TIME_OF_DAY# literals are accepted by
+      naut check today (#307); TestCheckRejects/TOD_literal skips on that bug
+      until it is fixed.
 
   - id: ST-054
     claim: Exponentiation with ** is not supported; EXPT(base, exp) is used instead.
     source: "#not-supported"
     tests:
       - go ./lang/conformance TestConformance/fn-trig-log
-    partial: true
+      - go ./cmd/naut TestCheckRejects/**
     note: >-
-      EXPT working is covered by fn-trig-log; the rejection of ** in ST is
-      not asserted.
+      EXPT is run by fn-trig-log; `2.0 ** 3.0` in ST is refused by naut check.
 
   - id: ST-055
     claim: Length-qualified strings (STRING[80]) are a parse error.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/STRING[80]
 
   - id: ST-056
     claim: >-
       Aggregate initializers (:= [1, 2, 3]) in a declaration are a parse
       error.
     source: "#not-supported"
-    tests: []
-    note: No test asserts the rejection.
+    tests:
+      - go ./cmd/naut TestCheckRejects/array initializer
 
   - id: ST-057
     claim: >-

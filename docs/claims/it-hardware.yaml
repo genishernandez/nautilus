@@ -12,12 +12,13 @@ claims:
     tests:
       - go ./hw TestTypesRenderAndCompile
       - go ./hw TestBaseThroughRuntime
-    partial: true
     note: >-
-      Every type in the hw table compiles slot for slot and a driver-built
-      SwitchPort is read by a compiled program; that the table holds exactly
-      the nine UDTs the page names is not asserted, and the snmp-vs-prometheus
-      render comparison leaves redfish out.
+      TestTypesRenderAndCompile holds the committed hw_types.st of every
+      importer (snmp and three Redfish profiles) and the prometheus rendering
+      to one TYPE body, which declares the nine UDTs the page names, and
+      compiles it slot for slot; TestBaseThroughRuntime has a compiled program
+      read a driver-built SwitchPort through the hw base all three drivers
+      use.
   - id: IT-002
     claim: >-
       The alarm members the page lists (`Fault`, `Warning`, `High`,
@@ -57,11 +58,11 @@ claims:
       - go ./prom TestForeignImportByteIdenticalOnRerun
     partial: true
     note: >-
-      SNMP and Redfish golden-compare and re-run-check all three files;
-      Prometheus's `hw_types.st` is never golden-compared or re-run-checked
-      (only parsed). "All three write the same body" is asserted for the
-      snmp and prometheus renderings (and snmp across two devices); the
-      Redfish importer's body is never compared with the others'.
+      SNMP and Redfish golden-compare and re-run-check all three files, and
+      their committed hw_types.st bodies are held to one body, which the
+      prometheus rendering (TypesST) also matches. The hw_types.st the
+      Prometheus importer writes is still neither golden-compared,
+      re-run-checked nor compared with the others (only parsed).
   - id: IT-005
     claim: >-
       The generated manifest is explicit: every member of every tag names

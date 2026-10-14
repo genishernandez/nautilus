@@ -94,13 +94,11 @@ claims:
     source: "#what-the-runtime-does"
     tests:
       - go ./runtime TestRunLoopHoldsScheduleAndCountsMissed
-    partial: true
     note: >-
-      Missed-slot reporting and the no-burst bound (scans + missed <= 152) are
-      asserted. Non-accumulation is not: the lower bound of 120 of about 150
-      scans would also pass a loop that drifted by up to 20 %. (Bounds are
-      loose for shared CI runners.) "Does not start before its slot" dropped
-      from the claim (not on the page).
+      In virtual time, with every wake 50 µs late and every scan 200 µs long,
+      each scan starts exactly 50 µs after its slot on the start + n·period
+      grid, and a five-period stall reports four missed slots and fires no
+      burst.
 
   - id: RT-010
     claim: >-
@@ -130,15 +128,11 @@ claims:
     source: "#what-the-runtime-does"
     tests:
       - go ./runtime TestFastTaskDoesNotWaitForSlowTask
-    partial: true
+      - go ./runtime TestTasksRunConcurrently
     note: >-
-      The test drives the two scans from its own goroutines (Scan beside
-      ScanTask), so it proves no lock makes a fast scan wait for a slow one;
-      it does not prove Run schedules tasks concurrently: a Run that called
-      every task from one loop would still pass. Skips on machines where the
-      slow scan takes under 5 ms (it takes about 50 ms on a desktop).
-      TestTasksRunConcurrently removed: it only checks that both tasks scanned
-      during Run, which a sequential scheduler would pass too.
+      TestTasksRunConcurrently stalls the main scan in its driver read and the
+      aux task keeps scanning under Run; TestFastTaskDoesNotWaitForSlowTask
+      parks the main program mid-scan and the fast task scans and commits.
 
   - id: RT-013
     claim: >-
