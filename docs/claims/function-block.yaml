@@ -282,11 +282,8 @@ claims:
   - id: FBD-026
     claim: Authoring a FUNCTION in FBD is not supported; functions are ST.
     source: "#not-supported"
-    tests: []
-    note: >-
-      Not true as built: a FUNCTION with an FBD body is accepted by naut check
-      (#308). TestCheckRejects/FBD_FUNCTION pins the bug and skips until it is
-      fixed.
+    tests:
+      - go ./cmd/naut TestCheckRejects/FBD_FUNCTION
 
   - id: FBD-027
     claim: >-
