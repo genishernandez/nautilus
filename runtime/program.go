@@ -296,6 +296,16 @@ func (p *Program) Dirty() bool {
 	return p.source != p.bootSource
 }
 
+// BootHash identifies the source the deployed binary embeds — the program
+// an online edit was made against. The retain store keeps it beside an
+// edited source, so a restart can tell a restart of the same build (swap
+// the edit back in) from a deploy of a different one (the deploy wins).
+func (p *Program) BootHash() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return sourceHash(p.bootSource)
+}
+
 // CanRollback reports whether a previous program is available.
 func (p *Program) CanRollback() bool {
 	p.mu.Lock()

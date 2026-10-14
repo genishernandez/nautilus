@@ -77,8 +77,11 @@ matters:
   longer compiles is rejected whole.
 - **Undoable** — each program keeps its one-step rollback, and activating
   `built` returns to exactly what CI shipped.
-- **Ephemeral** — like any online edit, a restart boots the binary's
-  embedded programs. Making a revert permanent means deploying it.
+- **Same restart rule** — like any online edit: without a
+  [retain store](/guides/redundancy/#retained-state) a restart boots the
+  binary's embedded programs; with one, a restart of the same build keeps
+  the activated revision and a deploy of a different build replaces it.
+  Making a revert permanent means deploying it.
 
 After an activation the history reports `active: <sha>`; a hand edit or
 rollback clears the claim, since the running source then matches no one

@@ -189,6 +189,11 @@ type Runtime struct {
 	// each one once rather than on every tick.
 	retainSkipped sync.Map
 
+	// discardedPrograms is, per task, the source of the last retained online
+	// edit a deploy replaced (see loadRetained), carried in every save as
+	// retain.State.DiscardedPrograms so the edit stays recoverable. Under mu.
+	discardedPrograms map[string]string
+
 	// alwaysWrite / outGen / outSent implement the output push rule (see
 	// Options.AlwaysWriteOutputs): outGen is the tag store's output-write
 	// generation at the last SUCCESSFUL WriteOutputs, so a scan that finds
@@ -295,6 +300,12 @@ type ScanStats struct {
 	// needed it, so the dashboard must show it while it is fixable.
 	RetainErrors    uint64 `json:"retainErrors,omitempty"`
 	LastRetainError string `json:"lastRetainError,omitempty"`
+	// RetainDiscardedEdits names the tasks whose retained online edit was
+	// dropped since start because a different build had been deployed over
+	// it (see loadRetained). Not an error — a deploy replaces an edit, as a
+	// download does on a PLC — but an edit that was never pulled into git is
+	// gone, and that must be visible, not just logged.
+	RetainDiscardedEdits []string `json:"retainDiscardedEdits,omitempty"`
 
 	// Fault counters: input reads that failed (the scan ran on last-known
 	// values) and program scans that errored.
@@ -1173,6 +1184,9 @@ func (r *Runtime) Stats() ScanStats {
 	s.Recent = append([]float64(nil), r.stats.Recent...)
 	s.Periods = append([]float64(nil), r.stats.Periods...)
 	s.Histogram = append([]int(nil), r.stats.Histogram...)
+	if len(r.stats.RetainDiscardedEdits) > 0 {
+		s.RetainDiscardedEdits = append([]string(nil), r.stats.RetainDiscardedEdits...)
+	}
 	s.Lateness = r.late.snapshot()
 	r.mu.Unlock()
 	for _, tr := range r.tasks {
