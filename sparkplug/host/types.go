@@ -357,8 +357,32 @@ type Driver struct {
 	// attempt before CONNECT. The STATE birth must carry the byte-identical
 	// value the will carries (TCK host-topic-phid-birth-payload-timestamp).
 	sessionTS int64
-	cancel    context.CancelFunc
-	done      chan struct{}
+	// sessionPrimary records whether this session was opened as the primary
+	// host — with the STATE will installed and the birth published. Only
+	// such a session may re-assert its birth (reassertState): a standby that
+	// has just been promoted has no birth of its own to repeat until it
+	// reconnects.
+	sessionPrimary bool
+	cancel         context.CancelFunc
+	done           chan struct{}
+
+	// ── leadership under redundancy: (driver.go SetWriteGate, mqtt.go) ──
+	// gateMu guards this block.
+	gateMu sync.Mutex
+	// writeGate is the leadership gate `naut run` installs through
+	// SetWriteGate when — and only when — the manifest has a redundancy:
+	// section. nil (a single host) is always open. isLeader ANDs it with
+	// Config.Leader.
+	writeGate func() bool
+	// replicaID tells the replicas of a redundant pair apart on the broker:
+	// they run one manifest, so without it they would share an MQTT client
+	// ID and take each other's sessions over in a loop. Set alongside the
+	// write gate; "" (a single host) leaves the client ID as configured.
+	replicaID string
+	// stopping is set by Stop before it publishes the STATE death, so the
+	// echo of our own certificate is never mistaken for a stale one that
+	// needs re-asserting (reassertState).
+	stopping bool
 }
 
 // stats are the monotonic counters Status() reports.

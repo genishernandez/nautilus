@@ -33,6 +33,44 @@ import (
 	"github.com/joyautomation/nautilus/server"
 )
 
+// electorFor builds the elector for a manifest with a `redundancy:` section
+// and wires the project to it (wireRedundancy); nil, and nothing wired, for
+// a manifest without one.
+func electorFor(proj *project.Project, addr string) (*leader.Elector, error) {
+	if proj.Redundancy == nil {
+		return nil, nil
+	}
+	el, err := leader.New(proj.LeaseName(), os.Getenv("POD_NAME"), selfAddr(addr))
+	if err != nil {
+		return nil, err
+	}
+	wireRedundancy(proj, el)
+	return el, nil
+}
+
+// wireRedundancy answers a loaded project to its elector: the runtime scans
+// only on the leader, and the driver (or every child of a Multi) gets the
+// elector as its write gate. runProject calls it only for a manifest with a
+// `redundancy:` section; without one nothing is gated and every driver is
+// its own leader.
+//
+// The gate governs what a driver does on its OWN, outside the scan:
+//   - a driver whose outputs carry device-side watchdogs (the modbus
+//     Rewrite keep-alives: SC10 safety word, i550 control word) must stop
+//     asserting them the moment this replica is not the leader — two
+//     replicas must never both write a control word, and a stopped leader's
+//     silence is what trips the device's own fail-safe instead of masking
+//     the fault;
+//   - a Sparkplug host must not declare itself the primary host (STATE
+//     online) or send NCMD/DCMD from a standby, or two hosts fight over
+//     every edge node in the group (#325).
+func wireRedundancy(proj *project.Project, el runtime.Coordinator) {
+	proj.Runtime.Coordinator = el
+	if g, ok := proj.Runtime.Driver.(interface{ SetWriteGate(func() bool) }); ok {
+		g.SetWriteGate(el.IsLeader)
+	}
+}
+
 // runProject hosts a loaded project: scan loop + tag API, Ctrl+C to stop.
 // dir is the project's on-disk path when running from a checkout ("" for a
 // built binary's embedded project) — it's where live git history capture
@@ -54,25 +92,10 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 	// last leader saved. Outside a cluster the elector is standalone
 	// (always leader) and the retain store is the JSON file — the same
 	// manifest runs on a bench and as a replica set.
-	var el *leader.Elector
-	if proj.Redundancy != nil {
-		el, err = leader.New(proj.LeaseName(), os.Getenv("POD_NAME"), selfAddr(addr))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "naut run: redundancy:", err)
-			return 1
-		}
-		proj.Runtime.Coordinator = el
-		// A driver whose outputs carry device-side watchdogs (the modbus
-		// Rewrite keep-alives: SC10 safety word, i550 control word) must
-		// stop asserting them the moment this replica is not the leader —
-		// two replicas must never both write a control word, and a
-		// stopped leader's silence is what trips the device's own
-		// fail-safe instead of masking the fault. The elector is the gate;
-		// the runtime already keeps a standby from scanning at all, so
-		// this only governs the driver's OWN re-assert loop.
-		if g, ok := proj.Runtime.Driver.(interface{ SetWriteGate(func() bool) }); ok {
-			g.SetWriteGate(el.IsLeader)
-		}
+	el, err := electorFor(proj, addr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut run: redundancy:", err)
+		return 1
 	}
 	if proj.Retain != nil {
 		cm, file := proj.RetainNames()

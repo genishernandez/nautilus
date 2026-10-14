@@ -332,19 +332,19 @@ claims:
     claim: >-
       With a `redundancy:` section only the leader may claim to be online:
       the STATE publish and every outbound NCMD/DCMD are gated on
-      leadership, not just on `primary: true`.
+      leadership, not just on `primary: true`. On promotion the new leader
+      publishes STATE online; on demotion the old one stops commanding and
+      publishes its STATE death. Without `redundancy:` the host is always
+      the leader.
     source: "#redundancy"
     tests:
       - go ./sparkplug/host TestMqttStandbyPublishesNoStateAndNoCommandsUntilLeader
-    partial: true
-    note: >-
-      The driver gates STATE and every outbound NCMD/DCMD on Config.Leader
-      (asserted: a standby publishes nothing, the new leader publishes STATE
-      and its held command). But nothing wires a `redundancy:` manifest to it:
-      naut run only hands the elector to drivers that implement SetWriteGate,
-      sphost.Driver has none, and the project builder never sets
-      Config.Leader, so a manifest with redundancy: does not gate the host
-      today. Page and code disagree.
+      - go ./sparkplug/host TestWriteGateDrivesStateAndCommands
+      - go ./sparkplug/host TestWriteGateLeaderReassertsStateOverAStaleDeath
+      - go ./sparkplug/host TestNoWriteGateSingleHostIsAlwaysPrimary
+      - go ./cmd/naut TestRedundantSparkplugHostOnlyTheLeaderIsPrimary
+      - go ./cmd/naut TestRedundantSparkplugHostOnABenchIsPrimary
+      - go ./cmd/naut TestSingleSparkplugHostWithoutRedundancyIsAlwaysPrimary
   - id: SPH-037
     claim: >-
       The host passes the Sparkplug TCK host-application profile (NBIRTH,
