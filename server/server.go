@@ -624,7 +624,25 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /assets/", handleAsset)
 		mux.HandleFunc("GET /", s.handleIndex)
 	}
-	return withCORS(s.proxyStandby(mux))
+	return withCORS(s.proxyStandby(apiNotFound(mux)))
+}
+
+// apiNotFound makes every /api/ path no API route matches a JSON 404,
+// whatever else owns "/": without it the HMI's SPA fallback ("GET /") answered
+// a typo'd endpoint with index.html (200, text/html), and a GET on a POST-only
+// route did the same. The SPA fallback stays for every non-/api path. It asks
+// the mux which pattern would serve the request rather than registering an
+// "/api/" catch-all, which would conflict with "GET /".
+func apiNotFound(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if _, pattern := mux.Handler(r); pattern == "" || pattern == "GET /" {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such API endpoint: " + r.Method + " " + r.URL.Path})
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // proxyStandby wraps mux so that on a standby replica, requests it cannot

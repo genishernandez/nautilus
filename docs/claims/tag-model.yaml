@@ -347,15 +347,14 @@ claims:
       - go ./server TestHMIDoesNotShadowAPI
       - go ./server TestHMIMovesBuiltinDashboardToNautilusPrefix
       - go ./server TestHMIBuiltinAssetsMoveWithDashboard
-    partial: true
+      - go ./server TestUnmatchedAPIPathIs404
+      - go ./server TestHMISPAFallbackSurvivesAPI404
     note: >-
       The static file, SPA fallback, /api/state still answering JSON, and the
-      dashboard and its assets under /_nautilus/ are asserted. Page and code
-      disagree on one point: the page says an unmatched non-/api path falls back
-      to index.html and /api/* is untouched, but with server.hmi set an
-      unmatched /api path (GET /api/nope, or a GET on a POST-only route) is
-      answered 200 with the HMI's index.html, not a 404 (confirmed by probe;
-      reported in the PR, not fixed).
+      dashboard and its assets under /_nautilus/ are asserted. An unmatched
+      /api path (GET /api/nope, or a GET on a POST-only route) is a JSON 404,
+      with or without server.hmi, and non-/api paths such as /apis still fall
+      back to index.html (#301).
   - id: TAG-035
     claim: >-
       The server.hmi path is relative to the project and must resolve inside
