@@ -98,12 +98,12 @@ func TestLifecycleActiveAckRTN(t *testing.T) {
 	eq(t, "state", r.state(t, "HH"), UnackActive)
 	eq(t, "count", r.Records()[0].Count, 1)
 
-	n, err := r.Ack([]string{"HH"}, "rchon")
+	n, err := r.Ack([]string{"HH"}, "operator1")
 	if err != nil || n != 1 {
 		t.Fatalf("Ack = %d, %v", n, err)
 	}
 	eq(t, "state", r.state(t, "HH"), AckActive)
-	eq(t, "ackBy", r.Records()[0].AckBy, "rchon")
+	eq(t, "ackBy", r.Records()[0].AckBy, "operator1")
 
 	r.tags["FIT.HH"] = false
 	r.Evaluate()
@@ -503,10 +503,10 @@ func TestRetainedAckSurvivesRestart(t *testing.T) {
 	r := newRig(t, def("A", "A"), def("B", "B"))
 	r.tags["A"], r.tags["B"] = true, true
 	r.Evaluate()
-	if _, err := r.Ack([]string{"A"}, "rchon"); err != nil {
+	if _, err := r.Ack([]string{"A"}, "operator1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Shelve("B", r.clk.at(time.Hour), "rchon"); err != nil {
+	if err := r.Shelve("B", r.clk.at(time.Hour), "operator1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -514,7 +514,7 @@ func TestRetainedAckSurvivesRestart(t *testing.T) {
 	if len(snap) != 2 {
 		t.Fatalf("snapshot = %+v, want the acked and the shelved", snap)
 	}
-	if !snap["A"].Acked || snap["A"].AckBy != "rchon" {
+	if !snap["A"].Acked || snap["A"].AckBy != "operator1" {
 		t.Errorf("snapshot A = %+v", snap["A"])
 	}
 	if snap["B"].ShelfUntilMs == 0 {
@@ -539,7 +539,7 @@ func TestRetainedAckSurvivesRestart(t *testing.T) {
 		recs[rec.ID] = rec
 	}
 	eq(t, "A after restore", recs["A"].State, AckActive)
-	eq(t, "A ackBy", recs["A"].AckBy, "rchon")
+	eq(t, "A ackBy", recs["A"].AckBy, "operator1")
 	eq(t, "B after restore", recs["B"].State, Shelved)
 	eq(t, "unacked after restore", e2.Summary().Unacked, 0)
 

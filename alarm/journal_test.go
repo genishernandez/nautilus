@@ -218,8 +218,8 @@ func TestMultiJournalWithNoJournalsErrors(t *testing.T) {
 }
 
 func TestEventJSONShape(t *testing.T) {
-	got := mustJSON(t, Event{TS: 1000, ID: "A.HH", Kind: KindActive, Priority: Critical, Site: "RTU9", State: "unack-active", By: "rchon"})
-	want := `{"ts":1000,"id":"A.HH","kind":"active","priority":"critical","site":"RTU9","state":"unack-active","by":"rchon"}`
+	got := mustJSON(t, Event{TS: 1000, ID: "A.HH", Kind: KindActive, Priority: Critical, Site: "RTU9", State: "unack-active", By: "operator1"})
+	want := `{"ts":1000,"id":"A.HH","kind":"active","priority":"critical","site":"RTU9","state":"unack-active","by":"operator1"}`
 	if got != want {
 		t.Fatalf("Event JSON =\n%s\nwant\n%s", got, want)
 	}

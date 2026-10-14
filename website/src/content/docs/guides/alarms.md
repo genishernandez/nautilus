@@ -176,10 +176,10 @@ thing and stays an ordinary tag write. It is not the same button as
 ```
 GET  /api/alarms                    {"ts":…,"summary":{…},"alarms":[…]}
 GET  /api/alarms/journal?from&to&site&priority&id&kind&state&q&limit
-POST /api/alarms/ack       {"ids":["RTU9_WEL15_FIT_001.HH"],"by":"rchon"}
-                           {"all":true,"by":"rchon"}
-POST /api/alarms/shelve    {"id":"…","seconds":1800,"by":"rchon"}
-POST /api/alarms/unshelve  {"id":"…","by":"rchon"}
+POST /api/alarms/ack       {"ids":["RTU9_WEL15_FIT_001.HH"],"by":"operator1"}
+                           {"all":true,"by":"operator1"}
+POST /api/alarms/shelve    {"id":"…","seconds":1800,"by":"operator1"}
+POST /api/alarms/unshelve  {"id":"…","by":"operator1"}
 ```
 
 Reads are ungated like every other read. Writes go through the same
