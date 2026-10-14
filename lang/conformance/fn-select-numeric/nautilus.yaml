@@ -1,0 +1,56 @@
+# fn-select-numeric — the selection functions (SEL, MUX, MIN, MAX) called
+# positionally and formally (every input by its standard name), ABS on
+# integers and REALs, and TRUNC into the 64-bit integer an undeclared INT
+# is (docs/functions.md "Standard functions", "Selection", "Numeric"). The
+# same calls in ST and as FBD blocks; every step asserts both.
+#
+#   go test ./lang/conformance/ -run 'TestConformance/fn-select-numeric'
+#   go run ./cmd/naut test lang/conformance/fn-select-numeric
+name: fn-select-numeric
+
+tasks:
+  - program: fn-select-numeric.st   # the first task is always "main"; its prefix is still st_
+    scan: 10ms
+  - name: fbd
+    program: fn-select-numeric.fbd
+    scan: 10ms
+
+tags:
+  # Shared inputs.
+  - { name: G, role: state, init: false }
+  - { name: K, role: state, init: 0 }
+  - { name: X, role: state, init: 0 }
+  - { name: Y, role: state, init: 0 }
+  - { name: Z, role: state, init: 0 }
+  - { name: R, role: state, init: 0.0 }
+  - { name: D, role: state, init: 0 }
+  - { name: BIG, role: state, init: 0.0, desc: "a REAL beyond 32 bits for TRUNC" }
+
+  # Outputs, one set per language.
+  - { name: st_SELP,  role: state, init: 0, desc: "SEL(G, X, Y), positional" }
+  - { name: st_SELF,  role: state, init: 0, desc: "SEL(G := G, IN0 := X, IN1 := Y), formal" }
+  - { name: st_MUXF,  role: state, init: 0, desc: "MUX(K := K, IN0 := X, IN1 := Y, IN2 := Z), formal" }
+  - { name: st_MIN3,  role: state, init: 0 }
+  - { name: st_MAX3,  role: state, init: 0 }
+  - { name: st_MINF,  role: state, init: 0, desc: "MIN(IN1 := X, IN2 := Y, IN3 := Z), formal" }
+  - { name: st_MAX4,  role: state, init: 0, desc: "MAX(X, Y, Z, D)" }
+  - { name: st_ABSI,  role: state, init: 0 }
+  - { name: st_ABSD,  role: state, init: 0 }
+  - { name: st_ABSR,  role: state, init: 0.0 }
+  - { name: st_ABSF,  role: state, init: 0.0, desc: "ABS(IN := R), formal" }
+  - { name: st_TRUNC, role: state, init: 0 }
+  - { name: fbd_SELP,  role: state, init: 0 }
+  - { name: fbd_SELF,  role: state, init: 0 }
+  - { name: fbd_MUXF,  role: state, init: 0 }
+  - { name: fbd_MIN3,  role: state, init: 0 }
+  - { name: fbd_MAX3,  role: state, init: 0 }
+  - { name: fbd_MINF,  role: state, init: 0 }
+  - { name: fbd_MAX4,  role: state, init: 0 }
+  - { name: fbd_ABSI,  role: state, init: 0 }
+  - { name: fbd_ABSD,  role: state, init: 0 }
+  - { name: fbd_ABSR,  role: state, init: 0.0 }
+  - { name: fbd_ABSF,  role: state, init: 0.0 }
+  - { name: fbd_TRUNC, role: state, init: 0 }
+
+driver:
+  type: memory

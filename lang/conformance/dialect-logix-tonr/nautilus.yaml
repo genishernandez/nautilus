@@ -1,0 +1,42 @@
+# dialect-logix-tonr — the logix dialect's TONR run on the nautilus runtime.
+# `dialect: logix` composes internal/dialect/logix/tonr.st into every
+# program, exactly as a project targeting a Logix controller gets it; the
+# runtime then runs TONR like any user block. docs/functions.md#dialects:
+# "a TON whose Reset clears the accumulated time and Q while TRUE; the
+# free-running pulse is t:TONR(PT := T#1S, Reset := t.Q)".
+#
+#   go test ./lang/conformance/ -run 'TestConformance/dialect-logix-tonr'
+name: dialect-logix-tonr
+dialect: logix
+
+tasks:
+  - program: dialect-logix-tonr.st
+    scan: 1ms
+  - name: ld
+    program: dialect-logix-tonr.ld
+    scan: 1ms
+  - name: fbd
+    program: dialect-logix-tonr.fbd
+    scan: 1ms
+
+tags:
+  - { name: IN,    role: state, init: false, desc: "TONR.IN" }
+  - { name: PT,    role: state, init: 5000, unit: ms, desc: "TONR.PT" }
+  - { name: Reset, role: state, init: false, desc: "TONR.Reset" }
+
+  # t: the held timer; p: the free-running pulse (Reset := p.Q, PT = 1s).
+  - { name: st_Q,    role: state, init: false }
+  - { name: st_ET,   role: state, init: 0, unit: ms }
+  - { name: st_P,    role: state, init: false }
+  - { name: st_PET,  role: state, init: 0, unit: ms }
+  - { name: ld_Q,    role: state, init: false }
+  - { name: ld_ET,   role: state, init: 0, unit: ms }
+  - { name: ld_P,    role: state, init: false }
+  - { name: ld_PET,  role: state, init: 0, unit: ms }
+  - { name: fbd_Q,   role: state, init: false }
+  - { name: fbd_ET,  role: state, init: 0, unit: ms }
+  - { name: fbd_P,   role: state, init: false }
+  - { name: fbd_PET, role: state, init: 0, unit: ms }
+
+driver:
+  type: memory

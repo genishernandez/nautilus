@@ -11,16 +11,9 @@ claims:
     source: "#"
     tests:
       - go ./sparkplug TestBirthStatesUnitAndDescAsProperties
+      - go ./sparkplug TestBirthListsTheWholeTagStoreWithTypesAndValues
       - go ./sparkplug TestPropertiesRoundTrip
       - go ./sparkplug TestTCKConformance
-    partial: true
-    note: >-
-      `unit:` and `desc:` as `engUnit`/`documentation` on top-level tags and
-      `unit:` on a template member are asserted; `desc:` on a template
-      member, and that the birth lists the whole tag store with names,
-      types and current values, are not asserted (the TCK checks birth
-      structure, not completeness). Ignition mapping them onto tag
-      properties is host behaviour not tested here.
   - id: SPB-002
     claim: >-
       Types map faithfully: BOOL to Boolean, integers to Int64, REAL to
@@ -51,34 +44,26 @@ claims:
     source: "#"
     tests:
       - go ./internal/project TestSparkplugConfig
-    partial: true
-    note: >-
-      A section missing `group-id` erroring is asserted; a section missing
-      `broker` erroring, and a section with only `broker` and `group-id`
-      building a node, are not (the passing case sets many optional keys).
+      - go ./internal/project TestSparkplugOnlyBrokerAndGroupIDAreRequired
   - id: SPB-007
     claim: >-
       The password is never read from the manifest: it comes from
       `NAUTILUS_MQTT_PASSWORD`.
     source: "#"
-    tests: []
-    note: >-
-      No test asserts the env-only password rule or that a `password:` key
-      is rejected.
+    tests:
+      - go ./internal/project TestSparkplugPasswordComesFromTheEnvironment
   - id: SPB-008
     claim: >-
       `ssl://host:8883` brokers connect over TLS.
     source: "#"
-    tests: []
-    note: >-
-      No TLS broker test.
+    tests:
+      - go ./sparkplug TestEdgeNodeConnectsOverTLS
   - id: SPB-009
     claim: >-
       `edge-node` defaults to the project name.
     source: "#"
-    tests: []
-    note: >-
-      No test asserts the default.
+    tests:
+      - go ./internal/project TestSparkplugEdgeNodeDefaultsToTheProjectName
   - id: SPB-010
     claim: >-
       `deadband` publishes a numeric only when it moved more than that in
@@ -86,14 +71,10 @@ claims:
     source: "#publish-classes"
     tests:
       - go ./sparkplug TestRBEDeadbandAndHeartbeat
+      - go ./sparkplug TestRBEZeroDeadbandPublishesAnyChange
       - go ./sparkplug TestRBEDeadbandOnStructMembers
       - go ./sparkplug TestRBEDeadbandOnNestedStruct
       - go ./internal/project TestSparkplugManifestClassesReachTheNode
-    partial: true
-    note: >-
-      Sub- and over-deadband moves are asserted (scalars, struct members, and
-      classes set in the manifest reaching the node); a zero deadband
-      publishing a small numeric change is not.
   - id: SPB-011
     claim: >-
       `min-interval` means never publishing more often than that, even on
@@ -141,11 +122,18 @@ claims:
       tag of the `memory` loopback publish at node level.
     source: "#devices-and-connection-health"
     tests:
-      - go ./sparkplug TestRebirthCommandMidTickStopsTheNextRecord
+      - go ./sparkplug TestMetricsSplitBetweenDevicesAndTheNode
+      - go ./internal/project TestSparkplugDevicePerConnection
+      - go ./internal/project TestSparkplugMemoryMakesNoDevice
     partial: true
     note: >-
-      Only a device's DDATA appearing in a tick is exercised incidentally;
-      no test asserts the device/node split of metrics.
+      One device per connection carrying its inputs and `__Online`, the
+      memory loopback making none, and tags outside a device's list riding
+      the NBIRTH are asserted. That outputs publish at node level is not, and
+      the code disagrees for modbus: a writable binding that is also polled
+      (not `writeonly`) is listed in its source's Connections() inputs, so
+      that output rides the device. TestMetricsSplitBetweenDevicesAndTheNode
+      only shows the node honouring the device lists it is handed.
   - id: SPB-016
     claim: >-
       A device's DBIRTH/DDEATH follow its connection's health: when one
@@ -153,12 +141,8 @@ claims:
       while every other device stays born.
     source: "#devices-and-connection-health"
     tests:
+      - go ./sparkplug TestOneDeviceDyingLeavesTheOthersBorn
       - go ./sparkplug TestDeviceBirthWaitsForFirstRead
-    partial: true
-    note: >-
-      A device whose connection drops gets a DDEATH
-      (TestDeviceBirthWaitsForFirstRead, one device). Every other device
-      staying born is not asserted.
   - id: SPB-017
     claim: >-
       With `primary-host` set, the node defers its birth until the host's
@@ -168,10 +152,15 @@ claims:
     source: "#primary-host-and-store-and-forward"
     tests:
       - go ./sparkplug TestParseState
+      - go ./sparkplug TestPrimaryHostDefersTheBirthUntilOnline
+      - go ./sparkplug TestNoPrimaryHostBirthsOnConnect
     partial: true
     note: >-
-      Only the STATE payload parser is tested; deferring birth and the
-      NDEATH on host offline are not.
+      Both STATE encodings are parsed and the birth is deferred until the host
+      is ONLINE (2.x and 3.0). The page also says the node dies (NDEATH) when
+      the host goes offline; the code does not: handleState on an offline
+      STATE only logs and buffers (store-forward), it never publishes NDEATH.
+      Page and code disagree, so this stays partial.
   - id: SPB-018
     claim: >-
       With `store-forward: N`, data messages are buffered while the broker
@@ -180,12 +169,9 @@ claims:
     source: "#primary-host-and-store-and-forward"
     tests:
       - go ./sparkplug TestStoreForwardBuffersAcrossABrokerOutage
+      - go ./sparkplug TestStoreForwardBuffersWhileThePrimaryHostIsOffline
       - go ./sparkplug TestNoPublishWhileTheConnectionIsNotOpen
       - go ./sparkplug TestTimedOutTickIsBufferedWhenStoreForwardIsOn
-    partial: true
-    note: >-
-      Buffering while the primary host is offline (as opposed to the broker)
-      is not tested.
   - id: SPB-019
     claim: >-
       The store-and-forward buffer is a bounded ring that drops the oldest
@@ -193,21 +179,14 @@ claims:
     source: "#primary-host-and-store-and-forward"
     tests:
       - go ./sparkplug TestStoreForwardRingAndDrain
-    partial: true
-    note: >-
-      Ring drop-oldest and batched drain are asserted; the rate-limit
-      interval on reconnect is not.
+      - go ./sparkplug TestStoreForwardRingDropsOldestAndDrainsInBatches
   - id: SPB-022
     claim: >-
       `bdseq-file` persists the birth-death sequence number across
       restarts; without it bdSeq restarts at 0 each run.
     source: "#primary-host-and-store-and-forward"
     tests:
-      - go ./sparkplug TestTCKConformance
-    partial: true
-    note: >-
-      The TCK checks bdSeq in a single session; persistence across a
-      restart through the file is not tested.
+      - go ./sparkplug TestBdSeqFilePersistsAcrossRestarts
   - id: SPB-023
     claim: >-
       The node passes the Sparkplug TCK edge-node profile, run against a
@@ -223,9 +202,15 @@ claims:
       MQTT and protobuf live only in the sparkplug package; the runtime
       core stays stdlib-only.
     source: "#conformance"
-    tests: []
+    tests:
+      - go ./sparkplug TestMQTTAndProtobufLiveOnlyInTheSparkplugPackage
+      - go ./sparkplug TestRuntimeCoreDoesNotDependOnMQTTOrProtobuf
+    partial: true
     note: >-
-      An architectural constraint with no test.
+      MQTT and protobuf imports exist only under sparkplug/, and the runtime
+      core packages have no path to them (both asserted). "Stdlib-only" is not
+      literally true: the runtime imports gopkg.in/yaml.v3, so the page
+      overstates this.
   - id: SPB-025
     claim: >-
       `driver: {type: sparkplug-host}` presents an edge-node group as input

@@ -1,0 +1,24 @@
+PROGRAM TonrFbd
+(* TONR in FBD: the block, its outputs wired to the fbd_ tags. *)
+VAR_EXTERNAL
+    IN      : BOOL;
+    PT      : TIME;
+    Reset   : BOOL;
+    fbd_Q   : BOOL;
+    fbd_ET  : TIME;
+    fbd_P   : BOOL;
+    fbd_PET : TIME;
+END_VAR
+VAR
+    t : TONR;
+    p : TONR;
+END_VAR
+FBD
+  t : TONR(IN := IN, PT := PT, Reset := Reset)
+  fbd_Q  := t.Q
+  fbd_ET := t.ET
+  p : TONR(IN := TRUE, PT := T#1S, Reset := p.Q)
+  fbd_P   := p.Q
+  fbd_PET := p.ET
+END_FBD
+END_PROGRAM

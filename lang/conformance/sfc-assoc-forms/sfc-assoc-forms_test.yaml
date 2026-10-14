@@ -1,0 +1,34 @@
+# Association spellings and duration kinds. A activates on scan 1 (1ms
+# scans), so "100ms after activation" is scan 101. Every step asserts the
+# twins together: the two spellings must agree, and a TIME variable holding
+# 100ms must agree with T#100ms.
+tests:
+  - name: both spellings, literal and variable durations, agree at every edge
+    steps:
+      - scans: 5 # Idle: nothing active
+        expect: { sfc_N1: false, sfc_N2: false, sfc_L1: false, sfc_L2: false, sfc_L3: false, sfc_L4: false, sfc_D1: false, sfc_D2: false }
+      - given: { Go: true }
+        scans: 1 # A's activation scan
+        expect: { sfc_N1: true, sfc_N2: true, sfc_L1: true, sfc_L2: true, sfc_L3: true, sfc_L4: true, sfc_D1: false, sfc_D2: false }
+      - given: { Go: false }
+        advance: 99ms # 99ms into A
+        expect: { sfc_N1: true, sfc_N2: true, sfc_L1: true, sfc_L2: true, sfc_L3: true, sfc_L4: true, sfc_D1: false, sfc_D2: false }
+      - advance: 1ms # 100ms: L drops and D rises, in every spelling
+        expect: { sfc_N1: true, sfc_N2: true, sfc_L1: false, sfc_L2: false, sfc_L3: false, sfc_L4: false, sfc_D1: true, sfc_D2: true }
+      - given: { Next: true }
+        scans: 1 # A -> Idle
+        expect: { sfc_N1: false, sfc_N2: false, sfc_L1: false, sfc_L2: false, sfc_L3: false, sfc_L4: false, sfc_D1: false, sfc_D2: false }
+
+  - name: a TIME-variable duration is read from the variable, not fixed
+    given: { Dur: 40 }
+    steps:
+      - given: { Go: true }
+        scans: 1
+        expect: { sfc_L1: true, sfc_L2: true, sfc_L3: true, sfc_L4: true, sfc_D1: false, sfc_D2: false }
+      - given: { Go: false }
+        advance: 39ms
+        expect: { sfc_L1: true, sfc_L2: true, sfc_L3: true, sfc_L4: true, sfc_D1: false, sfc_D2: false }
+      - advance: 1ms # 40ms: the Dur twins act, the literal ones do not
+        expect: { sfc_L1: true, sfc_L2: true, sfc_L3: false, sfc_L4: false, sfc_D1: false, sfc_D2: true }
+      - advance: 60ms # 100ms: now the literal ones
+        expect: { sfc_L1: false, sfc_L2: false, sfc_L3: false, sfc_L4: false, sfc_D1: true, sfc_D2: true }

@@ -22,6 +22,7 @@ type fakeLogixd struct {
 	t     *testing.T
 	files map[string][]byte
 	seen  []string // method+path, in order
+	auth  []string // each request's Authorization header, in order
 	// importRungs records the body of the rung import, which is where the
 	// online-edit option lives.
 	importRungs map[string]any
@@ -32,12 +33,20 @@ type fakeLogixd struct {
 	// detailedL5x choice travels.
 	convert     map[string]any
 	probeUsable bool
+	// controllerL5X, when set, is the export a convert produces: what the
+	// controller "holds" for drift.
+	controllerL5X string
+	// mode is the controller's mode; a mode change sets it.
+	mode string
+	// linxXML is the FT Linx configuration /v1/linx-config returns.
+	linxXML string
 }
 
 func newFakeLogixd(t *testing.T) (*fakeLogixd, string, func()) {
 	f := &fakeLogixd{t: t, files: map[string][]byte{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.seen = append(f.seen, r.Method+" "+r.URL.Path)
+		f.auth = append(f.auth, r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
 		ok := func(data any) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "data": data, "events": []any{}})
@@ -85,6 +94,8 @@ func newFakeLogixd(t *testing.T) (*fakeLogixd, string, func()) {
 					map[string]any{"name": "sdk-service", "ok": true, "detail": "running"},
 					map[string]any{"name": "live-create-project", "ok": f.probeUsable, "detail": "no activation",
 						"remedy": "Check the FactoryTalk Local Directory before suspecting a licence."},
+					// A gate after the failing one, so "underneath" is not just "last".
+					map[string]any{"name": "interactive-session", "ok": true, "detail": "a user is logged on"},
 				},
 				"hint": "check FTACmdUtility listAvailable",
 			})
@@ -94,6 +105,9 @@ func newFakeLogixd(t *testing.T) (*fakeLogixd, string, func()) {
 			f.convert = body
 			out, _ := body["output"].(string)
 			f.files[out] = []byte("<?xml version=\"1.0\"?><RSLogix5000Content/>")
+			if f.controllerL5X != "" {
+				f.files[out] = []byte(f.controllerL5X)
+			}
 			ok(map[string]any{"input": body["input"], "output": out, "bytes": len(f.files[out])})
 		case strings.HasSuffix(r.URL.Path, "/import-rungs"):
 			_ = json.NewDecoder(r.Body).Decode(&f.importRungs)
@@ -107,7 +121,18 @@ func newFakeLogixd(t *testing.T) (*fakeLogixd, string, func()) {
 		case strings.HasSuffix(r.URL.Path, "/online"), strings.HasSuffix(r.URL.Path, "/offline"):
 			ok(map[string]any{"connected": "Online"})
 		case strings.HasSuffix(r.URL.Path, "/mode"):
-			ok(map[string]any{"mode": "Run"})
+			if f.mode == "" {
+				f.mode = "Run"
+			}
+			if r.Method == http.MethodPost {
+				var body struct{ Mode string }
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				f.mode = body.Mode
+			}
+			ok(map[string]any{"mode": f.mode})
+		case r.URL.Path == "/v1/linx-config":
+			ok(map[string]any{"dir": `C:\ProgramData\Rockwell\RSLinx Enterprise`,
+				"files": []any{map[string]any{"name": "RSLinxNG.xml", "xml": f.linxXML}}})
 		case strings.HasSuffix(r.URL.Path, "/download"):
 			ok(map[string]any{"downloaded": "p", "elapsedMs": 9})
 		case strings.HasSuffix(r.URL.Path, "/build"):
@@ -351,6 +376,20 @@ func TestLogixProbePrintsTheRemedyForAFailingGate(t *testing.T) {
 	}
 	if !strings.Contains(out, "FactoryTalk Local Directory") {
 		t.Errorf("the remedy should print under the gate that failed:\n%s", out)
+	}
+	// Underneath it: the line after the failing gate is the remedy,
+	// indented under it.
+	lines := strings.Split(out, "\n")
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "FAIL") {
+			continue
+		}
+		if !strings.Contains(l, "live-create-project") {
+			t.Errorf("unexpected failing gate %q", l)
+		}
+		if i+1 >= len(lines) || !strings.HasPrefix(lines[i+1], "        Check the FactoryTalk") {
+			t.Errorf("the line under the failing gate is not its remedy:\n%s", out)
+		}
 	}
 	// A gate that PASSED must not carry advice — noise on a healthy probe
 	// trains people to ignore the output.

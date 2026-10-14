@@ -1,0 +1,26 @@
+PROGRAM ScopeSfc
+(* No VAR_EXTERNAL: a transition condition, an association target and an
+   action body all name manifest tags directly. *)
+SFC
+
+  INITIAL_STEP Idle:
+    N Work;
+  END_STEP
+
+  STEP Running:
+    N Work;
+    N sfc_On;
+  END_STEP
+
+  TRANSITION t_on  FROM Idle    TO Running := Run;
+  END_TRANSITION
+  TRANSITION t_off FROM Running TO Idle    := NOT Run;
+  END_TRANSITION
+
+  ACTION Work:
+    sfc_Out := Gain * 2.0;
+    sfc_N   := Cnt + 1;
+  END_ACTION
+
+END_SFC
+END_PROGRAM

@@ -1,0 +1,25 @@
+# Top-to-bottom evaluation. X is written above its reader Y, so Y follows
+# A on the same scan; W is written below its reader V, so V follows A one
+# scan late (it sees the previous scan's W). Every step asserts st_, ld_
+# and fbd_ together.
+tests:
+  - name: a value written above is read below in the same scan; one written below is read above on the next
+    steps:
+      - scans: 1
+        expect:
+          { st_X: false, ld_X: false, fbd_X: false, st_Y: false, ld_Y: false, fbd_Y: false,
+            st_V: false, ld_V: false, fbd_V: false, st_W: false, ld_W: false, fbd_W: false }
+      - given: { A: true }
+        scans: 1 # the scan A rises: Y already follows, V does not yet
+        expect:
+          { st_X: true, ld_X: true, fbd_X: true, st_Y: true, ld_Y: true, fbd_Y: true,
+            st_W: true, ld_W: true, fbd_W: true, st_V: false, ld_V: false, fbd_V: false }
+      - scans: 1 # the next scan: V sees last scan's W
+        expect: { st_V: true, ld_V: true, fbd_V: true, st_Y: true, ld_Y: true, fbd_Y: true }
+      - given: { A: false }
+        scans: 1 # the scan A drops: Y follows at once, V lags one scan
+        expect:
+          { st_X: false, ld_X: false, fbd_X: false, st_Y: false, ld_Y: false, fbd_Y: false,
+            st_W: false, ld_W: false, fbd_W: false, st_V: true, ld_V: true, fbd_V: true }
+      - scans: 1
+        expect: { st_V: false, ld_V: false, fbd_V: false }

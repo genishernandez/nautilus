@@ -1,0 +1,32 @@
+PROGRAM InstSfc
+(* Two CTU instances called from an SFC action, outputs read as inst.Pin. *)
+VAR_EXTERNAL
+    CU1     : BOOL;
+    CU2     : BOOL;
+    PV      : INT;
+    sfc_Q1  : BOOL;
+    sfc_CV1 : INT;
+    sfc_Q2  : BOOL;
+    sfc_CV2 : INT;
+END_VAR
+VAR
+    c1 : CTU;
+    c2 : CTU;
+END_VAR
+SFC
+
+  INITIAL_STEP Counting:
+    N Count;
+  END_STEP
+
+  ACTION Count:
+    c1(CU := CU1, PV := PV);
+    c2(CU := CU2, PV := PV);
+    sfc_Q1  := c1.Q;
+    sfc_CV1 := c1.CV;
+    sfc_Q2  := c2.Q;
+    sfc_CV2 := c2.CV;
+  END_ACTION
+
+END_SFC
+END_PROGRAM

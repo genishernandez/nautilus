@@ -1,0 +1,63 @@
+# Selection and numeric standard functions (docs/functions.md "Standard
+# functions"), in ST and as FBD blocks; every step asserts both. The
+# formal calls use the standard input names: G/IN0/IN1 for SEL, K/IN0.. for
+# MUX, IN1..INn for MIN, IN for ABS (LIMIT's MN/IN/MX is in fbd-en-eno).
+tests:
+  - name: SEL gives IN0 when G is FALSE and IN1 when G is TRUE, positional or formal
+    given: { X: 11, Y: 22 }
+    steps:
+      - given: { G: false }
+        scans: 1
+        expect: { st_SELP: 11, fbd_SELP: 11, st_SELF: 11, fbd_SELF: 11 }
+      - given: { G: true }
+        scans: 1
+        expect: { st_SELP: 22, fbd_SELP: 22, st_SELF: 22, fbd_SELF: 22 }
+      - given: { G: false, X: -4 }
+        scans: 1
+        expect: { st_SELP: -4, fbd_SELP: -4, st_SELF: -4, fbd_SELF: -4 }
+
+  - name: a formal MUX picks by K over IN0..IN2
+    given: { X: 10, Y: 20, Z: 30 }
+    steps:
+      - given: { K: 0 }
+        scans: 1
+        expect: { st_MUXF: 10, fbd_MUXF: 10 }
+      - given: { K: 2 }
+        scans: 1
+        expect: { st_MUXF: 30, fbd_MUXF: 30 }
+      - given: { K: 1 }
+        scans: 1
+        expect: { st_MUXF: 20, fbd_MUXF: 20 }
+
+  - name: MIN and MAX of three or four inputs find the extreme wherever it sits
+    steps:
+      - given: { X: -7, Y: 3, Z: 5, D: 0 }
+        scans: 1
+        expect: { st_MIN3: -7, fbd_MIN3: -7, st_MINF: -7, fbd_MINF: -7, st_MAX3: 5, fbd_MAX3: 5, st_MAX4: 5, fbd_MAX4: 5 }
+      - given: { X: 3, Y: -7, Z: 1, D: 0 }
+        scans: 1
+        expect: { st_MIN3: -7, fbd_MIN3: -7, st_MINF: -7, fbd_MINF: -7, st_MAX3: 3, fbd_MAX3: 3, st_MAX4: 3, fbd_MAX4: 3 }
+      - given: { X: 4, Y: 9, Z: -8, D: 0 }
+        scans: 1
+        expect: { st_MIN3: -8, fbd_MIN3: -8, st_MINF: -8, fbd_MINF: -8, st_MAX3: 9, fbd_MAX3: 9, st_MAX4: 9, fbd_MAX4: 9 }
+      - given: { X: 1, Y: 2, Z: 6, D: 70000 }
+        scans: 1
+        expect: { st_MIN3: 1, fbd_MIN3: 1, st_MINF: 1, fbd_MINF: 1, st_MAX3: 6, fbd_MAX3: 6, st_MAX4: 70000, fbd_MAX4: 70000 }
+
+  - name: ABS is the absolute value of an INT, a DINT and a REAL, each in its own type
+    steps:
+      - given: { X: -5, D: -70000, R: -2.5 }
+        scans: 1
+        expect: { st_ABSI: 5, fbd_ABSI: 5, st_ABSD: 70000, fbd_ABSD: 70000, st_ABSR: 2.5, fbd_ABSR: 2.5, st_ABSF: 2.5, fbd_ABSF: 2.5 }
+      - given: { X: 5, D: 70000, R: 0.75 }
+        scans: 1
+        expect: { st_ABSI: 5, fbd_ABSI: 5, st_ABSD: 70000, fbd_ABSD: 70000, st_ABSR: 0.75, fbd_ABSR: 0.75, st_ABSF: 0.75, fbd_ABSF: 0.75 }
+
+  - name: TRUNC goes toward zero into a 64-bit integer - a value beyond 32 bits survives
+    steps:
+      - given: { BIG: 5000000000.7 }
+        scans: 1
+        expect: { st_TRUNC: 5000000000, fbd_TRUNC: 5000000000 }
+      - given: { BIG: -5000000000.7 }
+        scans: 1
+        expect: { st_TRUNC: -5000000000, fbd_TRUNC: -5000000000 }

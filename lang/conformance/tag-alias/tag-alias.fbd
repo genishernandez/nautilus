@@ -1,0 +1,11 @@
+PROGRAM AliasFbd
+(* The same seal-in as an FBD network, on aliased tags. *)
+VAR_EXTERNAL
+    StartPB : BOOL;
+    StopPB  : BOOL;
+    fbd_Run : BOOL;
+END_VAR
+FBD
+  fbd_Run := AND(OR(StartPB, fbd_Run), NOT(StopPB))
+END_FBD
+END_PROGRAM

@@ -1,0 +1,43 @@
+# tag-implicit-scope — every tag the manifest declares is in scope in every
+# PROGRAM, in every language, without a declaration
+# (docs/functions.md#project-tags-are-in-scope). No program here has a
+# VAR_EXTERNAL block: each reads the shared tags and writes its own outputs
+# by name alone.
+#
+#   go test ./lang/conformance/ -run 'TestConformance/tag-implicit-scope'
+name: tag-implicit-scope
+
+tasks:
+  - program: tag-implicit-scope.st
+    scan: 10ms
+  - name: ld
+    program: tag-implicit-scope.ld
+    scan: 10ms
+  - name: fbd
+    program: tag-implicit-scope.fbd
+    scan: 10ms
+  - name: sfc
+    program: tag-implicit-scope.sfc
+    scan: 10ms
+
+tags:
+  # Shared inputs, typed by type: and by init: (a REAL from a number).
+  - { name: Run,  role: state, type: BOOL, init: false }
+  - { name: Gain, role: state, init: 2.5 }
+  - { name: Cnt,  role: state, type: DINT, init: 0 }
+
+  - { name: st_On,   role: state, type: BOOL, init: false }
+  - { name: st_Out,  role: state, init: 0.0 }
+  - { name: st_N,    role: state, type: DINT, init: 0 }
+  - { name: ld_On,   role: state, type: BOOL, init: false }
+  - { name: ld_Out,  role: state, init: 0.0 }
+  - { name: ld_N,    role: state, type: DINT, init: 0 }
+  - { name: fbd_On,  role: state, type: BOOL, init: false }
+  - { name: fbd_Out, role: state, init: 0.0 }
+  - { name: fbd_N,   role: state, type: DINT, init: 0 }
+  - { name: sfc_On,  role: state, type: BOOL, init: false }
+  - { name: sfc_Out, role: state, init: 0.0 }
+  - { name: sfc_N,   role: state, type: DINT, init: 0 }
+
+driver:
+  type: memory
