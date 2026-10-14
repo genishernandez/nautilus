@@ -24,6 +24,9 @@ type scope struct {
 	// promoted renames program tags to <Program>_<Tag> controller tags,
 	// for a program with more than one routine.
 	promoted string
+	// im types a controller alias tag through its target (alias.go); nil
+	// in an Add-On Instruction, which has no alias tags.
+	im *importer
 }
 
 // found is one resolved operand base.
@@ -34,6 +37,9 @@ type found struct {
 	name  string
 	dtype string
 	dims  string
+	// alias is why an alias tag cannot be carried (alias.go): an operand
+	// naming it is refused with this, by name, never as an untyped tag.
+	alias *refusal
 }
 
 func (s *scope) lookup(base string) *found {
@@ -47,10 +53,18 @@ func (s *scope) lookup(base string) *found {
 			f.name = l5x.Ident(s.promoted) + "_" + f.name
 			f.ext = true
 		}
+		if t.AliasFor != "" {
+			f.alias = refuse("alias", "%s is a program-scoped alias tag (of %s); nautilus binds an alias on a controller tag", t.Name, t.AliasFor)
+		}
 		return f
 	}
 	if t, ok := s.ctrl[k]; ok {
-		return &found{tag: t, ext: true, name: l5x.Ident(t.Name), dtype: t.DataType, dims: t.Dimensions}
+		f := &found{tag: t, ext: true, name: l5x.Ident(t.Name), dtype: t.DataType, dims: t.Dimensions}
+		if t.AliasFor != "" && s.im != nil {
+			// An alias tag has no DataType in an export: its target's.
+			f.dtype, f.dims, f.alias = s.im.aliasType(t)
+		}
+		return f
 	}
 	return nil
 }
@@ -241,7 +255,7 @@ func (im *importer) importProgram(prog *l5x.Program) []string {
 	}
 	var files []string
 	for _, r := range logic {
-		sc := &scope{owner: prog.Name + "/" + r.Name, local: local, ctrl: im.ctrl, blockOwner: owners}
+		sc := &scope{owner: prog.Name + "/" + r.Name, local: local, ctrl: im.ctrl, blockOwner: owners, im: im}
 		name := l5x.Ident(prog.Name)
 		if multi {
 			sc.promoted = prog.Name

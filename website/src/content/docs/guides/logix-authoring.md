@@ -225,7 +225,12 @@ writes a nautilus project from a full L5X export: the manifest (with
 export uses its idioms), the tags with their descriptions, UDTs as IEC
 types, every ladder routine as a PROGRAM, and every Add-On Instruction as a
 FUNCTION_BLOCK in `lib/`. Alias tags, and rack points the logic names
-directly, become tags with `alias:`. A rung with no nautilus form is kept
+directly, become tags with `alias:`. A rung that names an alias tag comes
+in like any other: the tag takes its target's type, whether the target is
+a tag, a member of a UDT or Add-On Instruction instance, an array element,
+a bit (`Status.5`) or a rack point's bit (`Local:1:I.Data.3`). An alias the
+export cannot type, such as one of a whole rack word with no module
+definition, is refused by name. A rung with no nautilus form is kept
 as a comment and reported, never guessed at. `--comm-path` and `--host`
 fill in how to reach the controller.
 

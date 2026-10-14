@@ -1842,21 +1842,27 @@ claims:
     claim: >-
       A manifest tag's alias: is emitted by the Logix writer as an alias tag,
       and the L5X importer turns an export's alias tags, and rack points the
-      logic named directly, into tags with alias:.
+      logic named directly, into tags with alias:, and a rung that names an
+      alias tag imports with the tag typed through its target.
     source: "#dialects"
     tests:
       - go ./logix/writer TestAliasTags
       - go ./logix/importer TestDialectAndAliasImport
       - go ./logix/importer TestAliasTagImportsWithAlias
-    partial: true
+      - go ./logix/importer TestAliasTagsInRungsImportAndRoundTrip
+      - go ./logix/importer TestAliasTagsTheExportCannotTypeAreRefusedByName
     note: >-
       The writer's alias tags, the importer turning an export's alias tag
       (TagType="Alias" AliasFor=...) into a tag with alias:, and rack points
-      named directly in the logic, are asserted. Bug found: the import refuses
-      every rung that names an imported alias tag ("type: StartPB: type has no
-      nautilus declaration") because an L5X alias tag carries no DataType, so
-      an export using alias tags does not come back as a program that names
-      them.
+      named directly in the logic, are asserted. Rungs naming alias tags of
+      every target kind (a base tag, a UDT member, a UDT BIT member, an Add-On
+      Instruction parameter, a bit of a DINT, an array element, a rack
+      point's bit) import with each tag declared as its target's type, keep
+      alias: in the tag file, and write back to the export's rung text with
+      each tag an alias tag of the same target (#330). An alias the export
+      cannot type is refused by name, each case asserted: a whole rack word
+      with no module definition, a target not in the export, a whole TIMER,
+      a member the target's type lacks, and a program-scoped alias tag.
 
   - id: FN-142
     claim: >-

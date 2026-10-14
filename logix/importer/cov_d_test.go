@@ -37,8 +37,18 @@ func TestAliasTagImportsWithAlias(t *testing.T) {
 	if runLine == "" || strings.Contains(runLine, "alias:") {
 		t.Errorf("Run is a base tag and must import without alias:, got %q", runLine)
 	}
-	// Not asserted here: the rung naming StartPB. An alias tag carries no
-	// DataType in L5X (the writer emits it that way too), and the import
-	// refuses the rung ("type: StartPB: type  has no nautilus declaration")
-	// — see the FN-141 note in docs/claims/functions.yaml.
+	// The rung naming StartPB is carried: an alias tag has no DataType in
+	// L5X, so it is typed through its target, here a rack point's bit
+	// (#330; every kind of target is in alias_test.go).
+	for _, n := range p.Notes {
+		if n.Rung >= 0 {
+			t.Errorf("rung not carried: %s", n)
+		}
+	}
+	src := strings.Join(strings.Fields(string(p.Files["Main.ld"])), " ")
+	for _, want := range []string{"StartPB : BOOL;", "StartPB ( Run )"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing %q in\n%s", want, p.Files["Main.ld"])
+		}
+	}
 }
