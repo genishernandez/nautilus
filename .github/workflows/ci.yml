@@ -466,10 +466,16 @@ jobs:
       issues: write # the rolling "claims out of date" issue
     steps:
       - uses: actions/checkout@v4
+        with: {fetch-depth: 2} # HEAD^1 is the base, for the drift check
       - uses: actions/setup-go@v5
         with: {go-version: '1.24'}
       - uses: actions/download-artifact@v4
         with: {pattern: evidence-*, path: evidence}
+      # A docs page that changed while its claims file didn't: a warning on
+      # the PR, never a failure (docs/claims/README.md).
+      - name: Docs changed, claims didn't
+        if: github.event_name == 'pull_request'
+        run: git diff --name-only HEAD^1 HEAD | go run ./tools/evidence drift -github -summary "$GITHUB_STEP_SUMMARY"
       - name: main's last evidence (a PR is compared with it)
         if: github.event_name == 'pull_request'
         env:

@@ -16,6 +16,12 @@ update) the rolling **claims out of date** issue, and a clean run closes it.
 By hand: `go run ./tools/evidence check`, or
 `NAUTILUS_CLAIMS_CHECK=1 go test ./tools/evidence`.
 
+**When you change a docs page, update its claims file.** Nothing checks
+that a claim still says what its page says, so a PR that edits a page
+without touching `docs/claims/<page>.yaml` gets a warning (annotation and
+job summary): reread the page's claims and fix any the edit moved. By hand:
+`git diff --name-only main | go run ./tools/evidence drift`.
+
 ## Layout
 
 One file per documentation page, named after it:
