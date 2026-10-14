@@ -68,8 +68,10 @@
 //
 // A rung's trailing output zone is coils only: a function block that is
 // itself the rung's last element (no trailing coil) is fine — that's how
-// a rung whose sole output is a TON/CTU reads its own .Q/.DN elsewhere —
-// but a coil ahead of a later function block in the same rung is not
+// a rung whose sole output is a TON/CTU reads its own .Q/.DN elsewhere.
+// A block may also sit mid-rung, power continuing from its output pin to
+// the contacts and coils after it; without a coil, though, elements after
+// the last block would drive nothing and are refused. A coil ahead of a later function block in the same rung is not
 // supported (`coils must sit at the rung's right end`): unlike a
 // graphical diagram's 2-D wiring, this text format has no way to tell
 // "coil taps the rail, power continues" apart from "coil ends the rung,
@@ -416,6 +418,13 @@ func (r *rungParse) compile(res *resolver) (stmts []string, power string, err er
 	// assignment anywhere) is illegal.
 	if len(coils) == 0 && !hasFB(elems) {
 		return nil, "", fmt.Errorf("ld: rung %s (line %d): a rung needs at least one coil, function block or assignment", r.name, r.line)
+	}
+	// Without a coil, the rung's output is its last block (or assignment):
+	// anything after it would be evaluated into a condition nothing reads,
+	// so refuse it rather than drop it silently. With a coil, a block can
+	// sit anywhere and power continues from its output pin.
+	if len(coils) == 0 && !hasFB(elems[len(elems)-1:]) {
+		return nil, "", fmt.Errorf("ld: rung %s (line %d): the elements after the rung's last function block or assignment drive nothing — end the rung with a coil, or end it at the block", r.name, r.line)
 	}
 
 	ec := &edgeCtx{rung: r.name, seen: map[string]int{}}

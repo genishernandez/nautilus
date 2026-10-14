@@ -406,21 +406,14 @@ claims:
   - id: SFC-037
     claim: >-
       The chart transpiles to ST and compiles like any program; the line map
-      puts a type error in a condition on its TRANSITION line and one in a
-      body on its ACTION line.
+      puts a type error in a condition on its TRANSITION line and one in an
+      action body on the offending statement's own line inside the ACTION
+      block.
     source: "#structural-checks"
     tests:
       - go ./lang/sfc TestTranspileShape
       - go ./cmd/naut TestCheckSFCTypeErrorLines/condition
-    partial: true
-    note: >-
-      The transpile-and-compile half and the condition half are asserted: a type
-      error in a condition is reported on its TRANSITION line through naut check.
-      A type error in an action body is reported on the offending statement's
-      own line inside the ACTION block (line 20 in the test chart), not on the
-      ACTION header line the page says (TestCheckSFCTypeErrorLines/action_body
-      pins that, so it is not listed); left partial until the page or the
-      mapping is reconciled.
+      - go ./cmd/naut TestCheckSFCTypeErrorLines/action body
 
   - id: SFC-038
     claim: >-
@@ -490,14 +483,9 @@ claims:
     source: "#not-supported"
     tests:
       - go ./lang/sfc TestIECAssociationForm
+      - go ./lang/sfc TestParseErrors/indicator on a transition
+      - go ./cmd/naut TestCheckSFCNotSupported/indicator in an association
       - go ./cmd/naut TestCheckSFCNotSupported/indicator on a transition
-    partial: true
-    note: >-
-      The association case names the forms it does take (TestIECAssociationForm).
-      An indicator on a transition is refused by naut check (exit 1), but with a
-      generic parse error ("expected ':='") that does not name the forms a
-      transition does take; and a two-entry Lamp(N, Y) is reported as a time
-      argument, not as an indicator.
 
   - id: SFC-045
     claim: >-

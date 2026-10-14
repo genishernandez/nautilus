@@ -119,3 +119,22 @@ tests:
       - given: { B: false }
         scans: 1
         expect: { st_Br: false, ld_Br: false }
+
+  - name: block mid-rung, its Q carries power to the contact and coil after it
+    steps:
+      - given: { A: true, B: true }
+        scans: 1
+        expect: { st_Mid: false, ld_Mid: false }
+      - advance: 2ms
+        expect: { st_Mid: false, ld_Mid: false }
+      - advance: 1ms
+        expect: { st_Mid: true, ld_Mid: true }
+      - given: { B: false } # the contact after the block gates the coil
+        scans: 1
+        expect: { st_Mid: false, ld_Mid: false }
+      - given: { B: true }
+        scans: 1
+        expect: { st_Mid: true, ld_Mid: true }
+      - given: { A: false } # power off the block's input resets it
+        scans: 1
+        expect: { st_Mid: false, ld_Mid: false }

@@ -148,6 +148,8 @@ END_PROGRAM
 
 	for _, c := range []struct{ assoc, want string }{
 		{"A(N, T#1S, Ind);", "indicator variables"},
+		{"A(N, Ind);", "A(N, Ind): indicator variables are not supported"},
+		{"A(S, Ind1, Ind2);", "indicator variables"},
 		{"A(T#3S);", "expected a qualifier first"},
 		{"A(D, );", "expected a duration"},
 		{"N A(T#1S, T#2S);", "one duration"},

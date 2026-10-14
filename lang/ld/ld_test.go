@@ -110,6 +110,8 @@ func TestRungErrors(t *testing.T) {
 		{"one-leg branch", "[ Start ] ( Run )", "two legs"},
 		{"unclosed branch", "[ Start | Run ( Run )", "']'"},
 		{"power pin passed", "Cold t1:TON(IN := Start) ( Alm )", "power drives IN"},
+		{"contact after the last block, no coil", "Start t1:TON(PT := T#5S) Stop", "drive nothing"},
+		{"branch after the last block, no coil", "Start t1:TON(PT := T#5S) [ Stop | Run ]", "drive nothing"},
 		{"elements before rung", "", "before any RUNG"},
 	}
 	for _, tc := range cases {
@@ -740,6 +742,23 @@ END_PROGRAM`
 
 	// A rung with neither a coil nor a function block anywhere is still an
 	// error — TestRungErrors' "no coil" case covers the exact message.
+
+	// A block may sit mid-rung: power continues from its output pin to the
+	// contacts and coils after it.
+	mid := `PROGRAM p
+VAR_EXTERNAL A : BOOL; B : BOOL; Lamp : BOOL; END_VAR
+LD
+  RUNG r
+    A t1:TON(PT := T#5S) B ( Lamp )
+END_LD
+END_PROGRAM`
+	out, err = Transpile(mid)
+	if err != nil {
+		t.Fatalf("a block mid-rung must compile: %v", err)
+	}
+	if !strings.Contains(out, "t1 : TON(IN := A, PT := T#5S)") || !strings.Contains(out, "Lamp := AND(t1.Q, B)") {
+		t.Errorf("mid-rung block wrong:\n%s", out)
+	}
 }
 
 // ── edge contacts (+Name rising, -Name falling; ( P x ) / ( N x ) coils) ────

@@ -99,9 +99,13 @@ Series elements AND together and branch legs OR, so
 `Run := AND(OR(Start, Run), NOT Stop)`. That is the seal-in: Start energizes
 Run, Run's own contact holds it in, Stop drops it out.
 
-Coils sit at the right end of a rung. A rung needs at least one coil or a
-function block as its last element: `A B t1:TON(PT := T#5S)` is a complete
-rung whose only output is `t1.Q`, read elsewhere. Several coils share one
+Coils sit at the right end of a rung. A rung needs at least one coil,
+function block or assignment. A block can sit anywhere in the rung: power
+continues from its output pin, so `A t1:TON(PT := T#5S) B ( Lamp )` sets
+`Lamp` to `t1.Q AND B`. Without a coil the rung ends at its last block, so
+`A B t1:TON(PT := T#5S)` is a complete rung whose only output is `t1.Q`, read
+elsewhere; anything after that block would drive nothing and is an error.
+Several coils share one
 condition, evaluated once and fanned out. (When a coil writes a tag the
 condition reads, as in `/Lamp ( Lamp ) ( Horn )`, the condition is held in a
 generated BOOL, `<rung>__power`, which shows among the program's locals.) A rung with only a coil is driven
