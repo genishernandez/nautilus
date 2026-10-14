@@ -1,6 +1,8 @@
 package sparkplug
 
 import (
+	"time"
+
 	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/runtime"
 	"github.com/joyautomation/nautilus/sparkplug/spb"
@@ -68,7 +70,7 @@ func (n *Node) birth() error {
 	}
 	var births []dbirth
 	for _, d := range n.devices {
-		healthy := deviceReady(d, func(name string) bool { _, ok := snap[name]; return ok })
+		healthy := n.deviceReadyLocked(d, func(name string) bool { _, ok := snap[name]; return ok }, time.Now())
 		n.devHealth[d.ID] = healthy
 		if !healthy {
 			continue
@@ -175,25 +177,57 @@ func (n *Node) metricFor(name string, v ir.Value) (Metric, error) {
 }
 
 // deviceReady reports whether a device may be born: its connection is
-// healthy AND has delivered — at least one of the tags it contributes is in
-// the store. A driver connects before its first read
-// completes, and a DBIRTH sent in between carries no metrics, only for the
-// tags arriving a moment later to rebirth the whole node. A driver hands the
-// runtime one read's values together, so the first tag present means the
-// first read has landed; one that never reads must not keep the device
-// unborn, and a tag arriving after the birth is a new metric, which rebirths
-// as any new metric does. A device with no tags is ready when healthy.
-func deviceReady(d Device, has func(string) bool) bool {
+// healthy AND has delivered — every tag it contributes is in the store. A
+// driver connects before its first read completes, and its snapshot fills
+// tag by tag; the store catches up a runtime scan later. A DBIRTH sent while
+// only some tags are in carries only those ("device birth device=RTU53
+// metrics=27" of 47, the slow struct tags read member by member missing).
+// One tag that never reads must not keep the device unborn, so once some
+// tags are in and the device has waited (see Node.deviceReadyLocked) it is
+// born with what it has; a tag arriving after the birth is a new metric,
+// which rebirths as any new metric does. A device with no tags is ready
+// when healthy.
+func deviceReady(d Device, has func(string) bool, waited bool) bool {
 	if d.Health != nil && !d.Health() {
 		return false
 	}
 	if len(d.Tags) == 0 {
 		return true
 	}
+	some, all := false, true
 	for _, name := range d.Tags {
 		if has(name) {
-			return true
+			some = true
+		} else {
+			all = false
 		}
+	}
+	return all || some && waited
+}
+
+// deviceBirthWait is how long a healthy device with only some of its tags in
+// the store waits for the rest before it is born without them.
+const deviceBirthWait = 5 * time.Second
+
+// deviceReadyLocked is deviceReady with the wait tracked per device: the
+// clock starts when the device is healthy with some tags in, and resets
+// whenever it is not.
+func (n *Node) deviceReadyLocked(d Device, has func(string) bool, now time.Time) bool {
+	wait := n.birthWait
+	if wait == 0 {
+		wait = deviceBirthWait
+	}
+	since, waiting := n.devPartialSince[d.ID]
+	if deviceReady(d, has, waiting && now.Sub(since) >= wait) {
+		delete(n.devPartialSince, d.ID)
+		return true
+	}
+	if deviceReady(d, has, true) { // healthy, some tags in: start or keep waiting
+		if !waiting {
+			n.devPartialSince[d.ID] = now
+		}
+	} else {
+		delete(n.devPartialSince, d.ID)
 	}
 	return false
 }
