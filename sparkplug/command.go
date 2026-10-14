@@ -56,6 +56,13 @@ func (n *Node) applyCommand(device string, payload Payload) {
 		if m.Name == "" || m.IsNull || m.Name == "Node Control/Rebirth" {
 			continue
 		}
+		if n.flatten {
+			// Flattened, a member is published as "P101/Speed" and a host
+			// writes it back under that name: the store's path for it is
+			// "P101.Speed" (see flatten.go). Translated first, so the device
+			// check and the write gate see the tag and member path.
+			m.Name = memberPath(m.Name)
+		}
 		if owner := n.tagOwner[rootTag(m.Name)]; owner != device {
 			n.refuseCommand("addressed to the wrong device", m.Name,
 				"addressedTo", deviceLabel(device), "publishedOn", deviceLabel(owner))

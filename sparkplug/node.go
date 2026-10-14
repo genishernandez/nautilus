@@ -60,6 +60,7 @@ type Node struct {
 	devices  []Device
 	tagOwner map[string]string // tag -> device id ("" = node level)
 	writable []string          // WithWritable patterns; empty = every write refused
+	flatten  bool              // WithFlattenUDTs: UDT members as plain metrics, no Templates
 
 	// publish classes
 	classRBE    map[string]RBE

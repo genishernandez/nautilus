@@ -28,6 +28,11 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   edge node is now read-only by default: every other write is refused and
   only `Node Control/Rebirth` is honoured. Needs a `naut` newer than 0.16.1.
 
+- **`sparkplug.flatten-udts` in `nautilus.yaml`** — completion and
+  validation for the new option that publishes each UDT member as a plain
+  Sparkplug metric (`P101/Running`) instead of a Template, for hosts that
+  do not read Templates. Needs a `naut` newer than 0.16.1.
+
 ### Changed
 
 - **Manifest schema: `sparkplug.device` is removed** and squiggles with
