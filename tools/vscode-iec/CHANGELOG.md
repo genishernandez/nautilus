@@ -51,6 +51,12 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   before `END_PROGRAM`. Comments and blank lines after it are still fine.
   Needs a `naut` newer than 0.16.2.
 
+- **No completions inside comments or strings.** Typing prose in a
+  `(* … *)` comment, a `//` comment or a `'string'` offered keywords, and a
+  space after "while" or "real" turned it into `WHILE` or `REAL`. The
+  completion list is now empty there; code right after a closed comment
+  completes as before. Needs a `naut` newer than 0.16.2.
+
 - **A rung's coils see one evaluation of its condition.** In a rung where
   a coil writes a tag the condition reads, such as `/Lamp ( Lamp ) ( Horn )`,
   later coils re-evaluated the condition after the earlier coil's write, so

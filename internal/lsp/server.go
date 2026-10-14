@@ -437,6 +437,60 @@ func symbolHover(an *analysis, sym *Symbol) string {
 	return b.String()
 }
 
+// inCommentOrString reports whether the byte offset off of text sits inside
+// a (* block *) comment (nested per IEC 61131-3 3rd edition), a // line
+// comment, or a 'string' / "string" literal. It scans with the same rules as
+// identOccurrences. A comment or string closed before off does not count; an
+// unclosed one runs to the cursor.
+func inCommentOrString(text string, off int) bool {
+	off = min(off, len(text))
+	for i := 0; i < off; {
+		c := text[i]
+		switch {
+		case c == '(' && i+1 < len(text) && text[i+1] == '*':
+			depth := 1
+			i += 2
+			for depth > 0 {
+				if i >= off {
+					return true
+				}
+				switch {
+				case text[i] == '(' && i+1 < len(text) && text[i+1] == '*':
+					depth++
+					i += 2
+				case text[i] == '*' && i+1 < len(text) && text[i+1] == ')':
+					depth--
+					i += 2
+				default:
+					i++
+				}
+			}
+		case c == '/' && i+1 < len(text) && text[i+1] == '/':
+			end := strings.IndexByte(text[i:], '\n')
+			if end < 0 || i+end >= off {
+				return true
+			}
+			i += end
+		case c == '\'' || c == '"':
+			quote := c
+			i++
+			for i < off && text[i] != quote && text[i] != '\n' {
+				if text[i] == '$' { // IEC escape: $' $" $$ $L $N …
+					i++
+				}
+				i++
+			}
+			if i >= off {
+				return true
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return false
+}
+
 func (s *Server) handleCompletion(m *message) {
 	doc, uri, _, _, pos, ok := s.positional(m)
 	if !ok {
@@ -444,6 +498,13 @@ func (s *Server) handleCompletion(m *message) {
 	}
 	if doc.test != nil {
 		s.completeTest(m, doc, pos)
+		return
+	}
+	// Prose is not code: inside a comment or a string literal there is
+	// nothing to complete, and an accepted keyword would rewrite the text
+	// (#87). An empty list, not null: the position is answered.
+	if inCommentOrString(doc.text, offsetAt(doc.text, pos)) {
+		s.w.respond(m.ID, []CompletionItem{})
 		return
 	}
 	// Inside VAR_EXTERNAL the question is "which of the project's tags do I
