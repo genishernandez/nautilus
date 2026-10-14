@@ -154,10 +154,12 @@ claims:
     tests:
       - go ./lang/ld TestEdgeContactSyntax
       - go ./lang/ld TestEdgeTrigNamesMatchTheCompiler
-    partial: true
+      - go ./lang/ld TestEdgeStateSurvivesUnrelatedEdit
     note: >-
-      Naming and independence are asserted; retained state surviving an
-      actual online edit is not tested at this level.
+      Naming and two instances for two contacts on one tag are asserted on
+      the transpiled output; TestEdgeStateSurvivesUnrelatedEdit inserts a
+      rung ahead and edits another, warm-swaps the frame (ir.MigrateFrame)
+      with the tag held TRUE, and the contact does not fire again.
 
   - id: FN-013
     claim: >-
