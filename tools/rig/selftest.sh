@@ -186,7 +186,11 @@ vt ld_add_coil-reset PASS ld_add_coil pump_run Horn reset
 vt ld_add_block-TON PASS ld_add_block pump_run TON t2 "PT := T#5S"
 vt ld_add_block-libraryFB PASS ld_add_block pump_run RateOfChange roc2
 vt ld_rename_block PASS ld_rename_block pump_run t2 t_run
-vt ld_declare PASS ld_declare LevelPct VAR_EXTERNAL
+# The declare offer only shows for a name nothing declares: a manifest tag is
+# in scope without a declaration (a7c41bc), so SpareFlag, which the manifest
+# lacks, is the undeclared one.
+vt ld_add_contact-undeclared PASS ld_add_contact pump_run SpareFlag
+vt ld_declare PASS ld_declare SpareFlag VAR_EXTERNAL
 vt ld_add_branch PASS ld_add_branch pump_run HornAck TempLowAlm
 # A rung that calls a block needs no coil: its "( _ )" deletes outright
 vt ld_add_rung-starter PASS ld_add_rung starter
