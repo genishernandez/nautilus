@@ -229,6 +229,12 @@ func TestDriverLeafModeFallback(t *testing.T) {
 	if vals["Speed"] != 42.5 {
 		t.Errorf("Speed = %v, want 42.5", vals["Speed"])
 	}
+	// The same values come out of a plain whole-struct read, so they prove
+	// nothing about the path taken: the driver must report that the refused
+	// roots dropped both struct bindings (TRS, TRSCmd) to member-wise reads.
+	if h := d.Health(); h.LeafMode != 2 {
+		t.Errorf("Health().LeafMode = %d, want 2 (TRS and TRSCmd read member-wise)", h.LeafMode)
+	}
 }
 
 // TestRuntimeRoundTrip runs the full stack: emulator ← eip.Driver ← runtime
@@ -251,6 +257,9 @@ func TestRuntimeRoundTrip(t *testing.T) {
 		v, err := d.ReadInputs()
 		return err == nil && v["Speed"] != nil && v["TRS"] != nil
 	})
+	if h := d.Health(); h.LeafMode != 0 {
+		t.Errorf("whole-struct reads work here, but Health().LeafMode = %d", h.LeafMode)
+	}
 
 	program := `
 TYPE

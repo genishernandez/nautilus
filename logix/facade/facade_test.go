@@ -170,16 +170,26 @@ func TestWritesReachTheController(t *testing.T) {
 		{`{"name": "MainProgram_Motor", "value": 42}`, "Program:MainProgram.Motor", 42.0},
 	}
 	for _, c := range cases {
+		// The controller must hold something else first, or an unchanged
+		// value would look like a write that landed.
+		_, before, _ := store.Resolve(c.device)
+		if fmt.Sprint(before) == fmt.Sprint(c.want) {
+			t.Fatalf("%s: controller already holds %v; the case cannot tell a write from no write", c.body, before)
+		}
 		if code, body := post(t, base, c.body); code != http.StatusNoContent {
 			t.Fatalf("%s = %d %s", c.body, code, body)
 		}
 		_, got, _ := store.Resolve(c.device)
 		if fmt.Sprint(got) != fmt.Sprint(c.want) {
-			t.Errorf("%s: controller holds %v, want %v", c.body, got, c.want)
+			t.Errorf("%s: controller holds %v (was %v), want %v", c.body, got, before, c.want)
 		}
 	}
 	// And the frame follows the controller, not the request.
 	waitFor(t, "write read back by the poll", func() bool { return state(t, base)["Speed"] == 55.5 })
+	// A frame that merely echoed the request would show 55.5 forever; a value
+	// the controller's own logic sets afterwards has to replace it.
+	store.UpdateValue("Speed", 61.25)
+	waitFor(t, "controller-side change after the write", func() bool { return state(t, base)["Speed"] == 61.25 })
 }
 
 // The write connection carries nothing between writes, so the controller

@@ -404,8 +404,11 @@ func TestForeignLatencyAboveTimeoutReconnects(t *testing.T) {
 			}
 			return d.Health().Sources[0].Retries >= 3
 		})
-		if q := d.Quality()["PV"]; q == nio.Stale || q == nio.Bad {
-			t.Errorf("PV quality = %v; a never-delivered tag is Good-or-NotConnected, never Stale/Bad", q)
+		// Never delivered means NotConnected whichever phase of the
+		// reconnect oscillation this lands in (socket up but unheard-from,
+		// or down) — never Good, Stale or Bad.
+		if q, ok := d.Quality()["PV"]; !ok || q != nio.NotConnected {
+			t.Errorf("PV quality = %v (reported=%v); a never-delivered tag must be NotConnected", q, ok)
 		}
 		h := d.Health()
 		row := h.Sources[0]

@@ -203,17 +203,29 @@ func TestSchemaRequiresWhatLoaderRequires(t *testing.T) {
 	}
 	requires(t, "tag", s.Definitions["tag"].Required, "role")
 
-	// eip needs a host and a manifest before it can be built.
+	// eip needs a host and a manifest before it can be built. The file set
+	// holds a readable manifest, so a missing field is the only reason for
+	// the refusal — and the complete config, asserted first, must build
+	// (New never dials).
+	eipFS := fstest.MapFS{"eip_manifest.yaml": &fstest.MapFile{Data: []byte("tags: []\n")}}
+	eipFull := DriverConfig{Type: "eip", Host: "plc", Manifest: "eip_manifest.yaml"}
+	if _, err := buildDriver(eipFS, eipFull); err != nil {
+		t.Fatalf("a complete eip driver must build offline: %v", err)
+	}
 	for _, key := range []string{"host", "manifest"} {
-		cfg := DriverConfig{Type: "eip", Host: "plc", Manifest: "eip_manifest.yaml"}
+		cfg := eipFull
 		switch key {
 		case "host":
 			cfg.Host = ""
 		case "manifest":
 			cfg.Manifest = ""
 		}
-		if _, err := buildDriver(fstest.MapFS{}, cfg); err == nil {
+		_, err := buildDriver(eipFS, cfg)
+		if err == nil {
 			t.Fatalf("loader accepted an eip driver with no %s", key)
+		}
+		if !strings.Contains(err.Error(), key) {
+			t.Errorf("eip driver with no %s refused for another reason: %v", key, err)
 		}
 		requires(t, "driver(eip)", driverRequires(t, "eip"), key)
 	}

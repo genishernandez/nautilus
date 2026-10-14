@@ -122,6 +122,10 @@ func TestClientUnreachableIsFatalAndNamesTheURL(t *testing.T) {
 	if !strings.Contains(err.Error(), "127.0.0.1:1") {
 		t.Errorf("error should name the URL it tried: %v", err)
 	}
+	// The guide tells people to look for `logixd: unreachable ... refused`.
+	if !strings.HasPrefix(err.Error(), "logixd: unreachable") || !strings.Contains(err.Error(), "refused") {
+		t.Errorf("error wording = %q, want it to start `logixd: unreachable` and say refused", err)
+	}
 }
 
 func TestClientDefaultsFromEnvironment(t *testing.T) {

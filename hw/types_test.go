@@ -1,6 +1,7 @@
 package hw
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -13,11 +14,44 @@ func TestTypesRenderAndCompile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The three importers agree byte for byte apart from the header line.
-	src2, _ := TypesST("prometheus")
+	// The three importers agree byte for byte apart from the header line —
+	// checked against what each importer's committed output actually holds,
+	// not against TypesST called twice.
 	body := func(b []byte) string { s := string(b); return s[strings.Index(s, "*)"):] }
-	if body(src) != body(src2) {
-		t.Fatal("importers render different TYPE blocks")
+	for _, c := range []struct{ importer, file string }{
+		{"snmp", "../cmd/naut/testdata/snmp/hw_types.st"},
+		{"redfish", "../cmd/naut/testdata/redfish/supermicro-x14/hw_types.st"},
+		{"redfish", "../cmd/naut/testdata/redfish/legacy-1u/hw_types.st"},
+		{"redfish", "../cmd/naut/testdata/redfish/subsystem-1u/hw_types.st"},
+		// The prometheus importer has no committed hw_types.st that is
+		// current (examples/it-rack's predates the Ceph/CNPG types), so it
+		// is held to the snmp file's body below.
+		{"prometheus", "../cmd/naut/testdata/snmp/hw_types.st"},
+	} {
+		want, err := os.ReadFile(c.file)
+		if err != nil {
+			t.Fatalf("%s: %v", c.importer, err)
+		}
+		if c.importer == "prometheus" {
+			got, err := TypesST(c.importer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if body(got) != body(want) {
+				t.Errorf("prometheus renders a different TYPE block than the committed importers' files")
+			}
+			continue
+		}
+		got, err := TypesST(c.importer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("%s: TypesST differs from the committed %s", c.importer, c.file)
+		}
+		if body(want) != body(src) {
+			t.Errorf("%s importer's file renders a different TYPE block than snmp's", c.importer)
+		}
 	}
 	// It compiles, and the compiled slot order is the table's order — the
 	// invariant that lets a driver-built struct value be read by a program.
