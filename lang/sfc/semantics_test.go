@@ -314,10 +314,229 @@ END_PROGRAM`
 	}
 }
 
-// TestWarmMigration: transpile+lower, run 3 scans to move the token, then
-// lower a trivially-edited variant and MigrateFrame — the live token position
-// must survive (§2.7 warm restart).
+// TestWarmMigration: transpile+lower, run scans to move the token, then lower
+// an edited variant and MigrateFrame (what runtime.Program.SwapWarm does) —
+// the chart's live state must survive (§2.7 warm restart).
 func TestWarmMigration(t *testing.T) {
+	t.Run("token", testWarmMigrationToken)
+	t.Run("timers-latches-pulses", testWarmMigrationTimersLatchesPulses)
+	t.Run("renamed-step-resets", testWarmMigrationRenamedStep)
+}
+
+// warmChart has one of each piece of retained chart state on step Fill: its
+// Step.T timer, a MAXTIME overrun flag, a stored (S) action whose body
+// counts while the latch holds, a D-timed association (its own TON), an SL
+// association (a timed-qualifier latch and its TON), and a P action whose
+// once-per-activation pulse rides the step's edge memory.
+const warmChart = `PROGRAM P
+VAR_EXTERNAL Go : BOOL; Done : BOOL; Valve : BOOL; Ovr : BOOL; Pulses : INT; Ticks : INT; Pump : BOOL; END_VAR
+SFC
+INITIAL_STEP Idle:
+END_STEP
+STEP Fill (MAXTIME := T#5S, ERROR := Ovr):
+  S Agitate;
+  D Valve(T#10S);
+  SL Pump(T#20S);
+  P Bump;
+END_STEP
+STEP Drain:
+  R Agitate;
+END_STEP
+TRANSITION FROM Idle TO Fill := Go;
+END_TRANSITION
+TRANSITION FROM Fill TO Drain := Done;
+END_TRANSITION
+ACTION Agitate:
+  Ticks := Ticks + 1;
+END_ACTION
+ACTION Bump:
+  Pulses := Pulses + 1;
+END_ACTION
+END_SFC
+END_PROGRAM
+`
+
+// fbET reads a TON instance's ET (slot 3: IN, PT, Q, ET) from a frame.
+func fbET(t *testing.T, prog *ir.Program, frame *ir.Frame, name string) int64 {
+	t.Helper()
+	i := slotIdx(prog, name)
+	if i < 0 || frame.Slots[i].FB == nil {
+		t.Fatalf("no TON slot %q", name)
+	}
+	return frame.Slots[i].FB.Slots[3].I
+}
+
+func frameBool(t *testing.T, prog *ir.Program, frame *ir.Frame, name string) bool {
+	t.Helper()
+	i := slotIdx(prog, name)
+	if i < 0 {
+		t.Fatalf("no slot %q", name)
+	}
+	return frame.Slots[i].B
+}
+
+func testWarmMigrationTimersLatchesPulses(t *testing.T) {
+	prog1 := mustCompile(t, warmChart)
+	h := &clockHost{vals: map[string]ir.Value{}}
+	frame1 := ir.NewFrame(prog1)
+	run := func(prog *ir.Program, frame *ir.Frame, in map[string]ir.Value, now int64) {
+		t.Helper()
+		for k, v := range in {
+			h.vals[k] = v
+		}
+		h.now = now
+		if err := ir.Run(prog, frame, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Idle→Fill at 1 s; Fill stays active to 7 s, past its 5 s MAXTIME.
+	run(prog1, frame1, map[string]ir.Value{"Go": ir.BoolVal(true)}, 1000)
+	for now := int64(2000); now <= 7000; now += 1000 {
+		run(prog1, frame1, map[string]ir.Value{"Go": ir.BoolVal(false)}, now)
+	}
+	if !stepActive(t, prog1, frame1, "Fill") {
+		t.Fatal("token should be at Fill before the edit")
+	}
+	if got := fbET(t, prog1, frame1, "_S_Fill_t"); got != 6000 {
+		t.Fatalf("Fill.T before the edit = %d, want 6000", got)
+	}
+	if !h.vals["Ovr"].B || h.vals["Pulses"].I != 1 || h.vals["Ticks"].I != 7 || h.vals["Valve"].B || !h.vals["Pump"].B {
+		t.Fatalf("before the edit: Ovr=%v Pulses=%d Ticks=%d Valve=%v Pump=%v, want true/1/7/false/true",
+			h.vals["Ovr"].B, h.vals["Pulses"].I, h.vals["Ticks"].I, h.vals["Valve"].B, h.vals["Pump"].B)
+	}
+
+	// A real edit: the P action's body changes (so a re-fired pulse shows
+	// as +10), and a new step + transition are added after Drain.
+	edited := strings.Replace(warmChart, "Pulses := Pulses + 1;", "Pulses := Pulses + 10;", 1)
+	edited = strings.Replace(edited, "STEP Drain:\n  R Agitate;\nEND_STEP",
+		"STEP Drain:\n  R Agitate;\nEND_STEP\nSTEP Spare:\nEND_STEP", 1)
+	edited = strings.Replace(edited, "ACTION Agitate:",
+		"TRANSITION FROM Drain TO Spare := Go;\nEND_TRANSITION\nACTION Agitate:", 1)
+	prog2 := mustCompile(t, edited)
+	frame2, resets := ir.MigrateFrame(prog2, prog1, frame1)
+
+	// Every piece of chart state is carried by name, and none is reported
+	// as reset; the new step is.
+	for _, name := range []string{"_S_Fill_X", "_S_Fill_prev", "_S_Fill_t", "_S_Fill_err",
+		"_q_Fill_Valve_D_tmr", "_q_Fill_Pump_SL_ff", "_q_Fill_Pump_SL_tmr",
+		"_act_Agitate_stored", "_act_Agitate_prev"} {
+		for _, r := range resets {
+			if strings.EqualFold(r, name) {
+				t.Errorf("%s reported as reset (resets %v)", name, resets)
+			}
+		}
+	}
+	if !containsFold(resets, "_S_Spare_X") {
+		t.Errorf("the added step's token should be reported as reset: %v", resets)
+	}
+	if !frameBool(t, prog2, frame2, "_S_Fill_X") || frameBool(t, prog2, frame2, "_S_Idle_X") {
+		t.Fatal("warm migration lost the token at Fill")
+	}
+	// The MAXTIME flag is carried as is, not left for the next scan to
+	// recompute: a transition reading Fill.ERR on the first scan after the
+	// swap reads it before supervision runs.
+	if !frameBool(t, prog2, frame2, "_S_Fill_err") {
+		t.Error("Fill's MAXTIME overrun flag (Fill.ERR) was dropped by the swap")
+	}
+	if !frameBool(t, prog2, frame2, "_act_Agitate_stored") {
+		t.Error("the stored (S) latch on Agitate was dropped by the swap")
+	}
+	if !frameBool(t, prog2, frame2, "_S_Fill_prev") {
+		t.Error("Fill's edge memory (P pulses, S/MAXTIME edges) was dropped by the swap")
+	}
+	if got := fbET(t, prog2, frame2, "_S_Fill_t"); got != 6000 {
+		t.Errorf("Fill.T right after the swap = %d, want 6000", got)
+	}
+	if got := fbET(t, prog2, frame2, "_q_Fill_Valve_D_tmr"); got != 6000 {
+		t.Errorf("D Valve timer right after the swap = %d, want 6000", got)
+	}
+	if !frameBool(t, prog2, frame2, "_q_Fill_Pump_SL_ff") {
+		t.Error("the SL Pump latch was dropped by the swap")
+	}
+	if got := fbET(t, prog2, frame2, "_q_Fill_Pump_SL_tmr"); got != 6000 {
+		t.Errorf("SL Pump timer right after the swap = %d, want 6000", got)
+	}
+
+	// And it keeps running from there on the edited program.
+	run(prog2, frame2, nil, 8000)
+	if got := fbET(t, prog2, frame2, "_S_Fill_t"); got != 7000 {
+		t.Errorf("Fill.T one scan after the swap = %d, want 7000 (continues, not restarted)", got)
+	}
+	if h.vals["Pulses"].I != 1 {
+		t.Errorf("Pulses = %d after the swap, want 1: the P action re-fired, so its edge memory did not carry", h.vals["Pulses"].I)
+	}
+	if h.vals["Ticks"].I != 8 {
+		t.Errorf("Ticks = %d after the swap, want 8: the stored action stopped running", h.vals["Ticks"].I)
+	}
+	if !h.vals["Ovr"].B {
+		t.Error("ERROR := Ovr cleared across the swap")
+	}
+	run(prog2, frame2, nil, 10000)
+	if h.vals["Valve"].B {
+		t.Error("D Valve(T#10S) on at 10 s: 9 s after activation")
+	}
+	run(prog2, frame2, nil, 11000)
+	if !h.vals["Valve"].B {
+		t.Error("D Valve(T#10S) off at 11 s, 10 s after activation: its timer restarted at the swap")
+	}
+	// The latch still holds three scans on (a dropped latch gets one final
+	// scan from its falling-edge memory, then stops).
+	if h.vals["Ticks"].I != 10 {
+		t.Errorf("Ticks = %d three scans after the swap, want 10: the stored action stopped running", h.vals["Ticks"].I)
+	}
+	// SL Pump(T#20S): on from activation (1 s) until 21 s, on the latch and
+	// timer that crossed the swap.
+	if !h.vals["Pump"].B {
+		t.Error("SL Pump off at 11 s: its latch did not carry")
+	}
+	run(prog2, frame2, nil, 20000)
+	if !h.vals["Pump"].B {
+		t.Error("SL Pump off at 20 s, inside its 20 s limit")
+	}
+	run(prog2, frame2, nil, 21000)
+	if h.vals["Pump"].B {
+		t.Error("SL Pump still on at 21 s, 20 s after activation: its timer restarted at the swap")
+	}
+}
+
+func containsFold(list []string, s string) bool {
+	for _, v := range list {
+		if strings.EqualFold(v, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// testWarmMigrationRenamedStep: renaming the active step is a new slot name,
+// so its token resets — the chart ends up with no active step — and the
+// renamed step's token is listed in the swap report.
+func testWarmMigrationRenamedStep(t *testing.T) {
+	prog1 := mustCompile(t, warmChart)
+	h := &clockHost{vals: map[string]ir.Value{"Go": ir.BoolVal(true)}, now: 1000}
+	frame1 := ir.NewFrame(prog1)
+	if err := ir.Run(prog1, frame1, h); err != nil {
+		t.Fatal(err)
+	}
+	if !stepActive(t, prog1, frame1, "Fill") {
+		t.Fatal("token should be at Fill before the rename")
+	}
+	renamed := strings.NewReplacer("STEP Fill ", "STEP Filling ", "FROM Idle TO Fill ", "FROM Idle TO Filling ",
+		"FROM Fill TO", "FROM Filling TO").Replace(warmChart)
+	prog2 := mustCompile(t, renamed)
+	frame2, resets := ir.MigrateFrame(prog2, prog1, frame1)
+	if stepActive(t, prog2, frame2, "Filling") {
+		t.Error("a renamed step must not inherit the old step's token")
+	}
+	if stepActive(t, prog2, frame2, "Idle") {
+		t.Error("Idle must stay inactive: the rename resets the token, it does not restart the chart")
+	}
+	if !containsFold(resets, "_S_Filling_X") {
+		t.Errorf("the renamed step's token should be listed in the swap report: %v", resets)
+	}
+}
+
+func testWarmMigrationToken(t *testing.T) {
 	prog1 := mustCompile(t, tankBatchSrc)
 	h := &clockHost{vals: map[string]ir.Value{
 		"FillSP": ir.RealVal(100), "HeatSP": ir.RealVal(80), "EmptySP": ir.RealVal(5),

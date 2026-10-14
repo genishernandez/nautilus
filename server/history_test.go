@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	nio "github.com/joyautomation/nautilus/io"
+	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/runtime"
 )
 
@@ -183,6 +185,130 @@ func TestActivateRejections(t *testing.T) {
 	}
 	if rt.Program().Source() != testProgram || rt.Program().Dirty() {
 		t.Fatal("a rejected activation must leave the running program untouched")
+	}
+}
+
+// activateClock is a hand-moved runtime.Clock, so the TONs below time in
+// exact virtual seconds.
+type activateClock struct{ t time.Time }
+
+func (c *activateClock) Now() time.Time { return c.t }
+
+// Two-task programs for TestActivateEveryTask. Each carries a TON and an
+// integrator; the older commit changes each program's output scaling, so
+// the test can tell which revision every task is running.
+const (
+	twoTaskMain = `PROGRAM Test
+VAR_EXTERNAL MainET : TIME; MainOut : REAL; END_VAR
+VAR Dwell : TON; Total : REAL; END_VAR
+Dwell(IN := TRUE, PT := T#1H);
+MainET := Dwell.ET;
+Total := Total + 1.0;
+MainOut := Total;
+END_PROGRAM
+`
+	twoTaskAux = `PROGRAM Totals
+VAR_EXTERNAL AuxET : TIME; AuxOut : REAL; END_VAR
+VAR Hold : TON; Sum : REAL; END_VAR
+Hold(IN := TRUE, PT := T#1H);
+AuxET := Hold.ET;
+Sum := Sum + 1.0;
+AuxOut := Sum;
+END_PROGRAM
+`
+)
+
+// Activation swaps EVERY task, not just main, and each swap is warm: both
+// tasks run the commit's source afterwards, and both keep their timers and
+// integrators. A handler that swapped only the main task, or swapped cold,
+// fails here.
+func TestActivateEveryTask(t *testing.T) {
+	oldMain := strings.Replace(twoTaskMain, "MainOut := Total;", "MainOut := Total * 10.0;", 1)
+	oldAux := strings.Replace(twoTaskAux, "AuxOut := Sum;", "AuxOut := Sum * 100.0;", 1)
+
+	clk := &activateClock{t: time.Unix(1_700_000_000, 0)}
+	t0 := clk.t
+	rt, err := runtime.New(runtime.Options{
+		Program: twoTaskMain,
+		Clock:   clk,
+		Seed:    nio.Values{"MainOut": 0.0, "AuxOut": 0.0},
+		Tasks:   []runtime.Task{{Name: "totals", Program: twoTaskAux, Scan: time.Second}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanAt := func(sec int) {
+		t.Helper()
+		clk.t = t0.Add(time.Duration(sec) * time.Second)
+		rt.Scan()
+		if err := rt.ScanTask("totals"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(name string) ir.Value {
+		t.Helper()
+		v, err := rt.Tags().ReadGlobal(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return v
+	}
+	for s := 0; s < 5; s++ {
+		scanAt(s)
+	}
+	if read("MainET").I != 4000 || read("AuxET").I != 4000 || read("MainOut").F != 5 || read("AuxOut").F != 5 {
+		t.Fatalf("before activation: MainET=%d AuxET=%d MainOut=%v AuxOut=%v, want 4000/4000/5/5",
+			read("MainET").I, read("AuxET").I, read("MainOut").F, read("AuxOut").F)
+	}
+
+	h := testHistory()
+	sources := map[string]map[string]string{
+		"aaaa111122223333aaaa111122223333aaaa1111": {"main": twoTaskMain, "totals": twoTaskAux},
+		"bbbb111122223333bbbb111122223333bbbb1111": {"main": oldMain, "totals": oldAux},
+	}
+	srv := New(rt, Options{
+		OnlineEdits: true,
+		History:     func() *ProgramHistory { return h },
+		SourcesAt: func(sha string) (map[string]string, error) {
+			if s, ok := sources[sha]; ok {
+				return s, nil
+			}
+			return nil, fmt.Errorf("no snapshot for %s", sha)
+		},
+	}).Handler()
+	w, body := doJSON(t, srv, "POST", "/api/program/activate", map[string]string{"sha": "bbbb111"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("activate = %d %v", w.Code, body)
+	}
+	progs, _ := body["programs"].([]any)
+	tasks := map[string]bool{}
+	for _, p := range progs {
+		tasks[p.(map[string]any)["task"].(string)] = true
+	}
+	if len(progs) != 2 || !tasks["main"] || !tasks["totals"] {
+		t.Errorf("activation should report both tasks, got %v", body["programs"])
+	}
+	if rt.TaskProgram("main").Source() != oldMain {
+		t.Error("main task is not running the activated revision")
+	}
+	if rt.TaskProgram("totals").Source() != oldAux {
+		t.Error("totals task is not running the activated revision: only main was swapped")
+	}
+
+	// Both swaps were warm: each task's TON continues to 5 s and each
+	// integrator steps 5 → 6 under the revision's scaling.
+	scanAt(5)
+	if got := read("MainET").I; got != 5000 {
+		t.Errorf("main Dwell.ET after activation = %d, want 5000 (timer carried)", got)
+	}
+	if got := read("MainOut").F; got != 60 {
+		t.Errorf("MainOut after activation = %v, want 60 (Total carried, ×10 live)", got)
+	}
+	if got := read("AuxET").I; got != 5000 {
+		t.Errorf("totals Hold.ET after activation = %d, want 5000 (timer carried)", got)
+	}
+	if got := read("AuxOut").F; got != 600 {
+		t.Errorf("AuxOut after activation = %v, want 600 (Sum carried, ×100 live)", got)
 	}
 }
 
