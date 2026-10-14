@@ -142,7 +142,16 @@ wait_state() {
 # scaffold, instead of `naut new`.
 ext_fixture() {
   PROJ=$HOME/$1
-  rm -rf "$PROJ"; cp -r "$FIX/$1" "$PROJ"
+  # Tracked files only: an untracked retain.json (or any runtime state) left
+  # in the fixture would start every beat from stale retained values.
+  rm -rf "$PROJ"; mkdir -p "$PROJ"
+  if git -C "$FIX/$1" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$FIX/$1" ls-files -z | tar -C "$FIX/$1" --null -T - -cf - | tar -C "$PROJ" -xf -
+  else
+    # No repo to ask (the fixtures are pushed into the container as plain
+    # files): copy it all and drop the known runtime state.
+    cp -r "$FIX/$1/." "$PROJ" && rm -f "$PROJ/retain.json"
+  fi
   git -C "$PROJ" init -q
   git -C "$PROJ" config user.name "Demo"
   git -C "$PROJ" config user.email "demo@example.com"
