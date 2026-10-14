@@ -173,9 +173,11 @@ func (f *Facade) Handler() http.Handler {
 	if f.prog != nil {
 		mux.HandleFunc("GET /api/program", f.prog.get)
 		mux.HandleFunc("PUT /api/program", f.prog.put)
+		mux.HandleFunc("POST /api/logix/deploy", f.prog.deployStream)
 	} else {
 		mux.HandleFunc("GET /api/program", programGone)
 		mux.HandleFunc("PUT /api/program", programLocked)
+		mux.HandleFunc("POST /api/logix/deploy", noProject)
 	}
 	mux.HandleFunc("GET /api/program/history", programGone)
 	mux.HandleFunc("POST /api/program/rollback", programLocked)
@@ -191,6 +193,8 @@ const (
 	msgNoEdit = "this is a Logix controller, which nautilus does not warm-swap. " +
 		"Edit rungs online with `naut logix push --comm-path`, or download a " +
 		"project with `naut logix download`."
+	msgNoProject = "this `naut logix serve` has no project to deploy: restart it with " +
+		"`--project <dir>` (a nautilus project with a target: logix section)"
 )
 
 func programGone(w http.ResponseWriter, _ *http.Request) {
@@ -199,6 +203,10 @@ func programGone(w http.ResponseWriter, _ *http.Request) {
 
 func programLocked(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusForbidden, msgNoEdit)
+}
+
+func noProject(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusNotFound, msgNoProject)
 }
 
 func writeJSON(w http.ResponseWriter, code int, msg string) {

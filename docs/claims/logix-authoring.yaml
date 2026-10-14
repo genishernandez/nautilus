@@ -551,3 +551,49 @@ claims:
       may be stopped (NAUTILUS_LOGIX_DOWNLOAD_COMM_PATH, NAUTILUS_LOGIX_HOST)
       and logixd; skipped in CI and not yet run (the SDK machine is
       unavailable).
+
+  - id: LGA-040
+    claim: >-
+      With `naut logix serve --project`, an online edit from the editor is
+      the same online edit `naut logix deploy --online` makes, and its
+      progress and result reach the editor as they happen; a change it
+      cannot carry is refused with the way to download it.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamOnlineEdit
+      - go ./logix/facade TestDeployStreamRefusal
+      - go ./logix/facade TestProgramPlaneDeploysAnOnlineEdit
+    partial: true
+    note: >-
+      Against a stand-in deploy function: the endpoint streams each progress
+      line, then the report, and serves the new source; a NeedsDownloadError
+      arrives as a 422 error event naming the download command. The deploy
+      itself (logix/deploy.Session) has its own fake-agent tests; neither
+      has run against a controller through the editor yet.
+
+  - id: LGA-041
+    claim: >-
+      A download from the editor is refused unless the request says yes;
+      it sends the project with the Program-mode choice made, re-reads
+      nautilus.yaml for it, releases the online session first and opens it
+      again afterwards, so the next online edit is warm.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamDownload
+      - go ./cmd/naut TestLogixServePlaneDownloadRewarmsTheSession
+      - go ./cmd/naut TestLogixServePlaneReleasesTheSessionBeforeADownload
+    partial: true
+    note: >-
+      Against the fake agent: no "yes" is a 400 and nothing runs; the held
+      session is deleted before /download, an upload reopens it after, and
+      the next edit makes no upload; a tag description added to
+      nautilus.yaml after the server started is in the project sent. Not yet
+      run against a controller.
+
+  - id: LGA-042
+    claim: >-
+      Only one deploy runs at a time, and a deploy whose base is not what
+      the controller runs is refused before anything is sent.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamUpfrontRefusals

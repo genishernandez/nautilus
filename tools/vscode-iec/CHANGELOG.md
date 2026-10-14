@@ -7,6 +7,22 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Added
 
+- **Deploy to a Logix controller without leaving the editor.** In a
+  project whose `nautilus.yaml` has a `target: logix` section, with
+  `naut logix serve --project` at `nautilus.runtimeUrl`:
+  **nautilus: Push Online Edit to Logix Controller** (a button in the
+  editor title bar of a ladder or ST program) replaces the routine's rungs
+  in the running controller, as `naut logix deploy --online` does, and
+  **nautilus: Download Project to Logix Controller** (the title bar's `…`
+  menu) downloads the project, as `naut logix deploy --download --yes`
+  does, after a modal that says it stops the controller, with a choice to
+  switch it to Program mode first. Progress shows in a notification and
+  the **nautilus Logix** output channel; live values keep streaming
+  throughout. **nautilus: Download Program to Controller** on a Logix
+  server now runs the same online edit. If nothing answers, the commands
+  offer to start `naut logix serve --project` in a terminal. Needs a
+  `naut` newer than 0.17.0.
+
 - **`sparkplug.primary-host-offline` in `nautilus.yaml`.** Completion
   and validation for the new option that says what an edge node does when
   its primary host goes offline: `buffer` (the default, as before) keeps

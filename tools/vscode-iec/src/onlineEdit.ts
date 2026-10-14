@@ -59,6 +59,9 @@ export type ProgramInfo = {
   canRollback: boolean;
   programs?: ProgramSummary[];
   error?: string;
+  /** "logix" when the runtime URL is `naut logix serve --project`: the
+   * Download there is an online edit to a Logix controller (logixDeploy.ts). */
+  target?: string;
 };
 
 /** All four IEC languages participate in online edits: a project's program
@@ -323,7 +326,15 @@ export class OnlineEdit implements vscode.Disposable {
    * composeAll and handle multi-program projects themselves.
    */
   private async compose(quiet = false, action = "download"): Promise<
-    | { source: string; prelude: string; programFile: string; programUri: vscode.Uri; programBody: string; pou: string }
+    | {
+        source: string;
+        prelude: string;
+        programFile: string;
+        programUri: vscode.Uri;
+        programBody: string;
+        pou: string;
+        dir: vscode.Uri;
+      }
     | undefined
   > {
     const ws = await this.composeAll(quiet);
@@ -381,7 +392,18 @@ export class OnlineEdit implements vscode.Disposable {
       programUri: program.uri,
       programBody: program.body,
       pou: program.pou,
+      dir: ws.dir,
     };
+  }
+
+  /** The program a Logix deploy sends (logixDeploy.ts): the program file's
+   * text as written — unsaved edits included — and the project directory.
+   * The Logix writer takes the project's libraries itself, so no prelude. */
+  async programForLogix(
+    action: string
+  ): Promise<{ programFile: string; programBody: string; dir: vscode.Uri } | undefined> {
+    const c = await this.compose(false, action);
+    return c && { programFile: c.programFile, programBody: c.programBody, dir: c.dir };
   }
 
   /** Push the composed workspace program to the controller (warm swap). */
@@ -394,6 +416,12 @@ export class OnlineEdit implements vscode.Disposable {
     const info = await this.fetchInfo(composed.pou);
     if (!info) {
       void notifyError(`nautilus: no controller at ${this.runtimeUrl()}`);
+      return;
+    }
+    if (info.target === "logix") {
+      // `naut logix serve --project`: Download here is an online edit to a
+      // Logix controller, with its own confirmation and progress.
+      await vscode.commands.executeCommand("nautilus.logix.onlineEdit");
       return;
     }
     if (!info.editable) {
