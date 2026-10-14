@@ -44,12 +44,7 @@ claims:
       - go ./lang/fbd TestFunctionBlockInstance
       - go ./lang/fbd TestTranspileMultipleBlocks
       - go ./lang/conformance TestConformance/fb-ton
-    partial: true
-    note: >-
-      Declare-and-call in one statement and pin reads are asserted (and run,
-      in the fb-ton fixture's FBD program). The split form, a bare
-      lic : PID declaration in the body followed by a later lic(...) call,
-      is not exercised by any test.
+      - go ./lang/fbd TestSplitDeclareThenCall
 
   - id: FBD-004
     claim: >-
@@ -71,11 +66,7 @@ claims:
       - go ./lang/fbd TestSealInLatch
       - go ./lang/fbd TestArithmeticAndFanout
       - go ./lang/fbd TestFunctionBlockInstance
-    partial: true
-    note: >-
-      NOT on a pin (seal-in), REAL literals and a TIME literal (T#5S, run to
-      PT in TestFunctionBlockInstance) are asserted. BOOL and STRING literal
-      inputs are not.
+      - go ./lang/fbd TestBoolAndStringLiteralInputs
 
   - id: FBD-006
     claim: >-
@@ -84,11 +75,7 @@ claims:
     source: "#a-netlist-line-by-line"
     tests:
       - go ./lang/fbd TestCommentsInModel
-    partial: true
-    note: >-
-      Full-line comments are asserted. No compile or run test uses a
-      ;-terminated statement; TestStatementsLenient (dropped) only checks the
-      LSP outline parser, not the compiler.
+      - go ./lang/fbd TestSemicolonTerminatedStatements
 
   - id: FBD-007
     claim: >-
@@ -99,12 +86,7 @@ claims:
       - go ./lang/fbd TestArithmeticAndFanout
       - go ./lang/conformance TestConformance/fbd-en-eno/EN TRUE runs the call and ENO is TRUE
       - go ./lang/fbd TestENOErrors
-    partial: true
-    note: >-
-      Positional calls are run (ADD/MUL/GT) and an all-named LIMIT is run,
-      but only with EN bound; a plain all-named call with no EN is not run.
-      TestUserFunctionPinNames was dropped: it draws a user FUNCTION's pins
-      in the editor model.
+      - go ./lang/fbd TestAllNamedStandardCallWithoutEN
 
   - id: FBD-008
     claim: >-
@@ -123,12 +105,7 @@ claims:
     source: "#how-a-diagram-evaluates"
     tests:
       - go ./lang/fbd TestArithmeticAndFanout
-    partial: true
-    note: >-
-      Fan-out gives the right values, but nothing asserts the wire is inlined
-      at each read rather than held in shared state (the values are the same
-      either way). TestGraphFanoutAndNesting (dropped) checks the render
-      model's edges only.
+      - go ./lang/fbd TestWireInlinedAtEveryRead
 
   - id: FBD-010
     claim: >-
@@ -237,12 +214,8 @@ claims:
       AND, OR, XOR, ADD and MUL take two or more inputs; SUB, DIV, MOD and
       the comparisons take exactly two; MOVE is a one-input pass-through.
     source: "#types-functions-and-blocks"
-    tests: []
-    note: >-
-      No test asserts these arities. The old refs did not count:
-      TestOpArityConversionsFromRegistry checks the editor's arity for
-      conversion functions, and st-xor runs the ST XOR operator, not an
-      n-input FBD block.
+    tests:
+      - go ./lang/fbd TestFunctionArities
 
   - id: FBD-020
     claim: >-
@@ -251,11 +224,7 @@ claims:
     source: "#types-functions-and-blocks"
     tests:
       - go ./lang/fbd TestOmittedFBInputKeepsInitial
-    partial: true
-    note: >-
-      An omitted input holding its declared initial value across scans is run.
-      An input written by an earlier call and then omitted keeping that value
-      is not.
+      - go ./lang/fbd TestOmittedFBInputKeepsLastWrittenValue
 
   - id: FBD-021
     claim: >-
@@ -276,14 +245,7 @@ claims:
     source: "#types-functions-and-blocks"
     tests:
       - go ./runtime TestLibrariesUserFBFromFBD
-      - go ./lang/ld TestLadderFunctionBlockFromST
-    partial: true
-    note: >-
-      Only an ST-authored block is used from FBD. An FBD-authored block is
-      never instantiated from FBD, and the ladder block is called from ST, not
-      FBD. "A file with no PROGRAM is a library" is not exercised here: the
-      library sources are passed in directly. The palette test
-      TestInsertLibraryFBAllPinsOpen (editor insertion) was dropped.
+      - go ./runtime TestFBDInstantiatesBlocksFromSTFBDAndLadderLibraries
 
   - id: FBD-023
     claim: >-
@@ -293,12 +255,9 @@ claims:
     source: "#tooling"
     tests:
       - go ./runtime TestSwapWarmFBDCarriesRetainedState
-    partial: true
-    note: >-
-      The runtime keeps the .fbd text as the program source and a warm swap
-      carries a retained REAL integral; serving it over the controller API is
-      not tested here, nor a PID's integral or a running TON specifically.
-      TestLanguageDetection (dropped) only classifies source text.
+      - go ./runtime TestSwapWarmFBDKeepsPIDIntegralAndRunningTON
+      - go ./runtime TestSwapWarmFBDTypeChangeResets
+      - go ./server TestProgramFBDServedAndRoutedByPOU
 
   - id: FBD-024
     claim: >-
@@ -317,8 +276,8 @@ claims:
       An edit routes to a task by PROGRAM name, so a task's own .fbd
       downloads without disturbing another task's program.
     source: "#tooling"
-    tests: []
-    note: No test asserts per-task routing by PROGRAM name.
+    tests:
+      - go ./server TestProgramFBDServedAndRoutedByPOU
 
   - id: FBD-026
     claim: Authoring a FUNCTION in FBD is not supported; functions are ST.

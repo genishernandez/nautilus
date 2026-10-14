@@ -234,6 +234,7 @@ func TestScaffoldedManifestProjectsPass(t *testing.T) {
 		{"minimal-st", tmplMinimal, "st", false},
 		{"minimal-fbd", tmplMinimal, "fbd", false},
 		{"minimal-ld", tmplMinimal, "ld", false},
+		{"minimal-sfc", tmplMinimal, "sfc", false},
 		{"demo", tmplDemo, "", false},
 		// deploy adds retain:/redundancy: to the manifest — the project
 		// must still load, compile, and pass its suites with them present.
