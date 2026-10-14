@@ -192,3 +192,27 @@ func TestExternalInitialValueRejected(t *testing.T) {
 		}
 	}
 }
+
+// An unbound VAR_INPUT keeps its declared initial value: the call binds
+// only X, so Bias reads 7 on every scan. (A FUNCTION must bind every input,
+// so this is an FB rule only.)
+func TestUserFB_UnboundInputKeepsInitial(t *testing.T) {
+	src := `
+FUNCTION_BLOCK Offset
+VAR_INPUT X : INT; Bias : INT := 7; END_VAR
+VAR_OUTPUT Y : INT; END_VAR
+Y := X + Bias;
+END_FUNCTION_BLOCK
+
+PROGRAM Main
+VAR_EXTERNAL Out : INT; END_VAR
+VAR o : Offset; END_VAR
+o(X := 1, Y => Out);
+END_PROGRAM
+`
+	host := newFakeHost()
+	runScans(t, src, host, 2)
+	if got := host.vals["Out"]; got.Kind != ir.TypeInt || got.I != 8 {
+		t.Fatalf("Out = %+v, want 8 (X 1 + the unbound Bias 7)", got)
+	}
+}
