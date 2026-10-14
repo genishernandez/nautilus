@@ -22,6 +22,10 @@
 //	    drive the rolling issue). -baseline <evidence.json> compares with an
 //	    earlier run and -summary <file> writes the comparison as markdown
 //	    (CI's PR job summary).
+//
+//	git diff --name-only BASE HEAD | go run ./tools/evidence drift [-github] [-summary f]
+//	    Warn about each documentation page that changed while its
+//	    docs/claims file did not. Never fails; CI runs it on PRs.
 package main
 
 import (
@@ -49,6 +53,8 @@ func main() {
 		err = runCat(os.Stdin, os.Stdout)
 	case "build":
 		err = runBuild(os.Args[2:])
+	case "drift":
+		err = runDrift(os.Args[2:], os.Stdin, os.Stdout)
 	default:
 		usage()
 	}
@@ -59,7 +65,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: evidence check | cat | build [flags]  (see go doc ./tools/evidence)")
+	fmt.Fprintln(os.Stderr, "usage: evidence check | cat | build | drift [flags]  (see go doc ./tools/evidence)")
 	os.Exit(2)
 }
 
