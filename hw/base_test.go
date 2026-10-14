@@ -458,6 +458,81 @@ func TestBaseWrites(t *testing.T) {
 	}
 }
 
+// In a multi-driver project `naut run` gates the nio.Multi, not the hw
+// driver itself; a standby replica's command must still never leave.
+func TestBaseWriteGateBehindMulti(t *testing.T) {
+	w := newFakeWire()
+	pdu := func(id string) Config {
+		return Config{
+			Kind:    "test",
+			Sources: []SourceConfig{{ID: id, Interval: 20 * time.Millisecond, RetryMin: 10 * time.Millisecond, RetryMax: 20 * time.Millisecond}},
+			Tags: []TagDecl{{Name: id + "_Outlet01", Type: "PDUOutlet", Source: id, Members: map[string]Binding{
+				"Index": {Const: 1}, "On": {},
+			}}},
+			Writes: []WriteDecl{{Name: id + "_Outlet01_Cmd", Tag: id + "_Outlet01", Member: "On"}},
+			Poll:   w.poll,
+			Write:  w.write,
+		}
+	}
+	a, err := NewBase(pdu("PDU1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewBase(pdu("PDU2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := nio.NewMulti(nio.NamedDriver{Name: "a", Driver: a}, nio.NamedDriver{Name: "b", Driver: b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, ok := nio.Driver(m).(interface{ SetWriteGate(func() bool) })
+	if !ok {
+		t.Fatal("nio.Multi takes no write gate")
+	}
+	var gmu sync.Mutex
+	leader := false
+	g.SetWriteGate(func() bool { gmu.Lock(); defer gmu.Unlock(); return leader })
+
+	w.set("PDU1", DefaultClass, Result{Updates: []Update{{"PDU1_Outlet01", "On", ir.BoolVal(true)}}})
+	w.set("PDU2", DefaultClass, Result{Updates: []Update{{"PDU2_Outlet01", "On", ir.BoolVal(true)}}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.Start(ctx)
+	defer m.Stop()
+	w.waitPoll(t, "PDU1/default")
+
+	// A follower: baseline, then a change on both drivers. Nothing leaves.
+	_ = m.WriteOutputs(nio.Values{"PDU1_Outlet01_Cmd": true, "PDU2_Outlet01_Cmd": true})
+	_ = m.WriteOutputs(nio.Values{"PDU1_Outlet01_Cmd": false, "PDU2_Outlet01_Cmd": false})
+	time.Sleep(60 * time.Millisecond)
+	w.mu.Lock()
+	sent := append([]string(nil), w.writes...)
+	w.mu.Unlock()
+	if len(sent) != 0 {
+		t.Fatalf("a follower's write left the driver behind a Multi: %v", sent)
+	}
+	for _, d := range []*Base{a, b} {
+		if h := d.Health(); h.Sources[0].QueuedWrites != 0 || h.Writes != 0 {
+			t.Fatalf("follower queued or wrote: %+v writes=%d", h.Sources[0], h.Writes)
+		}
+	}
+
+	// Promoted: the first value is a baseline again, a change goes out.
+	gmu.Lock()
+	leader = true
+	gmu.Unlock()
+	_ = m.WriteOutputs(nio.Values{"PDU1_Outlet01_Cmd": false})
+	_ = m.WriteOutputs(nio.Values{"PDU1_Outlet01_Cmd": true})
+	deadline := time.Now().Add(time.Second)
+	for a.Health().Writes != 1 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if a.Health().Writes != 1 {
+		t.Fatal("the leader's change never left the driver")
+	}
+}
+
 func TestBaseClassAssignments(t *testing.T) {
 	w := newFakeWire()
 	cfg := switchConfig(w)
