@@ -353,20 +353,13 @@ claims:
       is not directly tested (the offline-site queue is).
   - id: SPH-034
     claim: >-
-      `__Rebirth` is unaffected by the baseline rule: its baseline is false
-      and only a rising edge is a command.
+      `__Rebirth` follows the baseline rule: only a rising edge is a command,
+      and a `__Rebirth` already TRUE on the first scan is baseline, so a value
+      held TRUE across a restart does not rebirth every site.
     source: "#outputs-are-commands-the-baseline-rule"
     tests:
       - go ./sparkplug/host TestMqttRebirthTagRisingEdge
-    partial: true
-    note: >-
-      Only a rising edge commanding, and held-true or falling values not
-      re-commanding, are asserted (TestMqttRebirthTagRisingEdge). The
-      "unaffected" half is not true as built: WriteOutputs records __Rebirth
-      in the baseline snapshot like any output, and
-      TestMqttRebirthTagTrueInFirstSnapshot pins that a __Rebirth already TRUE
-      in the first snapshot sends nothing, where a false baseline would
-      command it. The page or the code needs a decision.
+      - go ./sparkplug/host TestMqttRebirthTagTrueInFirstSnapshot
   - id: SPH-035
     claim: >-
       `/api/drivers` reports Kind `sparkplug-host`, Name the host-id, state

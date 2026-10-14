@@ -288,8 +288,10 @@ So the driver reads its output set as follows.
   output tags, not the broker session, so it survives a dropped
   connection intact. Commands genuinely raised while the broker was away
   are still queued and go out on reconnect.
-- **`__Rebirth` is unaffected**: its baseline is `false` and only a
-  rising edge is a command, which is what it always meant.
+- **`__Rebirth` follows the same rule.** Only a rising edge is a command,
+  and a `__Rebirth` that is already TRUE on the first scan is baseline,
+  not an edge: a value held TRUE (or retained) across a restart does not
+  ask every site to rebirth each time the controller starts.
 
 None of this depends on how often the runtime calls the driver. The scan
 loop hands the driver *every* output on the calls it makes, but it only
