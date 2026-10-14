@@ -116,7 +116,7 @@ programs are not in the subset.
 | edges `+X` `-X`, edge coils `( P X )` `( N X )` | `ONS` `OSF` with generated storage bits |
 | compares `GT GE LT LE EQ NE` | the compare instructions; an expression operand becomes `CMP` |
 | `{ y := expr }` | `MOVE`, `ADD`, `SUB`, `MUL` or `DIV` for one operation on plain operands, `ABS` for `ABS(x)`, and `CPT` for anything else: `MOD`, unary `-`, `SQRT` (as `SQR`), `**` or `EXPT`, and nested expressions |
-| `t:TON` `t:TOF`, `c:CTU` | `TON` `TOF` `CTU` on `TIMER` / `COUNTER` tags; `t.Q`→`t.DN`, `t.ET`→`t.ACC` |
+| `t:TON` `t:TOF`, `c:CTU` | ladder: `TON` `TOF` `CTU` on `TIMER` / `COUNTER` tags. ST: `TONR(t)` (with `t.Reset := NOT IN`, so it clears when `IN` drops, as a TON does), `TOFR(t)` and `CTUD(c)` on `FBD_TIMER` / `FBD_COUNTER` tags. Both: `t.Q`→`t.DN`, `t.ET`→`t.ACC`, `c.CV`→`c.ACC` |
 | `t:TONR` (with `dialect: logix`) | ladder: a `TON` with a `RES(t)` rung ahead of it; ST: `TONR(t);` on an `FBD_TIMER` |
 | `FIRST_SCAN()`, `/FIRST_SCAN()` | `XIC(S:FS)`, `XIO(S:FS)`; `S:FS` in ST |
 | `clk:LOCAL_TIME()`, `clk.SECOND` | `GSV(WallClockTime,,LocalDateTime,clk[0])` into a `DINT[7]`, `clk[5]` |

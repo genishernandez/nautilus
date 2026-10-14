@@ -111,16 +111,25 @@ claims:
 
   - id: LGA-009
     claim: >-
-      `TON`, `TOF` and `CTU` blocks are written as the Logix instructions on
-      `TIMER` / `COUNTER` tags, with `t.Q` written as `t.DN` and `t.ET` as
-      `t.ACC`.
+      In ladder, `TON`, `TOF` and `CTU` blocks are written as the Logix
+      instructions on `TIMER` / `COUNTER` tags; in ST, as `TONR(t)` (with
+      `t.Reset := NOT IN`), `TOFR(t)` and `CTUD(c)` on `FBD_TIMER` /
+      `FBD_COUNTER` tags. Either way `t.Q` is written as `t.DN`, `t.ET` as
+      `t.ACC` and `c.CV` as `c.ACC`.
     source: "#what-the-target-accepts"
     tests:
       - go ./logix/writer TestNeutralTextSpelling
       - go ./logix/writer TestCounterEndsItsRung
       - go ./logix/writer TestOutputCapturesAndResetConditions
       - go ./logix/writer TestGolden/subset
-    note: "`TOF` and the `TIMER` / `COUNTER` tag types are asserted through the subset golden snapshot."
+      - go ./logix/writer TestStructuredText
+      - go ./logix/writer TestSTTOFAndCounterValue
+    note: >-
+      Ladder `TOF` and the `TIMER` / `COUNTER` tag types are asserted through
+      the subset golden snapshot; the ST TON and CTU forms and the
+      `FBD_TIMER` / `FBD_COUNTER` types by TestStructuredText, ST `TOF` and
+      `c.CV` by TestSTTOFAndCounterValue, ladder `c.CV` by
+      TestOutputCapturesAndResetConditions.
 
   - id: LGA-010
     claim: >-

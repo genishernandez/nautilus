@@ -1465,3 +1465,32 @@ func hasDiag(diags []Diag, rule, want string) bool {
 	}
 	return false
 }
+
+// An ST TOF is TOFR on an FBD_TIMER, with no Reset: TOFR restarts from
+// the input's rising edge by itself. A counter's CV reads as ACC.
+func TestSTTOFAndCounterValue(t *testing.T) {
+	src := "PROGRAM P\nVAR\n  Run : BOOL; Fan : BOOL; t : TOF; c : CTU; N : DINT;\nEND_VAR\n" +
+		"t(IN := Run, PT := T#5S, Q => Fan);\nc(CU := Run, PV := 3);\nN := c.CV;\nEND_PROGRAM\n"
+	doc, diags, err := WriteST(src, Options{Controller: "C"})
+	if err != nil || len(diags) > 0 {
+		t.Fatalf("%v %v", err, joinDiags(diags))
+	}
+	f, err := l5x.Parse(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := f.Controller.Programs[0].Routines[0].Text
+	for _, want := range []string{"t.PRE := 5000;", "t.TimerEnable := Run;", "TOFR(t);", "Fan := t.DN;", "N := c.ACC;"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "t.Reset") {
+		t.Errorf("a TOF drives no Reset:\n%s", text)
+	}
+	for _, tg := range append(f.Controller.Tags, f.Controller.Programs[0].Tags...) {
+		if tg.Name == "t" && tg.DataType != "FBD_TIMER" {
+			t.Errorf("t is %s, want FBD_TIMER", tg.DataType)
+		}
+	}
+}
