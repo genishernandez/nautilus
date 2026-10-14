@@ -146,21 +146,22 @@ claims:
   - id: SPB-017
     claim: >-
       With `primary-host` set, the node defers its birth until the host's
-      STATE is ONLINE and dies (NDEATH) when the host goes offline, and both
-      the 2.x (plain ONLINE/OFFLINE) and 3.0 (JSON) STATE encodings are
-      accepted.
+      STATE is ONLINE, and both the 2.x (plain ONLINE/OFFLINE) and 3.0 (JSON)
+      STATE encodings are accepted. When the host goes offline the node
+      stays connected and born (no NDEATH) and stops publishing data, which
+      is buffered and replayed as historical with store-forward and not sent
+      without it.
     source: "#primary-host-and-store-and-forward"
     tests:
       - go ./sparkplug TestParseState
       - go ./sparkplug TestPrimaryHostDefersTheBirthUntilOnline
       - go ./sparkplug TestNoPrimaryHostBirthsOnConnect
-    partial: true
+      - go ./sparkplug TestStoreForwardBuffersWhileThePrimaryHostIsOffline
+      - go ./sparkplug TestPrimaryHostOfflineWithoutStoreForwardSendsNothing
     note: >-
-      Both STATE encodings are parsed and the birth is deferred until the host
-      is ONLINE (2.x and 3.0). The page also says the node dies (NDEATH) when
-      the host goes offline; the code does not: handleState on an offline
-      STATE only logs and buffers (store-forward), it never publishes NDEATH.
-      Page and code disagree, so this stays partial.
+      The page states that this differs from Sparkplug 3.0, where the edge
+      node ends its session when the primary host goes offline. Whether the
+      code should follow the spec is open in #333.
   - id: SPB-018
     claim: >-
       With `store-forward: N`, data messages are buffered while the broker
@@ -200,17 +201,13 @@ claims:
   - id: SPB-024
     claim: >-
       MQTT and protobuf live only in the sparkplug package; the runtime
-      core stays stdlib-only.
+      core's one dependency outside the Go standard library is
+      gopkg.in/yaml.v3.
     source: "#conformance"
     tests:
       - go ./sparkplug TestMQTTAndProtobufLiveOnlyInTheSparkplugPackage
       - go ./sparkplug TestRuntimeCoreDoesNotDependOnMQTTOrProtobuf
-    partial: true
-    note: >-
-      MQTT and protobuf imports exist only under sparkplug/, and the runtime
-      core packages have no path to them (both asserted). "Stdlib-only" is not
-      literally true: the runtime imports gopkg.in/yaml.v3, so the page
-      overstates this.
+      - go ./sparkplug TestRuntimeCoreDependsOnlyOnStdlibAndYAML
   - id: SPB-025
     claim: >-
       `driver: {type: sparkplug-host}` presents an edge-node group as input

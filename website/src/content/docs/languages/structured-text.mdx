@@ -72,8 +72,11 @@ is what the next line reads in the same scan.
 
 The `VAR_EXTERNAL` block here is the explicit form: in a manifest project every
 tag in `nautilus.yaml` is in scope in every program without it, typed by its
-`type:` (or its `init:`), and a `VAR_EXTERNAL` that names one must agree with
-that type. (This Go-tier example's tags are declared in Go with no type, so
+`type:` (or its `init:`). A `VAR_EXTERNAL` that names a tag with a `type:` must
+agree with it. A tag typed only by its `init:` takes the declared type instead
+(`VAR_EXTERNAL Count : DINT` with `init: 0` is a DINT), and the `init:` must be
+a value of that type: `init: TRUE` against `VAR_EXTERNAL Speed : REAL` is an
+error. (This Go-tier example's tags are declared in Go with no type, so
 the program states them.) Either way, naming a tag binds it in the tag store
 rather than creating it, and reading a tag nothing has ever written faults the
 scan with `undefined tag`. A `FUNCTION_BLOCK` sees no tag it does not declare

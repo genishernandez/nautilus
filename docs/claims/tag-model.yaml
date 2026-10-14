@@ -57,11 +57,14 @@ claims:
     claim: >-
       A VAR_EXTERNAL declaration wins for its program but must agree with a
       stated type: (VAR_EXTERNAL Speed : BOOL against type: REAL is an error
-      at the declaration).
+      at the declaration). A tag with only an init: takes the declared type,
+      and an init: that is not a value of it (TRUE for a REAL, 2.5 for a
+      DINT) is an error naming the tag.
     source: "#tags-in-scope-the-rules"
     tests:
       - go ./internal/project TestExplicitDeclarationMustAgreeWithTypedTag
       - go ./internal/project TestProgramsDisagreeingOnAnUntypedTag
+      - go ./internal/project TestDeclarationTypesAnInitOnlyTag
   - id: TAG-007
     claim: >-
       Programs that bind one untyped tag with different types are an error

@@ -52,7 +52,12 @@ so you see this before the download, not after.)
   in the manifest, or declare it in VAR_EXTERNAL`.
 - **`VAR_EXTERNAL` stays legal** and wins for that program. When the tag
   states a `type:`, the declaration must agree with it — `VAR_EXTERNAL Speed
-  : BOOL` against `type: REAL` is an error at the declaration. Programs that
+  : BOOL` against `type: REAL` is an error at the declaration. When the tag
+  has only an `init:`, the declaration sets its type (`VAR_EXTERNAL Count :
+  DINT` with `init: 0` seeds a DINT), and the `init:` must be a value of
+  that type: `init: TRUE` against `VAR_EXTERNAL Speed : REAL` is an error
+  (`tag Speed (declared REAL by a program): init: want REAL, got a
+  boolean`), as is `init: 2.5` against a DINT. Programs that
   bind one untyped tag with different types (one declares `Count : DINT`,
   another reads `Count` implicitly as the REAL its `init: 0` implies) are an
   error naming both tasks; a `type:` on the tag settles it.

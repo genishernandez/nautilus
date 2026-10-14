@@ -44,14 +44,14 @@ claims:
   - id: ST-004
     claim: >-
       A VAR_EXTERNAL that names a manifest tag must agree with the tag's
-      type.
+      type:. For a tag typed only by its init:, the declaration sets the
+      type and the init: must be a value of it (init: TRUE against a REAL
+      declaration is an error).
     source: "#a-program-top-to-bottom"
     tests:
       - go ./internal/project TestExplicitDeclarationMustAgreeWithTypedTag
+      - go ./internal/project TestDeclarationTypesAnInitOnlyTag
       - go ./lang/st TestTagTypesAndUntypedTags
-    partial: true
-    note: >-
-      Agreement with a tag's type: is asserted. For a tag typed only by its init:, which the page also covers, the page and the code disagree: a number init types the tag REAL but a VAR_EXTERNAL of an integer kind is accepted (guides/tag-model documents this), so only a BOOL-vs-number mismatch is refused. TestTagTypesAndUntypedTags asserts the opposite of the page (an init-inferred type never overrides a VAR_EXTERNAL declaration).
 
   - id: ST-005
     claim: >-

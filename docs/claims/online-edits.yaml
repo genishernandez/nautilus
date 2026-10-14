@@ -47,21 +47,19 @@ claims:
       - go ./server TestOnlineEditsRequireTheTokenButReadsStayOpen
   - id: OE-005
     claim: >-
-      Online edits are ephemeral: a restart reverts to the program the binary
-      embeds, and only committing to git makes an edit permanent.
+      Without a retain store a restart goes back to the program the binary
+      embeds. With retain: configured, online-edited programs are saved and
+      reloaded before the first scan, replacing the binary's program for that
+      task (even a newer one) until a build whose program matches the edit
+      ships.
     source: "#online-edits"
     tests:
       - go ./internal/project TestOnlineEditDoesNotSurviveARestart
-    partial: true
+      - go ./runtime TestOnlineEditSurvivesARestartThroughTheStore
+      - go ./runtime TestRetainedProgramApplies
     note: >-
-      A controller without a retain store reverts to the embedded program on
-      restart (asserted). Page and code disagree for a controller with retain:
-      configured: online-edited program sources are persisted in the retain
-      store and reloaded on start (runtime/retain.go,
-      TestRetainedProgramApplies), so the edit survives a restart there. The
-      page states no such exception. The restart is a fresh runtime from the
-      same project in the same process, and 'only committing to git makes an
-      edit permanent' is not asserted.
+      A restart is a fresh runtime from the same project (and, with retain,
+      the same store) in the test process, not a new OS process.
   - id: OE-007
     claim: >-
       An online edit can be rolled back, restoring the program that ran

@@ -86,6 +86,50 @@ func TestScaffoldMinimalIsOneTaskOneProgramOneTestFile(t *testing.T) {
 	}
 }
 
+// ciRuns returns the run: lines of a scaffolded project's ci.yml, in order.
+func ciRuns(t *testing.T, dir string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wf struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &wf); err != nil {
+		t.Fatalf("ci.yml is not valid YAML: %v", err)
+	}
+	var runs []string
+	for _, j := range wf.Jobs {
+		for _, s := range j.Steps {
+			if s.Run != "" {
+				runs = append(runs, strings.TrimSpace(s.Run))
+			}
+		}
+	}
+	return runs
+}
+
+// assertRunsEach fails unless some run: line starts with each of want.
+func assertRunsEach(t *testing.T, runs []string, want ...string) {
+	t.Helper()
+	for _, w := range want {
+		found := false
+		for _, r := range runs {
+			if strings.HasPrefix(r, w) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the scaffolded CI never runs %q; its run steps are %q", w, runs)
+		}
+	}
+}
+
 // Getting started: the scaffolded CI gates on naut check, naut test and
 // naut build (the manifest templates).
 func TestScaffoldedManifestCIGatesOnCheckTestBuild(t *testing.T) {
@@ -95,37 +139,25 @@ func TestScaffoldedManifestCIGatesOnCheckTestBuild(t *testing.T) {
 	}{{"tour", tmplDemo}, {"minimal", tmplMinimal}} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := scaffoldInto(t, scaffold{Name: tc.name, Program: "P", Template: tc.template, CI: true})
-			raw, err := os.ReadFile(filepath.Join(dir, ".github/workflows/ci.yml"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			var wf struct {
-				Jobs map[string]struct {
-					Steps []struct {
-						Run string `yaml:"run"`
-					} `yaml:"steps"`
-				} `yaml:"jobs"`
-			}
-			if err := yaml.Unmarshal(raw, &wf); err != nil {
-				t.Fatalf("ci.yml is not valid YAML: %v", err)
-			}
-			var runs []string
-			for _, j := range wf.Jobs {
-				for _, s := range j.Steps {
-					if s.Run != "" {
-						runs = append(runs, s.Run)
-					}
-				}
-			}
-			for _, want := range []string{"naut check", "naut test", "naut build"} {
-				found := false
-				for _, r := range runs {
-					if strings.HasPrefix(strings.TrimSpace(r), want) {
-						found = true
-					}
-				}
-				if !found {
-					t.Errorf("the scaffolded CI never runs %q; its run steps are %q", want, runs)
+			assertRunsEach(t, ciRuns(t, dir), "naut check", "naut test", "naut build")
+		})
+	}
+}
+
+// Getting started: an SDK project's CI runs go vet, naut check (through go
+// run), go test and go build in place of naut test and naut build.
+func TestScaffoldedSDKCIGatesOnGoVetCheckTestBuild(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		template string
+	}{{"sdk", tmplSDK}, {"sdkdemo", tmplSDKDemo}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := scaffoldInto(t, scaffold{Name: tc.name, Module: "example.com/" + tc.name, Program: "P", Template: tc.template, CI: true})
+			runs := ciRuns(t, dir)
+			assertRunsEach(t, runs, "go vet", "go run github.com/joyautomation/nautilus/cmd/naut check", "go test", "go build")
+			for _, r := range runs {
+				if strings.HasPrefix(r, "naut ") {
+					t.Errorf("an SDK project's CI runs %q, which needs naut installed", r)
 				}
 			}
 		})
@@ -226,6 +258,17 @@ func TestScaffoldedSDKProjectsGoTest(t *testing.T) {
 			dir := scaffoldInto(t, scaffold{Name: tc.name, Module: "example.com/" + tc.name, Program: pascalCase(tc.name), Template: tc.template, Replace: repo})
 			if err := os.WriteFile(filepath.Join(dir, "go.sum"), sum, 0o644); err != nil {
 				t.Fatal(err)
+			}
+			// The scaffolded test scans the program by hand against the
+			// in-memory driver (Getting started says so).
+			src, err := os.ReadFile(filepath.Join(dir, "program_test.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"nio.NewMemory()", "rt.Scan()"} {
+				if !strings.Contains(string(src), want) {
+					t.Errorf("the scaffolded program_test.go does not call %s", want)
+				}
 			}
 			cmd := exec.Command(goBin, "test", "-count=1", "-v", "./...")
 			cmd.Dir = dir

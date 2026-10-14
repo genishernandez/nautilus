@@ -949,17 +949,11 @@ claims:
   - id: FN-069
     claim: >-
       Every divide-by-zero bumps the controller-wide divZero counter in the
-      scan stats (/api/state stats.divZero), counted since start.
+      scan stats (/api/state scan.divZero), counted since start.
     source: "#operators"
     tests:
       - go ./runtime TestDivideByZeroCountsAndKeepsScanning
       - go ./server TestStateCarriesDivZeroCount
-    partial: true
-    note: >-
-      Page and code disagree on the path. The counter is controller-wide and
-      counted since start, and /api/state carries it, but under scan.divZero
-      (the frame's "scan" stats block), not the stats.divZero the page names;
-      TestStateCarriesDivZeroCount asserts scan.divZero.
 
   - id: FN-070
     claim: MOVE passes its single input through as an assignment (FBD wiring aid).

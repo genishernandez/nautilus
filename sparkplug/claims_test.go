@@ -366,6 +366,15 @@ func TestStoreForwardBuffersWhileThePrimaryHostIsOffline(t *testing.T) {
 	if got := len(sc.published("NDATA")); got != 0 {
 		t.Fatalf("%d NDATA published while the primary host was offline, want 0", got)
 	}
+	// The node keeps its session: no NDEATH, still born. (Sparkplug 3.0 has
+	// the node disconnect here instead; see #333. A Disconnect would panic
+	// through the fake client's nil embedded interface.)
+	if got := len(sc.published("NDEATH")); got != 0 {
+		t.Fatalf("%d NDEATH published when the primary host went offline, want 0", got)
+	}
+	if !n.Status().Born {
+		t.Fatal("the node stopped being born when the primary host went offline")
+	}
 
 	// The host returns: the next tick replays all three, marked historical.
 	n.handleState(sc, fakeMsg{"STATE/ScadaHost", []byte("ONLINE")})
@@ -381,6 +390,35 @@ func TestStoreForwardBuffersWhileThePrimaryHostIsOffline(t *testing.T) {
 	}
 	if n.sf.len() != 0 {
 		t.Errorf("%d records still buffered after the replay", n.sf.len())
+	}
+}
+
+// Without store-and-forward, data from while the primary host is offline is
+// not sent at all: nothing is published and nothing is kept for later.
+func TestPrimaryHostOfflineWithoutStoreForwardSendsNothing(t *testing.T) {
+	n, sc, rt := newPrimaryHostNode(t)
+	n.onConnect(sc)
+	n.handleState(sc, fakeMsg{"STATE/ScadaHost", []byte("ONLINE")})
+	n.handleState(sc, fakeMsg{"STATE/ScadaHost", []byte("OFFLINE")})
+	for _, v := range []float64{55, 56, 57} {
+		rt.Tags().Set("LevelSP", ir.RealVal(v))
+		tickWithin(t, n, 2*time.Second)
+	}
+	if got := len(sc.published("NDATA")); got != 0 {
+		t.Fatalf("%d NDATA published while the primary host was offline, want 0", got)
+	}
+	if got := len(sc.published("NDEATH")); got != 0 {
+		t.Fatalf("%d NDEATH published when the primary host went offline, want 0", got)
+	}
+	if n.sf != nil {
+		t.Fatal("a node without store-forward has a buffer")
+	}
+	n.handleState(sc, fakeMsg{"STATE/ScadaHost", []byte("ONLINE")})
+	tickWithin(t, n, 2*time.Second)
+	for _, p := range sc.published("NDATA") {
+		if _, hist := decodeSeq(t, p); hist {
+			t.Fatal("a node without store-forward replayed historical data")
+		}
 	}
 }
 
@@ -557,5 +595,30 @@ func TestRuntimeCoreDoesNotDependOnMQTTOrProtobuf(t *testing.T) {
 		if isWireLib(d) {
 			t.Errorf("the runtime core depends on %s", d)
 		}
+	}
+}
+
+// SPB-024: the runtime core's one dependency outside the Go standard
+// library is gopkg.in/yaml.v3; everything else it imports is this module.
+func TestRuntimeCoreDependsOnlyOnStdlibAndYAML(t *testing.T) {
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{if not .Standard}}{{.ImportPath}}{{end}}",
+		"./runtime", "./io", "./lang/ir", "./lang/st")
+	cmd.Dir = moduleRoot(t)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skipf("go list unavailable: %v", err)
+	}
+	var yaml bool
+	for _, d := range strings.Fields(string(out)) {
+		switch {
+		case strings.HasPrefix(d, "github.com/joyautomation/nautilus/"):
+		case d == "gopkg.in/yaml.v3":
+			yaml = true
+		default:
+			t.Errorf("the runtime core depends on %s, outside the standard library and gopkg.in/yaml.v3", d)
+		}
+	}
+	if !yaml {
+		t.Error("gopkg.in/yaml.v3 is no longer a runtime dependency: the page can say stdlib-only again")
 	}
 }

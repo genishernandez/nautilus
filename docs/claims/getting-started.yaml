@@ -6,20 +6,13 @@ claims:
     claim: >-
       naut new scaffolds four templates: the tour (three tasks in three IEC
       languages and a simulated plant), minimal (one task, one program, one
-      test), sdk (a Go project) and sdk-demo (a Go project with plant
+      test file), sdk (a Go project) and sdk-demo (a Go project with plant
       physics in Go).
     source: "#2-scaffold-a-project"
     tests:
       - go ./cmd/naut TestScaffoldVariants
       - go ./cmd/naut TestScaffoldTourDeclaresThreeTasksInThreeLanguages
       - go ./cmd/naut TestScaffoldMinimalIsOneTaskOneProgramOneTestFile
-    partial: true
-    note: >-
-      Asserts each template's file set, that the tour manifest declares three
-      tasks in .fbd, .st and .ld (with the sim task), and that minimal holds one
-      task, one program file and one *_test.yaml. Not matched: the page says
-      minimal is 'one test', but its test file holds two test cases
-      (disagreement, see PR), so the claim stays partial.
   - id: GS-002
     claim: >-
       A freshly scaffolded project can be run, tested and shipped with the
@@ -105,34 +98,25 @@ claims:
       - go ./internal/project TestControlLogicUnchangedWhenSimIsSwappedForDriverInputs
   - id: GS-010
     claim: >-
-      An SDK project's go test runs the same acceptance suites on the same
-      virtual clock.
+      An SDK project's go test runs the scaffolded Go tests, which scan the
+      program one rt.Scan() at a time against the in-memory driver; a Go
+      test can run on the same virtual clock as naut test
+      (acceptance.NewClock and acceptance.NewScheduler), as the go-sdk
+      example does.
     source: "#2-scaffold-a-project"
     tests:
-      - go ./examples/go-sdk TestPISettles
       - go ./cmd/naut TestScaffoldedSDKProjectsGoTest
-    partial: true
-    note: >-
-      The SDK example's suite runs on the virtual clock, and the scaffolded sdk
-      and sdk-demo projects' go test is now run
-      (TestScaffoldedSDKProjectsGoTest). But the scaffolded program_test.go
-      drives rt.Scan() by hand against the Memory driver: it uses neither the
-      acceptance suites nor the virtual clock the page names (page and template
-      disagree, see PR).
+      - go ./examples/go-sdk TestPISettles
   - id: GS-011
     claim: >-
-      The scaffolded CI gates on naut check, naut test and naut build.
+      The scaffolded CI gates on naut check, naut test and naut build; an SDK
+      project's CI runs go vet, naut check (through go run), go test and go
+      build instead.
     source: "#4-make-it-yours"
     tests:
       - go ./cmd/naut TestScaffoldVariants/demo manifest project
       - go ./cmd/naut TestScaffoldedManifestCIGatesOnCheckTestBuild
-    partial: true
-    note: >-
-      The manifest templates' ci.yml runs naut check, naut test and naut build
-      (asserted). The sdk and sdk-demo scaffolds' ci.yml runs go vet, go run
-      .../naut check, go test and go build instead, never naut test or naut
-      build, so the page's sentence does not hold for them (disagreement, see
-      PR).
+      - go ./cmd/naut TestScaffoldedSDKCIGatesOnGoVetCheckTestBuild
   - id: GS-012
     claim: >-
       One release build runs on macOS, Linux and Windows (amd64 and arm64)

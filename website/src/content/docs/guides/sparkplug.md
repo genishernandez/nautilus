@@ -160,10 +160,19 @@ tag and counted as `commandsRefused` in the node's status.
 
 ## Primary host and store-and-forward
 
-Set `primary-host` to a SCADA host's id and the node coordinates with that
-host's STATE certificate, per the spec: it defers its own birth until the
-host is ONLINE, and dies (NDEATH) when the host goes offline — both the
-2.x and 3.0 STATE encodings are accepted.
+Set `primary-host` to a SCADA host's id and the node watches that host's
+STATE certificate (both the 2.x and 3.0 encodings are accepted). It defers
+its own birth until the host is ONLINE. When the host goes offline, the
+node logs a warning and stays connected and born: it sends no NDEATH, and
+it stops publishing NDATA and DDATA until the host is back. With
+`store-forward` set, that data is buffered and replayed as historical once
+the host returns; without it, data from while the host was offline is not
+sent.
+
+This differs from Sparkplug 3.0, in which an edge node ends its MQTT
+session when its primary host goes offline (publishing NDEATH as it
+disconnects) and connects and births again once the host is back online.
+nautilus keeps its session and buffers instead.
 
 `store-forward: 5000` buffers up to that many data messages while the
 broker is unreachable (or the primary host is offline) and replays them,
@@ -203,8 +212,9 @@ node.Start(ctx)
 
 The node passes the **Sparkplug TCK edge-node profile** — CI runs the
 `joyautomation/sparkplug-tck-go` harness against a live node on every push.
-MQTT and protobuf live only in this package; the runtime core stays
-stdlib-only.
+MQTT and protobuf live only in this package. The runtime core's one
+dependency outside the Go standard library is `gopkg.in/yaml.v3`, which it
+uses to read the project manifest.
 
 ## The other side of the wire
 
