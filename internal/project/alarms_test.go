@@ -149,8 +149,10 @@ alarm-files: [alarms/rtu9.yaml]
 		t.Fatal("an id declared in both an alarm file and the manifest was accepted")
 	}
 	if !strings.Contains(err.Error(), "RTU9_WEL15_INT_001_YA") ||
-		!strings.Contains(err.Error(), "declared by both") {
-		t.Errorf("error should name the id and both sources, got: %v", err)
+		!strings.Contains(err.Error(), "declared by both") ||
+		!strings.Contains(err.Error(), "alarms/rtu9.yaml alarm") ||
+		!strings.Contains(err.Error(), "manifest alarm") {
+		t.Errorf("error should name the id, the alarm file and the manifest, got: %v", err)
 	}
 }
 
