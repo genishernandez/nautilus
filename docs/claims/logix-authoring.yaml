@@ -237,8 +237,8 @@ claims:
   - id: LGA-021
     claim: >-
       A tag's `alias:` is written as a Logix alias tag (`AliasFor`) and the
-      program names the tag, so one source runs in simulation and on
-      hardware.
+      program names the tag; the nautilus runtime ignores the binding, so the
+      same source runs in simulation.
     source: "#io-tag-aliases"
     tests:
       - go ./logix/writer TestAliasTags

@@ -194,10 +194,14 @@ claims:
     source: "#when-something-isnt-working"
     tests:
       - go ./cmd/naut TestLogixProbePrintsTheRemedyForAFailingGate
+    partial: true
     note: >-
-      Against a fake agent that, like logixd's probe, attaches a remedy to the
-      failing gate: the remedy is the indented line directly under that gate,
-      before the next gate, and a passing gate carries none.
+      The CLI half: against a fake agent that attaches a remedy to the failing
+      gate, the remedy is the indented line directly under that gate, before
+      the next gate, and a passing gate carries none. The remedies themselves
+      come from the C# agent (its Remedies table in tools/logixd), and that
+      the real agent attaches one to every failing gate is not asserted by
+      any test, in CI or on hardware.
 
   - id: LGX-018
     claim: >-
@@ -380,9 +384,9 @@ claims:
       - go ./logix/logixd TestInstallerRefusesPlainDOTNET_ROOT
     partial: true
     note: >-
-      Verified on Windows only: the test sets DOTNET_ROOT at User scope, runs
-      install.ps1 in an elevated session and expects the refusal, both fix
-      commands and nothing installed. Opt-in
+      Verified on hardware only (an elevated Windows session): the test sets
+      DOTNET_ROOT at User scope, runs install.ps1 elevated and expects the
+      refusal, both fix commands and nothing installed. Opt-in
       (NAUTILUS_LOGIXD_INSTALLER_TEST=1), skipped in CI and not yet run (the
       Windows SDK machine is unavailable).
 
