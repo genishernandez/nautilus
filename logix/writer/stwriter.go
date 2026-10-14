@@ -32,7 +32,8 @@ import (
 //	                         (logix/conversion): narrowing as a wrap in
 //	                         integer arithmetic, int → REAL as v or
 //	                         (v * 1.0), BOOL → number as an IF; REAL →
-//	                         integer refused (convert.go)
+//	                         integer as a plain store of the whole
+//	                         right-hand side (convert.go)
 //	Run, Mode#Run            the enumeration member's value (enum.go)
 //
 // Refused by name: STRING and the string functions, MIN / MAX / LIMIT /
@@ -190,12 +191,15 @@ type stWriter struct {
 	// rhs is the assignment's right-hand side being rendered and dest
 	// its target's type; realCtx marks an expression Logix may compute
 	// in REAL; beside an operand whose sibling is a REAL reference or
-	// literal; depth counts nested expr calls (convert.go).
-	rhs     st.Expression
-	dest    string
-	realCtx bool
-	beside  bool
-	depth   int
+	// literal; depth counts nested expr calls (convert.go). realKnown
+	// is realCtx for a REAL the writer can see: an integer / there is
+	// refused (#361).
+	rhs       st.Expression
+	dest      string
+	realCtx   bool
+	realKnown bool
+	beside    bool
+	depth     int
 }
 
 func (w *stWriter) emitf(depth int, format string, a ...any) {
@@ -417,7 +421,9 @@ func (w *stWriter) expr(e st.Expression) string {
 	if w.depth == 0 {
 		// A statement's expression: REAL when it mixes one in, or when
 		// it is stored into one.
-		w.realCtx = w.numReal(e) || e == w.rhs && isRealType(w.dest)
+		stored := e == w.rhs && isRealType(w.dest)
+		w.realCtx = w.numReal(e) || stored
+		w.realKnown = w.knownReal(e) || stored
 	}
 	w.depth++
 	defer func() { w.depth-- }()
@@ -470,23 +476,29 @@ func (w *stWriter) expr(e st.Expression) string {
 			return "0"
 		}
 		arr := w.expr(v.Array)
-		saved := w.realCtx
+		saved, savedKnown := w.realCtx, w.realKnown
 		w.realCtx = w.numReal(v.Indices[0]) // an index is a computation of its own
+		w.realKnown = w.knownReal(v.Indices[0])
 		idx := w.expr(v.Indices[0])
-		w.realCtx = saved
+		w.realCtx, w.realKnown = saved, savedKnown
 		return arr + "[" + idx + "]"
 	case *st.BinaryExpr:
-		saved := w.realCtx
+		saved, savedKnown := w.realCtx, w.realKnown
 		if isCompare(v.Op) {
 			// So are a comparison's operands.
 			w.realCtx = w.numReal(v.Left) || w.numReal(v.Right)
+			w.realKnown = w.knownReal(v.Left) || w.knownReal(v.Right)
+		}
+		if w.intDivision(v) {
+			w.realCtx, w.realKnown = saved, savedKnown
+			return "0"
 		}
 		mixes := isCompare(v.Op) || v.Op == "+" || v.Op == "-" || v.Op == "*" || v.Op == "/"
 		w.beside = mixes && w.realLeaf(v.Right)
 		l := w.expr(v.Left)
 		w.beside = mixes && w.realLeaf(v.Left)
 		r := w.expr(v.Right)
-		w.realCtx = saved
+		w.realCtx, w.realKnown = saved, savedKnown
 		return "(" + l + " " + v.Op + " " + r + ")"
 	case *st.UnaryExpr:
 		return v.Op + " (" + w.expr(v.Operand) + ")"

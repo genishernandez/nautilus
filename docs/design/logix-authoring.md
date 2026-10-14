@@ -103,7 +103,7 @@ positions (`logix-target.md` §6.4).
 | global (`VAR_EXTERNAL`) | controller tag | |
 | a manifest tag a program names undeclared (#177/#210) | controller tag, typed from the manifest | ladder and ST (#248); uses resolved on the compiler's AST (`logix/writer/uses.go`) |
 | enumeration type and its members | `DINT`; a member is its value | Logix has no enumerated type; the names do not reach the controller, and an import brings the tag back as `DINT` (`logix/writer/enum.go`) |
-| `X_TO_Y` / `TO_Y` / `TRUNC_<int>` in ST | Logix that computes nautilus's result, or `logix/conversion` | narrowing as an integer-arithmetic wrap, int → REAL as `v` or `(v * 1.0)`, BOOL → number as an `IF`; REAL → integer rounding, unsigned, bit strings, LINT, LTIME and STRING refused (`logix/writer/convert.go`, #255) |
+| `X_TO_Y` / `TO_Y` / `TRUNC_<int>` in ST | Logix that computes nautilus's result, or `logix/conversion` | narrowing as an integer-arithmetic wrap, int → REAL as `v` or `(v * 1.0)`, BOOL → number as an `IF`, REAL → integer as a plain store of the whole right-hand side into a tag of that type; REAL → integer inside an expression, an integer `/` whose quotient meets a REAL (#361), unsigned, bit strings, LINT, LTIME and STRING refused (`logix/writer/convert.go`, #255) |
 | program-local `VAR` | program tag | |
 | one nautilus task + program | one Logix task + program + `MainRoutine` | a stated decision, not a derivation |
 
@@ -1352,7 +1352,8 @@ or refuses it with **`logix/conversion`**:
 | integer → LREAL, REAL ↔ LREAL | `v`, as the whole right-hand side only | the store converts; mixing inside an expression is unverified |
 | BOOL → number | `IF b THEN x := 1; ELSE x := 0; END_IF;`, whole right-hand side only | no arithmetic on a BOOL |
 | `TRUNC_<int>(r)` | `TRUNC(r)`, as the whole right-hand side of an integer assignment | the value stored is already whole, so no rounding rule applies |
-| REAL / LREAL → integer or TIME | refused | Logix rounds only as it stores, and that it rounds halves to even is not verified |
+| REAL → integer or TIME | `r`, as the whole right-hand side of an assignment to a tag of the conversion's own type (`i := REAL_TO_INT(r)` → `i := r;`, `t := REAL_TO_TIME(r)` → `t := r;`) | the store rounds halves to even, as nautilus does (verified on Echo, below); TIME is a DINT of milliseconds, the unit `REAL_TO_TIME` counts. Refused inside an expression (Logix would compute with the unrounded REAL), into another type (the store rounds to the destination's width) |
+| LREAL → integer or TIME | refused | not verified on a controller |
 | unsigned, BYTE…LWORD, LINT, LTIME, STRING | refused, the type named | no Logix type in the subset (the importer reads LINT and the unsigned types in brownfield declarations; the writer declares none) |
 
 A narrowing wrap is also refused inside an expression that mixes in a
@@ -1360,18 +1361,48 @@ REAL (Logix might compute its `MOD`s in REAL); a comparison's operands and
 an array index count as computations of their own. Two divergences stay,
 as they do for every value: a REAL is 32 bits on the controller and 64 in
 nautilus, and a REAL with no value in the target faults the nautilus scan
-where the controller stores something and sets S:V. Ladder is unchanged:
+where the controller rounds it and stores the result's low bits (below).
+Ladder is unchanged:
 `{ y := X_TO_Y(v) }` was and is refused by `logix/data-op`
 (`logix/operand` in a compare).
 
-**To verify on Echo** (blocked; nothing above has run on a controller):
-that a REAL store rounds halves to even (2.5, 3.5, -2.5, -3.5, 0.5), which
-would let `REAL_TO_DINT` as a whole right-hand side be written as a store;
-that `MOD` on a negative DINT keeps a remainder within the divisor
-(-70000 to INT); that `(v * 1.0)` and a mixed comparison convert as
-documented; `TRUNC` of a REAL into a DINT; and, for a cheaper wrap
-(`((v AND 65535) XOR 32768) - 32768`), that `AND`/`XOR` are bitwise on a
-DINT.
+**Verified on Echo** (v38, 1756-L85E emulation, 2026-10-14, #297): the
+written conversions computed nautilus's value for 271 of 279 results over
+9 input sets; the other 8 were a `3.7` input's float32 rounding. What the
+controller does:
+
+| Question | Observed |
+|---|---|
+| a REAL stored into DINT / INT / SINT | rounds **halves to even**, at run time and for literals: 2.5 → 2, 3.5 → 4, −2.5 → −2, −3.5 → −4, 0.5 → 0, 1.5 → 2, −0.5 → 0, −1.5 → −2 (nautilus's `REAL_TO_DINT`) |
+| `MOD` of a negative DINT | truncated, the dividend's sign: −70000 MOD 65536 = −4464, −7 MOD 3 = −1, 7 MOD −3 = 1 (as nautilus) |
+| `AND` / `XOR` on a DINT | bitwise: 70000 AND 65535 = 4464, 5 XOR 3 = 6; `((v AND 65535) XOR 32768) - 32768` wraps to INT for every value tried (the writer keeps the `MOD` form) |
+| `(v * 1.0)`, a DINT compared with a REAL | the integer becomes REAL (float32: 16777217 = 16777216.0 is TRUE) |
+| `TRUNC` of a REAL into a DINT | toward zero (2.7 → 2, −2.7 → −2) |
+| a REAL out of range | rounded, then **wrapped** to the target's low bits, never saturated: 3e9 → DINT −1294967296, 2^31 → −2^31, 1e20 → 0, 40000.5 → INT −25536. With the writer's `ReportMinorOverflow="false"` nothing is logged and the controller keeps running; `S:V` cannot be read in ST. nautilus faults the scan |
+| an integer `/` beside a REAL | divided **in REAL** once the destination or a comparison partner is REAL: `r := a / 2` is 3.5 for a = 7 (nautilus 3) — #361, below |
+
+### Follow-up — REAL → integer as a store, integer `/` beside a REAL (2026-10-14, #361)
+
+With ties-to-even verified, `REAL_TO_DINT` / `_INT` / `_SINT`, `TO_<int>`
+of a REAL and `REAL_TO_TIME` are written as a plain store when the
+conversion is the whole right-hand side of an assignment to a tag of the
+conversion's own type. Anything else stays refused: inside an expression
+(Logix rounds only as it stores), into a narrower or wider tag
+(`i := REAL_TO_DINT(r)` with `i` INT: nautilus stores the rounded DINT
+unwrapped, the store would round and wrap to 16 bits; the fix is a DINT
+tag and `DINT_TO_INT`), and from an LREAL (unverified). Out of range the
+general divergence applies: Logix wraps silently, nautilus faults; a
+`REAL_TO_TIME` beyond a DINT of milliseconds (±24.8 days) wraps on the
+controller, where nautilus's TIME is 64 bits.
+
+An integer `/` whose quotient meets a REAL — stored into a REAL or LREAL,
+computed beside a REAL operand, or compared with one — is refused with
+`logix/conversion`, naming the fix: compute the quotient into a DINT tag
+first (or divide by a REAL if a REAL quotient is meant). A division whose
+own operand is REAL is a REAL division in nautilus too and is written as
+before; an all-integer division (an integer destination, an integer
+comparison partner, an array index) is written unchanged. Ladder's `DIV`
+and `CPT` with a REAL destination are not covered here (unverified).
 
 ## 8. The demo this enables
 

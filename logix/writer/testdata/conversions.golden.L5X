@@ -222,12 +222,30 @@
 <![CDATA[d := TRUNC(r);]]>
 </Line>
 <Line Number="39">
-<![CDATA[IF ((((((d MOD 65536) + 98304) MOD 65536) - 32768) > 5) AND (r > 1.5)) THEN]]>
+<![CDATA[d := r;]]>
 </Line>
 <Line Number="40">
-<![CDATA[  r := (r + arr[((((d MOD 256) + 384) MOD 256) - 128)]);]]>
+<![CDATA[i := r;]]>
 </Line>
 <Line Number="41">
+<![CDATA[s := r;]]>
+</Line>
+<Line Number="42">
+<![CDATA[d := r;]]>
+</Line>
+<Line Number="43">
+<![CDATA[t := r;]]>
+</Line>
+<Line Number="44">
+<![CDATA[d := (a / 2);]]>
+</Line>
+<Line Number="45">
+<![CDATA[IF ((((((d MOD 65536) + 98304) MOD 65536) - 32768) > 5) AND (r > 1.5)) THEN]]>
+</Line>
+<Line Number="46">
+<![CDATA[  r := (r + arr[((((d MOD 256) + 384) MOD 256) - 128)]);]]>
+</Line>
+<Line Number="47">
 <![CDATA[END_IF;]]>
 </Line>
 </STContent>
