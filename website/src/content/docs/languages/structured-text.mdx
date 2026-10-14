@@ -131,7 +131,12 @@ Elementary types are `BOOL`; the integer kinds `SINT`, `USINT`, `INT`, `UINT`,
 `LREAL`; `TIME` and `LTIME`; `STRING`, `WSTRING`, `CHAR`, and `WCHAR`. `WSTRING`, `CHAR` and `WCHAR`
 are accepted as declarations but are held as `STRING`. Integer
 kinds share one 64-bit representation, so a declared width documents intent
-without narrowing. `TIME` counts milliseconds.
+without narrowing: arithmetic does not wrap (an `INT` at 32767 plus 1 is
+32768), by design, so a counter or totaliser never turns silently wrong. A
+conversion such as `TO_INT` wraps to its target when you want the PLC
+behaviour. Mixing signed and unsigned widens to a signed type that holds both
+(`INT + UINT` is a `DINT`) rather than being refused. `TIME` counts
+milliseconds.
 
 `ARRAY[lo..hi] OF T` takes several comma-separated dimensions and any element
 type, including a UDT or a function block. Bounds are integer constants: a
