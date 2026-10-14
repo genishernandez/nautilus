@@ -44,18 +44,24 @@ claims:
     tests:
       - go ./server TestWriteAuthToken
       - go ./server TestWriteAuthBaseLayer
-    partial: true
-    note: >-
-      The tag-write half is asserted; online-edit endpoints (PUT /api/program,
-      rollback, activate) with a token set are not.
+      - go ./server TestOnlineEditsRequireTheTokenButReadsStayOpen
   - id: OE-005
     claim: >-
       Online edits are ephemeral: a restart reverts to the program the binary
       embeds, and only committing to git makes an edit permanent.
     source: "#online-edits"
-    tests: []
+    tests:
+      - go ./internal/project TestOnlineEditDoesNotSurviveARestart
+    partial: true
     note: >-
-      Gap. No test restarts a controller after an online edit and checks the embedded program returns.
+      A controller without a retain store reverts to the embedded program on
+      restart (asserted). Page and code disagree for a controller with retain:
+      configured: online-edited program sources are persisted in the retain
+      store and reloaded on start (runtime/retain.go,
+      TestRetainedProgramApplies), so the edit survives a restart there. The
+      page states no such exception. The restart is a fresh runtime from the
+      same project in the same process, and 'only committing to git makes an
+      edit permanent' is not asserted.
   - id: OE-007
     claim: >-
       An online edit can be rolled back, restoring the program that ran
@@ -74,11 +80,7 @@ claims:
     tests:
       - go ./cmd/naut TestPullMultiTask
       - go ./cmd/naut TestPullSingleProgramRenameTolerant
-    partial: true
-    note: >-
-      Pulling into the declaring file and creating <POU>.st are asserted;
-      a new FBD program landing in <POU>.fbd and generated type files being
-      left alone are not.
+      - go ./cmd/naut TestPullCreatesFBDFileAndLeavesTypeAndLibraryFilesAlone
   - id: OE-009
     claim: >-
       naut pull --check reports drift in any of the controller's programs and
@@ -98,14 +100,7 @@ claims:
       - go ./cmd/naut TestComposeMatchesTheRuntime
       - go ./cmd/naut TestComposeJSON
       - go ./cmd/naut TestComposeGraphicalProgramUsesLadderLibrary
-    partial: true
-    note: >-
-      The lib/ prelude (.st verbatim, then .ld transpiled), a .ld program
-      kept as written and compiling on the controller, and the --json split
-      are asserted. Root-level PROGRAM-less files in the prelude and the
-      controller reporting the original .ld source are not asserted through
-      compose. (TestComposeOverrides, unsaved editor buffers, was removed: the
-      page does not describe overrides.)
+      - go ./cmd/naut TestComposeCoversRootLevelLibrariesAndBothGraphicalLibraries
   - id: OE-011
     claim: >-
       Composition is a single definition shared by the runtime, the language
@@ -113,9 +108,8 @@ claims:
     source: "#pulling-field-edits-back"
     tests:
       - go ./cmd/naut TestComposeMatchesTheRuntime
-    partial: true
-    note: >-
-      Only runtime equality is asserted, not an end-to-end download then pull round trip.
+      - go ./cmd/naut TestDownloadThenPullRoundTripsLosslessly
+      - go ./cmd/naut TestComposeCoversRootLevelLibrariesAndBothGraphicalLibraries
   - id: OE-012
     claim: >-
       Programs are addressed by POU name: GET /api/program lists every
@@ -124,14 +118,11 @@ claims:
     source: "#every-program-both-directions"
     tests:
       - go ./server TestProgramTaskRouting
-    partial: true
-    note: >-
-      The ?task= selector is not exercised, only ?pou=.
+      - go ./server TestProgramTaskSelectorOnGetAndRollback
   - id: OE-013
     claim: >-
       Retained state carries across a swap of a non-main task's program the
       same way as the main task's.
     source: "#every-program-both-directions"
-    tests: []
-    note: >-
-      Gap. Routing to a task program is tested; carrying its state across the swap is not.
+    tests:
+      - go ./server TestTaskProgramOnlineEditCarriesRetainedState
