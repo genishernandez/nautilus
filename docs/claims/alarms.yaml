@@ -130,11 +130,15 @@ claims:
   - id: ALM-012
     claim: >-
       ack-required false collapses Unack-Active to Ack-Active and Unack-RTN to
-      Normal on arrival; auto-clear false latches the alarm in Unack-RTN until
-      acked.
+      Normal on arrival; auto-clear false latches: an acked alarm whose
+      condition clears goes to Unack-RTN, not Normal.
     source: "#states"
     tests:
       - go ./alarm TestStateMachineTable
+    note: >-
+      Reworded to the page's table row (Ack-Active, condition false → Unack-RTN
+      with auto-clear false). The earlier "until acked" was not asserted for a
+      latched alarm: no case acks it again after the latch.
 
   - id: ALM-013
     claim: >-
@@ -335,7 +339,11 @@ claims:
     source: "#the-api"
     tests:
       - go ./server TestMetaReportsAlarmsAndShelveTimes
-    note: TestConfigShelveDurationsFallBack removed (default shelve times are not a page claim).
+      - go ./server TestAlarmRoutes404WithoutAnEngine
+    note: >-
+      TestConfigShelveDurationsFallBack removed (default shelve times are not
+      a page claim). TestAlarmRoutes404WithoutAnEngine added: it is the only
+      test asserting the alarms false half of "whether".
 
   - id: ALM-032
     claim: >-
@@ -364,9 +372,14 @@ claims:
     tests:
       - go ./alarm TestFileJournalRoundTrip
       - go ./alarm TestFileJournalRotatesAndStillQueriesAcross
+    partial: true
     note: >-
-      Querying across generations and skipping a torn line are code details,
-      not page claims; TestFileJournalSkipsATornLine was removed.
+      Durable (events survive a reopen) and rotated (a .1 generation appears)
+      are asserted. JSONL is not: both tests read the file back only through
+      the sink's own Query, so nothing inspects that what is written is one
+      JSON object per line. Querying across generations and skipping a torn
+      line are code details, not page claims; TestFileJournalSkipsATornLine
+      was removed.
 
   - id: ALM-035
     claim: The postgres journal sink creates its table idempotently at startup.
@@ -456,6 +469,12 @@ claims:
     tests:
       - go ./internal/project TestCheckAlarmsCatchesUnknownMember
       - go ./internal/project TestCheckAlarmsWarnsOnUndeclaredAndDeadRule
+    partial: true
+    note: >-
+      The error/warning split is asserted on Project.CheckAlarms, the pass
+      naut check calls. No test runs naut check on a project with alarm
+      mistakes, so the command printing them, and counting the first two as
+      errors and the last two as warnings, is not asserted.
 
   - id: ALM-044
     claim: >-

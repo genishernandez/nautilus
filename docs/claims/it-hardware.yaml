@@ -86,7 +86,16 @@ claims:
       - go ./cmd/naut TestSnmpLiveEqualsRecording
       - go ./redfish/codegen TestLiveImportMatchesRecording
       - go ./cmd/naut TestRedfishLiveImportAndRecord
-      - go ./prom TestForeignImportByteIdenticalOnRerun
+    partial: true
+    note: >-
+      SNMP is covered end to end: a live import, `browse --record` and an
+      import of that recording give the same manifest, tag file and
+      hw_types.st. Redfish compares the live and recorded manifests only,
+      not the tag file or hw_types.st. Prometheus is not covered: no test
+      imports from a `browse --record` body and compares it with a live
+      import. TestForeignImportByteIdenticalOnRerun was removed: its
+      "recording" is the parsed scrape re-rendered by prom.RenderText, not
+      a recorded body, and it compares the manifest only.
   - id: IT-008
     claim: >-
       `manifest:` is the only required key and `New` never dials, so check
@@ -237,18 +246,21 @@ claims:
       the 1 s to 60 s ladder and the `/api/drivers` rendering are not.
   - id: IT-019
     claim: >-
-      A wrong SNMPv3 key reads as `wrong credentials`, not as a timeout.
+      A wrong SNMPv3 auth pass phrase reads as `authentication failed —
+      wrong auth pass phrase or protocol for user …`, and a wrong priv pass
+      phrase as `authentication succeeded but privacy failed`, not as a
+      timeout.
     source: "#quality-rates-and-companions"
     tests:
       - go ./snmp TestForeignWrongCredentials/v3 wrong auth key
       - go ./snmp TestForeignWrongCredentials/v3 wrong priv key
     partial: true
     note: >-
-      The tests assert a wrong v3 auth or priv key puts a credentials
-      diagnosis (not "no answer within") in the source's LastError. The
-      string the page quotes, `wrong credentials`, does not exist in the
-      code: the driver says "authentication failed" / "privacy failed", and
-      the test checks those. The `/api/drivers` rendering is not asserted.
+      Reworded after the page changed (#293); the code produces both quoted
+      strings. The tests assert a wrong v3 auth or priv key puts
+      "authentication failed" / "privacy failed" (and not "no answer
+      within") in the source's LastError; the rest of each quoted string is
+      not checked, and the `/api/drivers` rendering is not asserted.
       (TestDriverWrongCommunity removed: the v2c case is not on the page.)
   - id: IT-020
     claim: >-

@@ -140,15 +140,17 @@ claims:
 
   - id: CTIA-014
     claim: >-
-      Standard blocks have no `EN`/`ENO` and always evaluate; a user block in
-      a ladder rung takes power on its `EN` pin if it declares one.
+      Any block takes `EN` (TRUE when unbound) and gives `ENO`.
     source: "#fbd-and-ladder"
-    tests: []
+    tests:
+      - go ./lang/conformance TestConformance/fbd-en-eno
+    partial: true
     note: >-
-      The old reference, fbd-en-eno, tests FBD EN/ENO (EN FALSE skips a call),
-      which is the opposite of this page's "none" and is what the page lists
-      as planned (#206); the page looks out of date. No test asserts a ladder
-      user block taking power on a declared EN pin.
+      Reworded after the page changed (#293): it used to say standard blocks
+      have no EN/ENO. fbd-en-eno asserts EN FALSE skipping a call and ENO
+      for LIMIT, CTU and DIV in ST and FBD; every call there binds EN, so
+      "TRUE when unbound" is asserted only implicitly (calls that leave EN
+      off run), and "any block" rests on those three.
 
   - id: CTIA-015
     claim: >-

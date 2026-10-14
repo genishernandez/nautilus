@@ -277,6 +277,8 @@ claims:
     source: "#sfc-action-qualifiers-and-step-supervision"
     tests:
       - go ./lang/conformance TestConformance/sfc-qualifiers
+      - go ./lang/sfc TestSetActsOnceThenActionMayClear
+      - go ./lang/sfc TestResetActsOnceThenActionMaySet
 
   - id: FN-023
     claim: >-
@@ -841,6 +843,12 @@ claims:
     source: "#operators"
     tests:
       - go ./lang/conformance TestConformance/st-div-zero/ordinary division truncates toward zero, MOD keeps the dividend's sign
+      - go ./lang/conformance TestConformance/fbd-en-eno/DIV's ENO is FALSE on a zero divisor, TRUE otherwise
+    partial: true
+    note: >-
+      Integer quotient and remainder are asserted through ST's `/` and MOD.
+      The DIV block itself (FBD) is asserted only on REALs (9.0 DIV 2.0 =
+      4.5 in fbd-en-eno); no test calls the DIV block on two integers.
 
   - id: FN-068
     claim: >-
@@ -1218,6 +1226,13 @@ claims:
       - go ./lang/ir TestConversionSemantics
       - go ./lang/st TestConversionMatrixThroughST
       - go ./lang/st TestEnumConversions
+    partial: true
+    note: >-
+      "An expression's integer converts as LINT" is not asserted: the one
+      case (TO_UINT of an untyped integer 65536 = 0) gives 0 whether the
+      value is read as LINT, DINT or INT first, and no test passes an
+      integer expression to TO_<type>. The enumeration case, TRUNC_<int>,
+      <real>_TRUNC_<int> and TO_<Enum> are asserted.
 
   - id: FN-100
     claim: >-
@@ -1458,6 +1473,11 @@ claims:
     tests:
       - go ./lang/ld TestLadderFunctionBlockPowerPins
       - go ./lang/ld TestLadderFunctionBlockInOutStructPin
+    partial: true
+    note: >-
+      Only the "every BOOL input bound by name" shape is asserted (refused
+      behind a contact, accepted and run on a rail-driven rung). A block
+      with no BOOL inputs at all ("or none") is not exercised.
 
   - id: FN-123
     claim: >-
@@ -1513,6 +1533,12 @@ claims:
     source: "#pid-closed-loop-control"
     tests:
       - go ./lang/st TestPIDManualToAutoBumpless
+    partial: true
+    note: >-
+      CV equals CV_MAN in manual and does not jump on the switch to AUTO.
+      CV_MAN, PV and SP stay constant throughout, so neither "tracks" (CV
+      following a CV_MAN that moves) nor "back-solved every scan" (rather
+      than once on entering manual) is asserted.
 
   - id: FN-128
     claim: >-
