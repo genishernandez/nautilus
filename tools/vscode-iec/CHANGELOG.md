@@ -69,6 +69,14 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   identifier "t1"`. Only the POU's own header now counts. (#332) Needs a
   `naut` newer than 0.16.2.
 
+- **An FB instance named like a FUNCTION runs its block.** With
+  `f : Counter;` declared and a library `FUNCTION F` in the project,
+  `f(IN := 1);` called the function and the block never ran, with no
+  diagnostic. The instance in scope now wins, and its declaration carries
+  a warning (`instance f shadows FUNCTION F`); using the instance in an
+  expression is an error that names the function. (#336) Needs a `naut`
+  newer than 0.16.2.
+
 - **Text after `END_PROGRAM` is an error, not silently ignored.** A
   `FUNCTION_BLOCK` (or anything else) placed after `END_PROGRAM` was never
   compiled, yet the file showed no diagnostics and `naut check` passed it.

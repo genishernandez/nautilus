@@ -521,6 +521,41 @@ func (l *lowerer) lookup(name string) (symbol, bool) {
 	return sym, ok
 }
 
+// userFunc resolves a call's bare name to a user FUNCTION. A function
+// block instance in scope with that name wins (#336): the declaration in
+// scope is what the name means, as IEC scoping has it, so `f(IN := 1)`
+// with `f : Counter` runs the block even when a FUNCTION F exists (names
+// are case-insensitive). Only an instance hides a function: a variable of
+// any other type is not callable, so a call by its name still means the
+// function. `naut check` and the editor warn about the clash
+// (InstancesShadowingFunctions).
+func (l *lowerer) userFunc(name string) (*ir.FuncDef, bool) {
+	if _, hidden := l.hiddenFunc(name); hidden {
+		return nil, false
+	}
+	if l.userFuncs == nil {
+		return nil, false
+	}
+	def, _, ok := ir.Lookup(l.userFuncs, name)
+	return def, ok && def != nil
+}
+
+// hiddenFunc names the user FUNCTION that an FB instance in scope called
+// name hides, if there is one.
+func (l *lowerer) hiddenFunc(name string) (string, bool) {
+	if l.userFuncs == nil {
+		return "", false
+	}
+	sym, defined := l.lookup(name)
+	if !defined || sym.typ == nil || sym.typ.Kind != ir.TypeFB {
+		return "", false
+	}
+	if def, _, ok := ir.Lookup(l.userFuncs, name); ok && def != nil {
+		return def.Name, true
+	}
+	return "", false
+}
+
 // dupErr is the duplicate-declaration error. When the two declarations
 // differ only in case it names both, so a project written when Nautilus
 // was case-sensitive sees exactly which two names now collide.
@@ -1306,8 +1341,8 @@ func (l *lowerer) lowerStmt(s Statement) (ir.Stmt, error) {
 // effects worth invoking as a statement.
 func (l *lowerer) lowerCallStmt(n *CallStmt) (ir.Stmt, error) {
 	// User FUNCTION called as a statement — discard the return value.
-	if l.userFuncs != nil {
-		if def, _, ok := ir.Lookup(l.userFuncs, n.Call.Name); ok && def != nil {
+	if n.Call.Callee == nil {
+		if def, ok := l.userFunc(n.Call.Name); ok {
 			call, x, err := splitExecControl(n.Call, funcDeclaresEN(def), false)
 			if err != nil {
 				return nil, err
@@ -1547,13 +1582,11 @@ func (l *lowerer) lowerCallExpr(n *CallExpr) (ir.Expr, error) {
 	// User-defined FUNCTION dispatch — preferred over the (case-insensitive)
 	// builtin table so a user can shadow nothing accidentally with mixed
 	// case while still binding by bare name.
-	if l.userFuncs != nil {
-		if def, _, ok := ir.Lookup(l.userFuncs, n.Name); ok && def != nil {
-			if !funcDeclaresEN(def) && hasExecControl(n) {
-				return nil, errExecInExpr(n)
-			}
-			return l.lowerUserFuncCall(n, def)
+	if def, ok := l.userFunc(n.Name); ok {
+		if !funcDeclaresEN(def) && hasExecControl(n) {
+			return nil, errExecInExpr(n)
 		}
+		return l.lowerUserFuncCall(n, def)
 	}
 	if conv, handled, err := l.lowerEnumConversion(n); handled {
 		return conv, err
@@ -1564,7 +1597,11 @@ func (l *lowerer) lowerCallExpr(n *CallExpr) (ir.Expr, error) {
 		// are read via member access (t1.Q), and bare `t1(...)` produces
 		// no value. Surface a clearer message when this is the case.
 		if sym, defined := l.lookup(n.Name); defined && sym.typ != nil && sym.typ.Kind == ir.TypeFB {
-			return nil, errName(n.Pos, n.Name, fmt.Errorf("FB instance %q can't be used as an expression — invoke it as a statement and read outputs (e.g. %s.Q)", n.Name, n.Name))
+			hides := ""
+			if fn, ok := l.hiddenFunc(n.Name); ok {
+				hides = fmt.Sprintf(" (it hides FUNCTION %s of the same name — rename the instance to call the function)", fn)
+			}
+			return nil, errName(n.Pos, n.Name, fmt.Errorf("FB instance %q can't be used as an expression — invoke it as a statement and read outputs (e.g. %s.Q)%s", n.Name, n.Name, hides))
 		}
 		return nil, errName(n.Pos, n.Name, fmt.Errorf("unknown function %q%s", n.Name, ir.ConversionHint(n.Name)))
 	}

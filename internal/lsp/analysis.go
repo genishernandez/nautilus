@@ -152,6 +152,16 @@ func analyzeIn(text string, e env) analysis {
 				" — this program reads and writes its own " + vd.Name + ", not the tag",
 		})
 	}
+	// An FB instance named like a FUNCTION hides it in that POU (#336).
+	for _, sh := range st.InstancesShadowingFunctions(prog, lowerProg) {
+		vd := sh.Decl
+		a.Diags = append(a.Diags, Diagnostic{
+			Range:    spanRange(text, vd.Pos, st.Pos{Line: vd.Pos.Line, Col: vd.Pos.Col + len(vd.Name)}),
+			Severity: SeverityWarning,
+			Source:   "nautilus-st",
+			Message:  sh.Message(),
+		})
+	}
 	if _, err := st.LowerWithOpts(lowerProg, opts); err != nil {
 		pos := st.Pos{Line: 1, Col: 1}
 		var end st.Pos
