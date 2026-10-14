@@ -318,11 +318,31 @@ needs zero HMI changes.
 ## Redundancy
 
 With a `redundancy:` section (lease-elected standby pair), only the
-**leader** may claim to be online: the driver gates its STATE publish —
-and every outbound NCMD/DCMD — on `runtime.Coordinator`'s leadership, not
-just on `primary: true`. A standby that published STATE online anyway
-would flap its LWT across every site in the fleet on every failover; this
-is designed in, not bolted on afterward.
+**leader** may claim to be online: `naut run` hands the elector to the
+driver as its write gate, and the driver gates its STATE publish — and
+every outbound NCMD/DCMD — on that leadership, not just on
+`primary: true`. A standby that published STATE online anyway would flap
+its LWT across every site in the fleet on every failover.
+
+- **The standby** connects and consumes the group like the leader, but
+  with no STATE will and no STATE birth, and its commands stay queued.
+- **On promotion** the new leader reconnects with the will and publishes
+  STATE online.
+- **On demotion** the old leader stops commanding at once and publishes
+  its STATE death before it reconnects as a standby. The death carries its
+  own session timestamp, never a newer one, so an edge node that has
+  already seen the new leader's birth ignores it. If it lands on the broker
+  after that birth anyway, the new leader publishes its birth again, so an
+  edge node that connects later still reads STATE online.
+
+Both replicas share the `host-id` (the STATE topic) but not an MQTT
+client ID. Under `redundancy:` each replica appends its identity
+(`POD_NAME`, or the hostname off-cluster) to `client-id`, so a pair never
+takes over each other's broker session. A broker ACL keyed on the client
+ID has to allow both.
+
+A project without `redundancy:` has no gate. It is always the leader and
+publishes STATE online from its first connect.
 
 ## Conformance
 

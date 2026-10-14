@@ -248,11 +248,12 @@ func (m *Multi) Start(ctx context.Context) {
 }
 
 // SetWriteGate fans the leadership gate out to every child that takes one
-// (modbus's re-assert loop, the hw command queues). `naut run` installs the
-// gate on whatever driver the project built; without this fan-out a
-// standby replica's children behind a Multi would never see it, and two
-// replicas could both drive a device. A child without a gate (eip,
-// sparkplug-host) is skipped, exactly as it would be running alone.
+// (modbus's re-assert loop, the hw command queues, a Sparkplug host's STATE
+// and NCMD/DCMD). `naut run` installs the gate on whatever driver the
+// project built; without this fan-out a standby replica's children behind a
+// Multi would never see it, and two replicas could both drive a device. A
+// child without a gate (eip) is skipped, exactly as it would be running
+// alone.
 func (m *Multi) SetWriteGate(gate func() bool) {
 	for _, c := range m.children {
 		if g, ok := c.Driver.(interface{ SetWriteGate(func() bool) }); ok {
