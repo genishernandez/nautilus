@@ -460,11 +460,16 @@ claims:
       - go ./internal/project TestTagTypeArrayOfProjectType
       - go ./internal/project TestUntypedTagErrorWording
       - go ./lang/st TestTagTypesAndUntypedTags
+    partial: true
     note: >-
-      Asserted: every elementary type:, a project TYPE, an ARRAY OF REAL and
-      an ARRAY of a project TYPE; the type init: implies (TRUE BOOL, 5 REAL,
-      T#5s TIME, other text STRING), each used in a way only that type
-      compiles; and the untyped-tag error saying "give Valve a type:".
+      Asserted: all 17 elementary type: names load, and the stored kind is
+      checked for BOOL, INT, LWORD, REAL, LREAL, TIME and STRING; a project
+      TYPE, an ARRAY OF REAL and an ARRAY of a project TYPE; the type init:
+      implies (TRUE BOOL, 5 REAL, T#5s TIME, other text STRING), each used in
+      a way only that type compiles; and the untyped-tag error saying "give
+      Valve a type:". Not asserted: that an integer tag keeps its declared
+      width. Every integer width is stored as one 64-bit kind, so a SINT,
+      DINT or UDINT tag typed as INT would pass these tests.
 
   - id: FN-035
     claim: >-
@@ -476,10 +481,14 @@ claims:
       - go ./internal/project TestExplicitDeclarationMustAgreeWithTypedTag
       - go ./internal/project TestProgramsDisagreeingOnAnUntypedTag
       - go ./internal/project TestTagTypeDisagreementsNameTheirSources
+    partial: true
     note: >-
-      The VAR_EXTERNAL disagreement is reported at the declaration's line; two
-      programs binding an untyped tag as DINT and REAL is an error naming both
-      tasks (main, b) and both types.
+      Asserted: a VAR_EXTERNAL of BOOL against type: REAL is an error at the
+      declaration's line; two programs binding an untyped tag as DINT and
+      REAL is an error naming both tasks (main, b) and both types.
+      Disagreement: agreement is checked by shape (ir.SameShape), not by type,
+      so integer widths never disagree. `VAR_EXTERNAL D : INT` against
+      `type: DINT` loads cleanly (checked 2026-10-13).
 
   - id: FN-036
     claim: >-
@@ -504,8 +513,9 @@ claims:
       - go ./internal/project TestFunctionBlocksDoNotSeeTagsImplicitly
       - go ./internal/project TestFunctionsDoNotSeeTagsImplicitly
     note: >-
-      A FUNCTION_BLOCK body and a FUNCTION body: each an undeclared-name error
-      without VAR_EXTERNAL, and each reads the tag with one.
+      A FUNCTION_BLOCK body and a FUNCTION body each give an undeclared-name
+      error without a VAR_EXTERNAL. With one, the FUNCTION reads the tag (Out
+      = 10); the FUNCTION_BLOCK case is only shown to load.
 
   - id: FN-038
     claim: >-
@@ -596,9 +606,13 @@ claims:
       - go ./lang/st TestStructAssignmentIsACopy
       - go ./lang/st TestFBStructInputIsCopied
       - go ./lang/st TestArrayAssignmentIsACopy
+      - go ./lang/st TestVarInOutAcceptsEveryAssignableForm
     note: >-
       TestArrayAssignmentIsACopy: b := a; b[1] := 99 leaves a[1], also for an
-      array inside a struct.
+      array inside a struct. A struct passed to a VAR_INPUT that the block
+      changes leaves the caller's alone; a VAR_IN_OUT writes back to the
+      caller's variable, struct field, array element and tag
+      (TestVarInOutAcceptsEveryAssignableForm).
 
   - id: FN-045
     claim: >-
@@ -1013,10 +1027,16 @@ claims:
       - go ./lang/st TestBuiltinMinMaxLimit
       - go ./lang/conformance TestConformance/st-mux-fault/LIMIT keeps a wandering selector in range, so the scan never faults
       - go ./lang/conformance TestConformance/fn-select-numeric/MIN and MAX of three or four inputs find the extreme wherever it sits
+      - go ./lang/st TestMixedNumericArgsPromoteStringNumberRefused
+      - go ./lang/st TestENOnFunctionAssign
+    partial: true
     note: >-
-      LIMIT clamps at both ends; MIN and MAX of three inputs (and MAX of
-      four) find the extreme in the first, second, third or fourth position,
-      in ST and FBD.
+      LIMIT clamps at both ends, on INT and on REAL (TestENOnFunctionAssign);
+      MIN and MAX of three INT inputs (and MAX of four, one a DINT) find the
+      extreme in any position, in ST and FBD; MAX of an INT and a REAL is
+      the REAL 2.5. Not asserted: MIN of REAL arguments. No test anywhere
+      runs MIN on a REAL, and disabling the REAL comparison leaves every
+      MIN test green.
 
   - id: FN-077
     claim: ABS returns the absolute value in the argument's own type.
@@ -1668,10 +1688,14 @@ claims:
     tests:
       - go ./lang/st TestPIDDTZeroUsesScanDt
       - go ./lang/st TestPIDBoundDTOverridesClock
+    partial: true
     note: >-
-      Unbound DT integrates over the host clock's 1 s scans; a bound DT of
-      0.5 s integrates 0.5 s per scan while the clock advances 1 s (and once
-      3 s).
+      A bound DT is asserted: 0.5 s per scan integrates 0.5 s while the clock
+      advances 1 s (and once 3 s). The unbound case is not:
+      TestPIDDTZeroUsesScanDt advances the clock a constant 1 s per scan, so
+      a fallback hard-coded to 1 s passes it too (every TestPID* stays green
+      with dt = 1.0 in place of the measured interval). An irregular clock
+      with DT unbound is needed to show the elapsed time is measured.
 
   - id: FN-130
     claim: >-
@@ -1860,10 +1884,14 @@ claims:
       - go ./lang/st TestFBUnknownPinTypeStillErrors
       - go ./lang/st TestVarInOutStructLocal
       - go ./lang/st TestUserTypeAsFunctionArgLocalReturnAndBlockVar
+    partial: true
     note: >-
-      TestUserTypeAsFunctionArgLocalReturnAndBlockVar: a FUNCTION's input, local
-      and return of a nested user TYPE declared in a library joined ahead, and a
-      FUNCTION_BLOCK VAR of that TYPE retaining its value across scans.
+      Asserted: VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT and VAR of a nested user
+      TYPE, a TYPE from a library joined ahead, a FUNCTION's input, local and
+      return of a nested user TYPE, and the unknown-type error naming the
+      type; elementary pins are used throughout. Not asserted: "any type" for
+      ARRAY types. No test declares a VAR_INPUT, VAR_OUTPUT or VAR_IN_OUT of
+      an ARRAY type, or a FUNCTION input of one.
 
   - id: FN-144
     claim: >-
@@ -2057,14 +2085,21 @@ claims:
       in either direction, across files), only which duplicate is reported.
     source: "#a-ld-library"
     tests:
+      - go ./internal/project TestLadderLibraryComposes
+      - go ./internal/stproject TestLibraryPathsRootAndLib
       - go ./internal/project TestLibDirComposes
       - go ./internal/project TestLibDirDuplicateAcrossRootAndLib
       - go ./internal/project TestLibraryReferencesResolveInEitherDirection
     note: >-
-      Ordering and duplicate reporting are asserted; a.st (composed first)
-      instantiates a block from b.st and one from a .ld library (composed
-      after every .st), and b.st calls a FUNCTION from a.st, and the project
-      runs.
+      Tier order is asserted where path order disagrees with it
+      (TestLadderLibraryComposes: scale.st composes ahead of blocks.ld).
+      TestLibraryPathsRootAndLib sorts each tier by project-relative path,
+      root and lib/ interleaved, with .fbd in the graphical tier. A block in
+      both the root and lib/ reports the same duplicate error as two root
+      files. a.st (composed first) instantiates a block from b.st and one
+      from a .ld library, b.st calls a FUNCTION from a.st, and the project
+      runs. TestLibDirComposes and the resolve test cannot tell tier order
+      from path order on their own: their .st paths already sort first.
 
   - id: FN-160
     claim: >-
