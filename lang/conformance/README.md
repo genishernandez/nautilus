@@ -156,9 +156,13 @@ Current table:
 <!-- go run ./lang/conformance -matrix -->
 | Feature | ST | LD | FBD | SFC | Tests |
 |---|:-:|:-:|:-:|:-:|--:|
+| `dialect-logix-tonr` | ✓ | ✓ | ✓ |   | 4 |
 | `fb-ctd` | ✓ | ✓ | ✓ |   | 7 |
+| `fb-ctu` | ✓ | ✓ | ✓ |   | 7 |
 | `fb-ctud` | ✓ | ✓ | ✓ |   | 8 |
 | `fb-f-trig` | ✓ | ✓ | ✓ |   | 5 |
+| `fb-instances` | ✓ | ✓ | ✓ | ✓ | 3 |
+| `fb-r-trig` | ✓ | ✓ | ✓ |   | 5 |
 | `fb-rs` | ✓ | ✓ | ✓ |   | 7 |
 | `fb-sr` | ✓ | ✓ | ✓ |   | 7 |
 | `fb-tof` | ✓ | ✓ | ✓ |   | 7 |
@@ -166,16 +170,22 @@ Current table:
 | `fb-tp` | ✓ | ✓ | ✓ |   | 8 |
 | `fbd-en-eno` | ✓ |   | ✓ |   | 7 |
 | `fn-conversions` | ✓ |   |   |   | 8 |
+| `fn-ops` | ✓ |   | ✓ |   | 9 |
+| `fn-select-numeric` | ✓ |   | ✓ |   | 5 |
 | `fn-trig-log` | ✓ |   |   |   | 8 |
+| `ld-assign` | ✓ | ✓ |   |   | 4 |
+| `ld-coil-fanout` | ✓ | ✓ |   |   | 2 |
 | `ld-coils` | ✓ | ✓ |   |   | 9 |
+| `ld-scan-order` | ✓ | ✓ | ✓ |   | 1 |
 | `sfc-alt-priority` |   |   |   | ✓ | 7 |
+| `sfc-assoc-forms` |   |   |   | ✓ | 2 |
 | `sfc-final-scan` |   |   |   | ✓ | 4 |
 | `sfc-jump-back` |   |   |   | ✓ | 4 |
 | `sfc-qualifiers` |   |   |   | ✓ | 7 |
 | `sfc-sim-div-conv` |   |   |   | ✓ | 6 |
 | `sfc-step-maxtime` |   |   |   | ✓ | 5 |
 | `sfc-step-t` |   |   |   | ✓ | 5 |
-| `sfc-timed-qualifiers` |   |   |   | ✓ | 10 |
+| `sfc-timed-qualifiers` |   |   |   | ✓ | 12 |
 | `st-bitwise` | ✓ |   | ✓ |   | 5 |
 | `st-case-constants` | ✓ |   |   | ✓ | 3 |
 | `st-case-insensitive` | ✓ | ✓ | ✓ | ✓ | 2 |
@@ -185,10 +195,12 @@ Current table:
 | `st-global-constants` | ✓ | ✓ | ✓ | ✓ | 3 |
 | `st-int-width` | ✓ |   |   |   | 5 |
 | `st-mux-fault` | ✓ |   |   |   | 2 |
-| `st-partial-access` | ✓ | ✓ | ✓ |   | 2 |
+| `st-partial-access` | ✓ | ✓ | ✓ |   | 4 |
 | `st-region` | ✓ |   |   | ✓ | 2 |
 | `st-string-clamp` | ✓ |   |   |   | 8 |
 | `st-var-temp` | ✓ | ✓ | ✓ | ✓ | 2 |
 | `st-xor` | ✓ |   |   |   | 3 |
+| `tag-alias` | ✓ | ✓ | ✓ |   | 1 |
+| `tag-implicit-scope` | ✓ | ✓ | ✓ | ✓ | 1 |
 
-34 features, 186 tests.
+46 features, 234 tests.
