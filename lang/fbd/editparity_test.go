@@ -230,15 +230,15 @@ func TestGhostLifecycle(t *testing.T) {
 		t.Fatalf("ghost output wrong: %+v", gout)
 	}
 
-	// Wiring FROM the ghost input rewires the arg and converts the entry.
+	// Wiring FROM the ghost input rewires the arg and drops the entry.
 	out2 := apply(t, out, mustOp(t, out, EditOp{
 		Type: "rewire", To: "b:w.hot", ToPin: "IN1", From: "v:TempC", Source: "g:in.TempSP",
 	}))
 	if !strings.Contains(out2, "GT(TempSP, 62.0)") {
 		t.Errorf("ghost input not wired:\n%s", out2)
 	}
-	if strings.Contains(out2, "g:in.TempSP") || !strings.Contains(out2, "v:TempSP") {
-		t.Errorf("ghost entry must convert to the real chip id:\n%s", out2)
+	if strings.Contains(out2, "g:in.TempSP") || strings.Contains(out2, "v:TempSP") {
+		t.Errorf("a wired ghost input drops its pin (auto-layout places it):\n%s", out2)
 	}
 
 	// Wiring INTO the ghost output writes its coil statement.
