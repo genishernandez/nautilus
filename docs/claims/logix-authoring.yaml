@@ -22,12 +22,13 @@ claims:
       - go ./logix/writer TestImplicitTagsBecomeControllerTags
       - go ./logix/writer TestImplicitTagsInST
       - go ./logix/writer TestImplicitTagsLadderMembersAndLiterals
-    partial: true
+      - go ./cmd/naut TestLogixDeployTypesUndeclaredTagsFromTheManifest
     note: >-
-      The writer is tested with the tag types handed to it directly. How
-      `naut logix deploy` and `naut logix write` derive a tag's type from
-      nautilus.yaml (logixTagTypes: `type:`, else the type `init:` implies)
-      has no test.
+      The CLI test deploys (to a fake agent) and writes a project whose ladder
+      names four manifest tags it never declares: each becomes a controller
+      tag typed from nautilus.yaml, `type:` where given (INT over the REAL
+      `init: 0` would imply; DINT with no init) and else the type `init:`
+      implies (REAL, BOOL); a manifest tag no rung names is not written.
 
   - id: LGA-003
     claim: >-
@@ -37,8 +38,13 @@ claims:
     tests:
       - go ./logix/writer TestTaskSchedulesTheProgram
       - go ./logix/writer TestDemoLineMatchesTheRealExport
-    partial: true
-    note: The `program`, `routine` and `task` rename keys and the program `VAR` becoming program tags are not asserted.
+      - go ./cmd/naut TestLogixDeployNamesTheTaskProgramAndRoutine
+    note: >-
+      The CLI test deploys a project (to a fake agent) and reads the L5X it
+      sends: a PERIODIC task at the task's 250 ms scan scheduling the program,
+      the program named for the POU with the rungs as MainRoutine and its VAR
+      as program (not controller) tags, and with `program`, `routine` and
+      `task` under target.logix the three renamed.
 
   - id: LGA-004
     claim: >-
@@ -56,8 +62,11 @@ claims:
     source: "#what-the-target-accepts"
     tests:
       - go ./cmd/naut TestCheckTargetLogixRefusesOtherLanguages
-    partial: true
-    note: FBD is refused (tested); SFC and the multi-task refusal in loadLogixProject have no test.
+      - go ./cmd/naut TestLogixTargetRefusesSFCAndASecondTask
+    note: >-
+      FBD and SFC programs are refused by `naut check --target logix` (an SFC
+      chart that checks clean without the target); `naut logix deploy` refuses
+      an SFC task program and a project with two tasks.
 
   - id: LGA-006
     claim: >-
@@ -89,12 +98,15 @@ claims:
     tests:
       - go ./logix/writer TestAssignmentsAndExpressionCompares
       - go ./logix/writer TestGolden/subset
+      - go ./logix/writer TestLEIsAPlainCompare
     partial: true
     note: >-
       MOVE, ADD, SUB, MUL, DIV, ABS, CPT and CMP are asserted, and the plain
-      compares GE, NE, GT and LT (golden snapshot). MOD, NEG, SQR and XPY are
-      never asserted as their own instructions: the writer folds those shapes
-      into CPT. LE as a plain compare instruction is not asserted.
+      compares GE, NE, GT, LT (golden snapshot) and LE. Page and code disagree
+      on MOD, NEG, SQR and XPY: the writer never emits them as instructions,
+      it folds `A MOD B`, `-A`, `SQRT(S)` and `EXPT`/`**` into CPT (and
+      refuses `NEG(A)` as logix/data-op), while the page's table lists them as
+      instructions.
 
   - id: LGA-009
     claim: >-
@@ -166,8 +178,11 @@ claims:
     source: "#what-the-target-accepts"
     tests:
       - go ./logix/writer TestStructuredText
-    partial: true
-    note: Assignments, IF/ELSIF, CASE, FOR, operators and ABS/SQRT/EXPT are asserted; WHILE, REPEAT and EXIT are not written by any test.
+      - go ./logix/writer TestStructuredTextLoopsAndExit
+    note: >-
+      Assignments, IF/ELSIF, CASE, FOR, operators and ABS/SQRT/EXPT are
+      asserted, and WHILE, REPEAT ... UNTIL and an EXIT inside an IF in the
+      loop, in order, as written.
 
   - id: LGA-017
     claim: >-
@@ -179,13 +194,16 @@ claims:
       - go ./logix/writer TestRejections
       - go ./logix/writer TestStructuredTextRejections
       - go ./logix/writer TestUserDefinedTypeRejections
+      - go ./logix/writer TestRefusalsTheTableNames
+      - go ./logix/writer TestSTAndTypeRefusalsHaveALineAndWriteNothing
     partial: true
     note: >-
-      Most rules have a case. `logix/name` is only tested for length and
-      consecutive underscores (not trailing), and the AOI-with-array
-      `logix/type` case is not tested. That the message names the
-      alternative is not asserted, and only the ladder rejections assert
-      the line and that no document is emitted.
+      Every rule has a case, now including trailing-underscore names
+      (logix/name) and an AOI with an array input or output (logix/type);
+      ladder, ST and user-type refusals each assert a line and that no
+      document is written. That the message names the alternative, which the
+      page also promises, is not asserted, and not every message does
+      (logix/name says what is wrong, not what to write instead).
 
   - id: LGA-018
     claim: >-
@@ -224,8 +242,12 @@ claims:
     source: "#io-tag-aliases"
     tests:
       - go ./logix/writer TestAliasTags
-    partial: true
-    note: The writer half is tested; that the nautilus runtime ignores the binding has no test.
+      - go ./cmd/naut TestAliasedTagsRunInSimulationAndDeployAsAliases
+    note: >-
+      One project with `alias:` on its tags: `naut test` runs its seal-in
+      scenario on the nautilus runtime, which ignores the binding, and the
+      deploy (to a fake agent) writes those tags as alias tags (AliasFor) with
+      the rung naming the tags.
 
   - id: LGA-022
     claim: >-
@@ -241,11 +263,13 @@ claims:
       - go ./logix/importer TestUDTConformanceImportsAndWritesBack
       - go ./logix/importer TestAOIConformanceImportsAndWritesBack
       - go ./logix/importer TestDialectAndAliasImport
-    partial: true
+      - go ./logix/importer TestEveryLadderRoutineBecomesAProgram
     note: >-
-      Every fixture has one ladder routine, so "every ladder routine as a
-      PROGRAM" is not asserted for an export with several. Descriptions are
-      asserted only for program-scope tags (as VAR comments).
+      TestEveryLadderRoutineBecomesAProgram imports an export with three
+      ladder routines in two programs: three PROGRAM files, each a task in the
+      manifest, each with its own rung; the manifest's target filled from the
+      controller (name, processor, revision); controller-scope descriptions in
+      the tag file.
 
   - id: LGA-023
     claim: >-
@@ -264,8 +288,16 @@ claims:
     source: "#bringing-an-existing-program-in"
     tests:
       - go ./logix/importer TestDialectAndAliasImport
+      - go ./logix/importer TestEveryLadderRoutineBecomesAProgram
     partial: true
-    note: Rack points named directly and the TONR fold are asserted; no fixture carries an existing Logix alias tag, so alias tags in the export becoming `alias:` is not.
+    note: >-
+      Rack points named directly, the TONR fold, and an alias tag in the
+      export becoming a tag with `alias:` are asserted. A rung that names an
+      alias tag is not carried: Logix exports an alias tag with no DataType,
+      and the import refuses the rung ("type: <tag>: type has no nautilus
+      declaration"), so a program that uses its alias tags imports with those
+      rungs as comments. Reported as a bug; the test keeps its alias tag out
+      of the logic.
 
   - id: LGA-026
     claim: >-
@@ -346,8 +378,14 @@ claims:
     tests:
       - go ./cmd/naut TestLogixModeRefusesAChangeWithoutConfirmation
       - go ./cmd/naut TestLogixModeTakesTheProjectDirectory
+      - go ./cmd/naut TestLogixModeReadsAndChangesTheMode
     partial: true
-    note: Only the refusal without `--yes` (with a comm path or a project directory) is tested; reading or changing the mode is not.
+    note: >-
+      The refusal without `--yes` is tested, and against a fake agent `naut
+      logix mode` reads the mode through a project uploaded from the named
+      controller (without changing it) and with `--yes program` changes it.
+      The controller's mode actually changing is the SDK's, verified on
+      hardware only.
 
   - id: LGA-033
     claim: >-
@@ -382,8 +420,12 @@ claims:
     source: "#a-project-with-a-logix-target"
     tests:
       - go ./logix/logixd TestClientDefaultsFromEnvironment
-    partial: true
-    note: The client's env defaults are tested; the manifest `agent:` precedence is not.
+      - go ./cmd/naut TestLogixDeployFindsTheAgent
+    note: >-
+      With two fake agents: a deploy reaches the one named by
+      target.logix.agent and every request carries NAUTILUS_LOGIXD_TOKEN as
+      its bearer; with NAUTILUS_LOGIXD_URL set it reaches that one instead; a
+      manifest with a `token:` under target.logix is refused.
 
   - id: LGA-036
     claim: >-
@@ -392,17 +434,27 @@ claims:
     tests:
       - go ./logix/writer TestRejections
       - go ./logix/writer TestStructuredTextRejections
-    partial: true
+      - go ./logix/writer TestRefusalsTheTableNames
+      - go ./cmd/naut TestLogixTargetRefusesSFCAndASecondTask
+      - go ./cmd/naut TestCheckTargetLogixRefusesOtherLanguages
     note: >-
-      The rejection tests cover the subset's rules case by case, but not
-      every rule (see LGA-017: trailing-underscore names and an AOI with an
-      array parameter have no case), and the multi-task and SFC refusals
-      (LGA-005) have no test, so "anything" is not asserted.
+      Every rule in the page's table has a refusal case (trailing-underscore
+      names and an AOI with an array parameter included), and FBD and SFC
+      programs and a multi-task project are refused, each with nothing
+      written.
 
   - id: LGA-037
     claim: >-
       A download resets tag values to the project's values; an online edit
       keeps them.
     source: "#what-it-does-not-do-yet"
-    tests: []
-    note: Controller behaviour; verified on hardware only and no env-gated test asserts it.
+    tests:
+      - go ./logix/deploy TestHardwareDownloadResetsValuesAndAnOnlineEditKeepsThem
+    partial: true
+    note: >-
+      Verified on hardware only: the test downloads DemoLine, sets HiLevelSP
+      to 70 over EtherNet/IP, makes an online edit and expects 70 kept, then
+      downloads again and expects the project's 85. It needs a controller that
+      may be stopped (NAUTILUS_LOGIX_DOWNLOAD_COMM_PATH, NAUTILUS_LOGIX_HOST)
+      and logixd; skipped in CI and not yet run (the SDK machine is
+      unavailable).
