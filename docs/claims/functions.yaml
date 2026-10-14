@@ -30,10 +30,16 @@ claims:
     tests:
       - go ./lang/ld TestLineMap
       - go ./lang/fbd TestTranspileLineMap
-    partial: true
+      - go ./internal/lsp TestAnalyzeLDHopErrorLandsOnRung
+      - go ./internal/lsp TestAnalyzeLDFunctionBlocks
+      - go ./internal/lsp TestAnalyzeFBDParseError
+      - go ./internal/lsp TestAnalyzeFBDMapsDiagnosticsToSource
     note: >-
-      The line maps are tested; the .sfc hop and the final diagnostic
-      position in the editor are not asserted here.
+      The line maps are tested per hop, and the editor's diagnostics (the
+      language server) land on the source line for an error raised at each
+      stage: the ladder hop (a misplaced coil, on its RUNG), the FBD hop (a
+      netlist parse error) and ST (an undeclared name, through .fbd and
+      through .ld).
 
   - id: FN-003
     claim: >-
