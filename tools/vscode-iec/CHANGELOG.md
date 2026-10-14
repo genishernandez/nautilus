@@ -44,6 +44,13 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Fixed
 
+- **Text after `END_PROGRAM` is an error, not silently ignored.** A
+  `FUNCTION_BLOCK` (or anything else) placed after `END_PROGRAM` was never
+  compiled, yet the file showed no diagnostics and `naut check` passed it.
+  It is now an error on that line; declare function blocks and functions
+  before `END_PROGRAM`. Comments and blank lines after it are still fine.
+  Needs a `naut` newer than 0.16.2.
+
 - **A rung's coils see one evaluation of its condition.** In a rung where
   a coil writes a tag the condition reads, such as `/Lamp ( Lamp ) ( Horn )`,
   later coils re-evaluated the condition after the earlier coil's write, so
