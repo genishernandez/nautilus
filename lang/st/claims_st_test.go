@@ -310,9 +310,18 @@ func TestRealIntoIntAssignmentIsACompileError(t *testing.T) {
 func TestNoWideOrCharConversionFunctions(t *testing.T) {
 	for _, fn := range []string{"WSTRING_TO_STRING", "CHAR_TO_STRING", "WCHAR_TO_STRING", "STRING_TO_WSTRING", "STRING_TO_CHAR", "STRING_TO_WCHAR", "CHAR_TO_INT", "WSTRING_TO_INT"} {
 		t.Run(fn, func(t *testing.T) {
-			_, err := lowerSrc("PROGRAM p\nVAR s : STRING; i : INT; END_VAR\ns := " + fn + "(s);\nEND_PROGRAM")
+			// The target matches the name's result type, so the only thing
+			// that can refuse the line is the function not existing.
+			target := "s"
+			if strings.HasSuffix(fn, "_TO_INT") {
+				target = "i"
+			}
+			_, err := lowerSrc("PROGRAM p\nVAR s : STRING; i : INT; END_VAR\n" + target + " := " + fn + "(s);\nEND_PROGRAM")
 			if err == nil {
 				t.Fatalf("%s compiled; it should not exist", fn)
+			}
+			if !strings.Contains(err.Error(), "unknown function") {
+				t.Errorf("%s refused for another reason: %v", fn, err)
 			}
 		})
 	}

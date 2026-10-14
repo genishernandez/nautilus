@@ -112,7 +112,9 @@ func TestCheckSFCNotSupported(t *testing.T) {
 }
 
 // A type error in a transition condition is reported on the TRANSITION's
-// line, one in an action body on the ACTION's line (SFC-037).
+// line (SFC-037). One in an action body is reported on the offending
+// statement's own line inside the ACTION block, not on the ACTION header
+// line the SFC page names; the action_body subtest pins today's behaviour.
 func TestCheckSFCTypeErrorLines(t *testing.T) {
 	// Each chart carries exactly one error, so the reported line can only
 	// be that one's.

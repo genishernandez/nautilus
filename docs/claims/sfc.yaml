@@ -411,14 +411,15 @@ claims:
     source: "#structural-checks"
     tests:
       - go ./lang/sfc TestTranspileShape
-      - go ./cmd/naut TestCheckSFCTypeErrorLines
+      - go ./cmd/naut TestCheckSFCTypeErrorLines/condition
     partial: true
     note: >-
       The transpile-and-compile half and the condition half are asserted: a type
       error in a condition is reported on its TRANSITION line through naut check.
       A type error in an action body is reported on the offending statement's
       own line inside the ACTION block (line 20 in the test chart), not on the
-      ACTION header line the page says; left partial until the page or the
+      ACTION header line the page says (TestCheckSFCTypeErrorLines/action_body
+      pins that, so it is not listed); left partial until the page or the
       mapping is reconciled.
 
   - id: SFC-038
@@ -508,5 +509,6 @@ claims:
     partial: true
     note: >-
       A Logix SFC routine in an L5X is refused by the ladder import, which names
-      it as skipped. There is no Siemens GRAPH or CODESYS SFC importer in the
-      codebase at all, so there is nothing to refuse and no test is possible.
+      it as skipped (Seq/Chart (SFC)). There is no Siemens GRAPH or CODESYS
+      importer in the codebase (the siemens and codesys dialects are reserved
+      names only), so those two clauses hold by absence and have no test.

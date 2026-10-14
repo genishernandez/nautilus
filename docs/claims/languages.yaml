@@ -50,6 +50,14 @@ claims:
       - go ./lang/ld TestLineMap
       - go ./lang/fbd TestTranspileLineMap
       - go ./cmd/naut TestCheckLandsDiagramErrorsOnSourceLine
+    partial: true
+    note: >-
+      Through naut check, a type error in a rung lands on its RUNG line and one
+      in a transition condition on its TRANSITION line; the LD and FBD line
+      maps are also tested at the transpile level. "An .sfc error at the step"
+      is not asserted: the test's error in a step's action body lands on the
+      offending statement's own line inside the ACTION block, not on the step
+      (the same disagreement as SFC-037).
 
   - id: LANG-005
     claim: >-

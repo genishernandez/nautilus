@@ -7,7 +7,8 @@ import (
 
 // An edge contact's one-shot memory lives in an instance whose name is
 // derived from the rung and tag, so an unrelated online edit (here a new
-// rung ahead of it) must not reset it: Cmd held TRUE across the swap
+// rung ahead of it, with an edge contact of its own on the same tag, so a
+// name counted across the program would shift) must not reset it: Cmd held TRUE across the swap
 // produces no second pulse. A reset memory would see the held input as a
 // fresh rising edge.
 func TestSwapWarmLadderKeepsEdgeContactMemory(t *testing.T) {
@@ -20,7 +21,7 @@ LD
   RUNG count  Rise cnt:CTU(PV := 100, CV => Ticks)
 END_LD
 END_PROGRAM`
-	v2 := strings.Replace(v1, "  RUNG start", "  RUNG lamp   /Halt ( Lamp )\n  RUNG start", 1)
+	v2 := strings.Replace(v1, "  RUNG start", "  RUNG lamp   /Halt [ +Cmd | /Halt ] ( Lamp )\n  RUNG start", 1)
 	if v2 == v1 {
 		t.Fatal("edit did not apply")
 	}
