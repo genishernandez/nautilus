@@ -44,6 +44,11 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Fixed
 
+- **A pointer dereference (`x := p^;`) is now an error in ST.** `naut check`
+  and the editor accepted `^` and read it as the bare name; it now says the
+  dereference operator is not supported, as `REF_TO` already was. Needs a
+  `naut` newer than 0.16.2.
+
 - **Text after `END_PROGRAM` is an error, not silently ignored.** A
   `FUNCTION_BLOCK` (or anything else) placed after `END_PROGRAM` was never
   compiled, yet the file showed no diagnostics and `naut check` passed it.

@@ -75,6 +75,13 @@ func (p *Parser) hashPrefixErr(hash Token) error {
 	return fmt.Errorf("line %d: the # prefix is Siemens SCL syntax; write the name without it", hash.Line)
 }
 
+// derefErr is the diagnostic for the pointer dereference operator ^. Nautilus
+// has no pointers or references (REF_TO is refused too), so the operator is
+// rejected instead of being dropped by the lexer and read as the bare name.
+func derefErr(caret Token) error {
+	return fmt.Errorf("line %d: the ^ dereference operator is not supported (Nautilus has no pointers or REF_TO); use the variable directly", caret.Line)
+}
+
 func (p *Parser) match(tt TokenType) bool {
 	if p.peek().Type == tt {
 		p.advance()
@@ -620,6 +627,8 @@ func (p *Parser) parseStatement() (Statement, error) {
 			return nil, fmt.Errorf("line %d: END_REGION without a matching REGION", p.peek().Line)
 		}
 		return p.parseAssignOrCall()
+	case TokenCaret:
+		return nil, derefErr(p.advance())
 	case TokenHash:
 		// `#state := 10;` — this used to fall through to the skip below,
 		// silently dropping the `#` and running the assignment (#198).
@@ -1218,6 +1227,8 @@ func (p *Parser) parsePrimary() (Expression, error) {
 		return p.parsePostfixChain()
 	case TokenHash:
 		return nil, p.hashPrefixErr(p.advance())
+	case TokenCaret:
+		return nil, derefErr(p.advance())
 	default:
 		if tok.Type == TokenEOF {
 			return nil, fmt.Errorf("line %d: unexpected end of file", tok.Line)
@@ -1241,6 +1252,8 @@ func (p *Parser) parsePostfixChain() (Expression, error) {
 func (p *Parser) continuePostfix(expr Expression) (Expression, error) {
 	for {
 		switch p.peek().Type {
+		case TokenCaret:
+			return nil, derefErr(p.advance())
 		case TokenDot:
 			p.advance()
 			// Word.3: a bit of an integer, as Logix spells it (IEC ed. 3
