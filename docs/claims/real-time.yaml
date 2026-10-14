@@ -13,10 +13,15 @@ claims:
       - go ./runtime TestLateTrackerCountsAndPercentiles
       - go ./runtime TestLateUs
       - go ./runtime TestLatenessUnderVirtualClock
+    partial: true
     note: >-
-      "An early sample counts as a scan, not as late" dropped (not on the
-      page). TestLatenessUnderVirtualClock added for the per-task clause: main
-      and the fast task carry separate lateness blocks.
+      Asserted on the parts: lateUs measures start minus a given slot, the
+      tracker counts late scans beyond the threshold and accumulates, and
+      main and a task carry separate lateness blocks. Not asserted: that
+      Run's scheduler hands the scan its slot's due time (no test reads
+      lateness from Run; TestLatenessUnderVirtualClock drives ScanTask, which
+      passes no slot and takes the period form). "An early sample counts as
+      a scan, not as late" dropped (not on the page).
 
   - id: RT-002
     claim: >-
@@ -40,8 +45,8 @@ claims:
 
   - id: RT-004
     claim: >-
-      p50, p99 and p999 are bucket upper edges, at most 3 percent above the
-      true value.
+      p50, p99 and p999 are bucket upper edges, about 3 percent above the
+      true value (the bucket width is 1/32, 3.125 percent).
     source: "#what-the-diagnostics-measure"
     tests:
       - go ./runtime TestLateTrackerCountsAndPercentiles
@@ -49,9 +54,10 @@ claims:
       - go ./runtime TestFineResolution
     partial: true
     note: >-
-      The tests bound the error at 1/32 (3.125 %), not the page's 3 %: with
-      fineSub = 32 the widest bucket is 3.125 % of its lower edge, so the
-      page's figure is slightly optimistic. "Empty trackers report zeros"
+      The page (since #293) gives the 1/32 width, 3.125 %, which the tests
+      bound: percentiles never below the true value and at most one bucket
+      above it, on three samples; TestFineResolution checks the relative
+      width of four buckets, not all of them. "Empty trackers report zeros"
       dropped (not on the page), with TestLateTrackerEmpty.
 
   - id: RT-005
@@ -124,8 +130,13 @@ claims:
     source: "#what-the-runtime-does"
     tests:
       - go ./runtime TestFastTaskDoesNotWaitForSlowTask
+    partial: true
     note: >-
-      Skips on machines where the slow scan takes under 5 ms.
+      The test drives the two scans from its own goroutines (Scan beside
+      ScanTask), so it proves no lock makes a fast scan wait for a slow one;
+      it does not prove Run schedules tasks concurrently: a Run that called
+      every task from one loop would still pass. Skips on machines where the
+      slow scan takes under 5 ms (it takes about 50 ms on a desktop).
       TestTasksRunConcurrently removed: it only checks that both tasks scanned
       during Run, which a sequential scheduler would pass too.
 

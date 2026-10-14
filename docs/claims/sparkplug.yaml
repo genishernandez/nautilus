@@ -31,10 +31,11 @@ claims:
       - go ./sparkplug TestStructToTemplate
   - id: SPB-003
     claim: >-
-      A host can write tags back via NCMD: a scalar command overwrites the
-      tag in the store for the program to act on.
+      A host can write the tags `writable:` names back via NCMD: a scalar
+      command overwrites the tag in the store for the program to act on.
     source: "#"
     tests:
+      - go ./sparkplug TestWriteGateOpensMatchingTagsOnly
       - go ./sparkplug TestCommandScalarStillReplaces
   - id: SPB-005
     claim: >-
@@ -129,11 +130,11 @@ claims:
       - go ./sparkplug TestClassResolution
   - id: SPB-015
     claim: >-
-      With `device:` set, the field driver's input tags publish as a
-      Sparkplug device under the edge node; everything else publishes at
-      node level, and without `device` the whole store publishes at node
-      level.
-    source: "#devices-and-driver-health"
+      Every field connection publishes as its own Sparkplug device under
+      the edge node, carrying the input tags it delivers (its `__Online`
+      companion included); computed tags, program state, outputs and every
+      tag of the `memory` loopback publish at node level.
+    source: "#devices-and-connection-health"
     tests:
       - go ./sparkplug TestRebirthCommandMidTickStopsTheNextRecord
     partial: true
@@ -142,10 +143,10 @@ claims:
       no test asserts the device/node split of metrics.
   - id: SPB-016
     claim: >-
-      The device's DBIRTH/DDEATH follow the driver's connection health: when
-      the driver link drops the host sees the device die rather than stale
-      values.
-    source: "#devices-and-driver-health"
+      A device's DBIRTH/DDEATH follow its connection's health: when one
+      link drops the host sees that device die rather than stale values,
+      while every other device stays born.
+    source: "#devices-and-connection-health"
     tests: []
     note: >-
       No test drives a device `Health` function false and asserts DDEATH.

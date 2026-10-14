@@ -11,6 +11,10 @@ claims:
     tests:
       - go ./lang/fbd TestTranspileMultipleBlocks
       - go ./lang/fbd TestFunctionBlockInstance
+      - go ./lang/fbd TestArithmeticAndFanout
+    note: >-
+      TestArithmeticAndFanout added: neither of the other two tests has a
+      named wire, and it runs one (s = ADD(A, B)) feeding three coils.
 
   - id: FBD-002
     claim: >-
@@ -54,6 +58,12 @@ claims:
     source: "#a-netlist-line-by-line"
     tests:
       - go ./lang/fbd TestOutputBinding
+    partial: true
+    note: >-
+      The test asserts the binding transpiles verbatim, compiles, draws ET as
+      an output pin, and rejects a literal target. It never runs the program,
+      so nothing shows Elapsed receiving the timer's ET. The only FBD
+      binding that is run (fbd-en-eno) binds ENO, a BOOL.
 
   - id: FBD-005
     claim: >-
@@ -144,6 +154,12 @@ claims:
     source: "#how-a-diagram-evaluates"
     tests:
       - go ./lang/fbd TestSealInLatch
+      - naut examples/lift-station the high-level alarm latches at 90% and clears only at or below 85%
+    note: >-
+      TestSealInLatch seeds Run on each fresh run, so it shows the latch logic
+      but not a value carried between scans. The lift-station test was added:
+      it runs level.fbd's own HighLevelAlm line across scans and holds the
+      alarm at 87 (inside the band), which only the carried value can do.
 
   - id: FBD-012
     claim: >-
@@ -289,11 +305,15 @@ claims:
 
   - id: FBD-024
     claim: >-
-      A failed compile on an FBD download leaves the running program
-      untouched.
+      An .fbd download behaves as a .st one does: a failed compile leaves
+      the running program untouched.
     source: "#tooling"
     tests:
       - go ./runtime TestSwapWarmFBDCompileErrorLeavesRunning
+    note: >-
+      Reworded: this page does not state the failed-compile rule itself; it
+      says download works as it does for .st and links to online edits,
+      whose opening paragraph makes the promise.
 
   - id: FBD-025
     claim: >-

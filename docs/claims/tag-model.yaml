@@ -97,6 +97,11 @@ claims:
     tests:
       - go ./internal/project TestLocalShadowsTag
       - go ./cmd/naut TestCheckGoldenShadowWarning
+    partial: true
+    note: >-
+      The tag keeping its value while the program writes the local, and the
+      naut check warning, are asserted; that a read in the program sees the
+      local rather than the tag is not.
   - id: TAG-009
     claim: >-
       Function blocks and functions do not see project tags implicitly; a
@@ -104,6 +109,10 @@ claims:
     source: "#tags-in-scope-the-rules"
     tests:
       - go ./internal/project TestFunctionBlocksDoNotSeeTagsImplicitly
+    partial: true
+    note: >-
+      A FUNCTION_BLOCK is asserted (undeclared without its own VAR_EXTERNAL,
+      compiles with one); a FUNCTION naming a tag is not tried.
   - id: TAG-010
     claim: >-
       A file-level VAR_GLOBAL block in a library .st (a GVL) declares globals
@@ -156,7 +165,6 @@ claims:
     source: "#a-tags-type"
     tests:
       - go ./internal/project TestTagTypeAndInitMustAgree
-      - go ./internal/project TestFractionalInitOnIntegerTagIsAnError
   - id: TAG-014
     claim: >-
       A type: naming something that is neither an IEC elementary type nor a
@@ -184,6 +192,11 @@ claims:
     tests:
       - go ./server TestMetaTagTypes
       - go ./runtime TestEnumTagsRenderByName
+    partial: true
+    note: >-
+      The meta entries (type, desc, enum members, locals, members only under
+      an enumeration) are asserted; the enumerated value by name is read from
+      Tags.All(), not from an /api/stream frame.
   - id: TAG-017
     claim: >-
       An init: on an untyped tag is seeded as the type the programs declare
@@ -244,6 +257,7 @@ claims:
     source: "#seeding-struct-members"
     tests:
       - go ./internal/project TestStructInitUnknownMemberIsAnError
+      - go ./lang/ir TestSeedFromInitUnknownNestedMemberNamesThePath
       - go ./internal/project TestStructInitScalarOnStructIsAnError
   - id: TAG-022
     claim: >-
@@ -282,6 +296,11 @@ claims:
     tests:
       - go ./runtime TestSetPathTypedMembers
       - go ./runtime TestSetPathTypeMismatch
+    partial: true
+    note: >-
+      A whole number landing on an INT member as an INT, and the BOOL
+      mismatch error, are asserted; a whole number written to a REAL member
+      is never checked to stay a REAL.
   - id: TAG-026
     claim: >-
       An enumerated member takes its member name (any case, Mode#Run
@@ -386,15 +405,21 @@ claims:
       - go ./server TestHMIDoesNotShadowAPI
       - go ./server TestHMIMovesBuiltinDashboardToNautilusPrefix
       - go ./server TestHMIBuiltinAssetsMoveWithDashboard
+    partial: true
+    note: >-
+      The static file, SPA fallback, /api/state still answering JSON, and the
+      dashboard and its assets under /_nautilus/ are asserted; an unmatched
+      /api path not falling back to index.html is not, and as built it does:
+      with server.hmi set, the HMI's "GET /" handler answers an unknown
+      /api/ path with index.html.
   - id: TAG-035
     claim: >-
       The server.hmi path is relative to the project and must resolve inside
-      it, and a path that is a file is an error.
+      it.
     source: "#serving-the-hmi-from-the-controller"
     tests:
+      - go ./internal/project TestHMIDirLoadsIntoServerOptions
       - go ./internal/project TestHMIPathMustStayInsideProject
-      - go ./internal/project TestHMIPathIsAFileIsAnError
-      - go ./cmd/naut TestRunBuildErrorsWhenHMIPathIsAFile
   - id: TAG-036
     claim: >-
       naut build embeds the HMI build output in the binary like any project

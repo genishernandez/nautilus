@@ -114,9 +114,9 @@ claims:
 
   - id: CCS-011
     claim: >-
-      Action qualifiers `N`, `S`, `R`, `P` plus `P1` and `P0` behave as in
-      IEC 61131-3: N while active, S sets once, R clears, P and P1 fire one
-      scan wide on entry, P0 on exit.
+      Action qualifiers `N`, `S`, `R` and `P` work as in Codesys, plus `P1`
+      and `P0`: N while the step is active, S sets once, R clears, P and P1
+      fire one scan wide on entry, P0 on exit.
     source: "#sfc"
     tests:
       - go ./lang/conformance TestConformance/sfc-qualifiers

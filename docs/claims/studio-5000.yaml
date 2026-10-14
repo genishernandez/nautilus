@@ -83,6 +83,10 @@ claims:
       - "go ./lang/conformance TestConformance/fb-ctd/LD loads PV into CV and clears Q"
       - "go ./lang/conformance TestConformance/fb-ctd/before any load CV is 0 and Q is already TRUE (CV <= 0)"
       - "go ./lang/conformance TestConformance/fb-ctd/counts down one per rising CD edge and Q rises when CV reaches 0"
+    partial: true
+    note: >-
+      LD loading PV, counting down and Q at CV = 0 are asserted; Q while CV is
+      below 0 (counting past zero) is not, so a Q that tested CV = 0 would also pass.
 
   - id: C5K-009
     claim: >-
@@ -92,7 +96,7 @@ claims:
     tests:
       - go ./logix/writer TestTONR
     partial: true
-    note: Only the Logix writer's translation is tested. No test runs a TONR on the nautilus runtime. The page still marks this row "in review" although #225 has merged.
+    note: Only the Logix writer's translation is tested. No test runs a TONR on the nautilus runtime.
 
   - id: C5K-010
     claim: >-
@@ -117,7 +121,7 @@ claims:
     tests:
       - go ./lang/ld TestAssignmentElement
     partial: true
-    note: Checked as the generated netlist (SEL on the rung power) and that it compiles; no test scans a rung and reads the assigned tag. The page still marks these rows "in review".
+    note: Checked as the generated netlist (SEL on the rung power) and that it compiles; no test scans a rung and reads the assigned tag.
 
   - id: C5K-012
     claim: >-
@@ -126,7 +130,6 @@ claims:
     source: "#compare-math-and-data-movement"
     tests:
       - "go ./lang/conformance TestConformance/st-partial-access/a bit and a byte of a word read as BOOL and BYTE"
-      - "go ./lang/conformance TestConformance/st-partial-access/writing bits packs a word, leaving its other bits alone"
       - go ./lang/ld TestBitAccessInLadder
       - go ./lang/st TestBitAccess
 
@@ -151,6 +154,7 @@ claims:
     source: "#tags-tasks-and-programs"
     tests:
       - go ./internal/project TestManifestTagsAreImplicit
+      - go ./internal/project TestProgramsDisagreeingOnAnUntypedTag
       - go ./internal/project TestExplicitDeclarationMustAgreeWithTypedTag
 
   - id: C5K-015
@@ -165,11 +169,10 @@ claims:
   - id: C5K-016
     claim: >-
       A tag's `type:` takes `BOOL`, `DINT`, `REAL`, `TIME`, a UDT or an
-      `ARRAY`, and `init:` must agree with it.
+      `ARRAY`.
     source: "#tags-tasks-and-programs"
     tests:
       - go ./internal/project TestElementaryTagTypes
-      - go ./internal/project TestTagTypeAndInitMustAgree
       - go ./internal/project TestTimeMembersSeedFromInit
 
   - id: C5K-017
@@ -181,7 +184,10 @@ claims:
       - go ./logix/writer TestAliasTags
       - go ./logix/importer TestDialectAndAliasImport
     partial: true
-    note: Writer and importer are tested; the page marks this row "in review" though #225 has merged.
+    note: >-
+      The writer is tested with an alias map passed to it directly, and the
+      importer writes `alias:` into the manifest; a manifest `alias:` reaching
+      the writer is not exercised.
 
   - id: C5K-018
     claim: >-

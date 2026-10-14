@@ -22,10 +22,13 @@ claims:
       Program-local VAR keeps its value from scan to scan.
     source: "#a-program-top-to-bottom"
     tests:
-      - go ./lang/ir TestRetainedAccumulator
-      - go ./lang/st TestLowerRetainedAccumulator
       - go ./lang/st TestVarTempResetsEveryScan
       - go ./lang/conformance TestConformance/st-var-temp
+    note: >-
+      TestVarTempResetsEveryScan's plain VAR kept counts to 5 over 5 scans.
+      Dropped: ir TestRetainedAccumulator (hand-built IR, not an ST VAR) and
+      TestLowerRetainedAccumulator (declares VAR RETAIN, so it passes even if
+      plain VAR stopped persisting).
 
   - id: ST-003
     claim: >-
@@ -48,6 +51,12 @@ claims:
     tests:
       - go ./internal/project TestExplicitDeclarationMustAgreeWithTypedTag
       - go ./lang/st TestTagTypesAndUntypedTags
+    partial: true
+    note: >-
+      Agreement with a tag's type: is asserted. For a tag typed only by its
+      init:, which the page also covers, no test asserts agreement;
+      TestTagTypesAndUntypedTags asserts the opposite (an init-inferred type
+      never overrides a VAR_EXTERNAL declaration).
 
   - id: ST-005
     claim: >-
@@ -150,8 +159,10 @@ claims:
     tests:
       - go ./lang/st TestGlobalConstantsVisibleEverywhere
       - go ./lang/st TestGlobalConstantsLibraryAlone
-      - go ./lang/st TestGlobalConstantCannotBeWritten
       - go ./lang/conformance TestConformance/st-global-constants
+    note: >-
+      TestGlobalConstantCannotBeWritten was dropped: the page does not say a
+      VAR_GLOBAL CONSTANT cannot be written.
 
   - id: ST-014
     claim: >-
@@ -218,6 +229,11 @@ claims:
     tests:
       - go ./lang/st TestConstantInBoundsAndInitialValues
       - go ./lang/conformance TestConformance/st-global-constants/an INT constant from a constant expression sizes an array and bounds a loop
+    partial: true
+    note: >-
+      Literal and named-constant bounds are asserted (the constant itself
+      defined by arithmetic); arithmetic written in the bound itself
+      (ARRAY[1..N*2]) is not.
 
   - id: ST-020
     claim: >-
@@ -408,7 +424,9 @@ claims:
 
   - id: ST-035
     claim: >-
-      Every IEC <A>_TO_<B> conversion between the elementary types exists.
+      Every IEC <A>_TO_<B> conversion between BOOL, the integer kinds, REAL,
+      LREAL, TIME, LTIME and STRING exists; there are no WSTRING_TO_,
+      CHAR_TO_ or WCHAR_TO_ functions.
     source: "#statements-and-expressions"
     tests:
       - go ./lang/ir TestConversionMatrixShape
@@ -416,9 +434,10 @@ claims:
       - go ./lang/conformance TestConformance/st-conversions-matrix
     partial: true
     note: >-
-      The matrix test pins 18 conversion types; WSTRING, CHAR and WCHAR,
-      which the page lists as elementary types, are not among them, so no
-      conversion to or from them is asserted (they may not exist).
+      Claim text updated to the page, which now limits the matrix to BOOL,
+      the integer kinds, REAL, LREAL, TIME, LTIME and STRING; coverage was
+      not re-audited. The absence of WSTRING_TO_, CHAR_TO_ and WCHAR_TO_ is
+      not asserted.
 
   - id: ST-036
     claim: >-
@@ -489,6 +508,11 @@ claims:
     tests:
       - go ./lang/st TestFBStructPins
       - go ./lang/st TestFBStructPinFromLibraryFile
+      - go ./lang/st TestEnumInStructsPinsArrays
+    partial: true
+    note: >-
+      Elementary, STRUCT and enumeration pins are asserted; no test uses an
+      ARRAY or a TYPE alias as a pin.
 
   - id: ST-043
     claim: >-
@@ -561,6 +585,13 @@ claims:
     tests:
       - go ./runtime TestSwapWarmCarriesRetainedState
       - go ./runtime TestSwapWarmCompileErrorLeavesRunning
+      - go ./server TestProgramOnlineEditFlow
+    partial: true
+    note: >-
+      A failed download leaving the running program is asserted through PUT
+      /api/program, and SwapWarm carrying VAR state is asserted on the
+      runtime; no test downloads through the endpoint and checks that state
+      carried.
 
   - id: ST-049
     claim: >-
@@ -570,7 +601,9 @@ claims:
     tests:
       - go ./lang/conformance TestConformance/fb-ton/Q false at PT-1ms, true at PT, ET clamps at PT
       - go ./acceptance TestVirtualDtIsExact
-      - go ./acceptance TestRunsAreReproducible
+    note: >-
+      TestRunsAreReproducible was dropped: run-to-run determinism is not
+      what the page promises here.
 
   - id: ST-050
     claim: Pointers and references (REF_TO, dereference) are not supported.

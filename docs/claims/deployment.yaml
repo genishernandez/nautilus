@@ -45,6 +45,13 @@ claims:
     source: "#the-image"
     tests:
       - go ./cmd/naut TestBuildEmbedRoundTrip
+      - go ./cmd/naut TestBuildEmbedsHMIAndBuiltBinaryServesIt
+    partial: true
+    note: >-
+      Asserts the output is the runner's bytes plus the project archive, that
+      the startup reader finds it, and that project.Load over that archive
+      builds a runtime. The runner is a fake byte string, so a real built
+      binary starting and scanning its embedded project is never executed.
   - id: DEP-005
     claim: >-
       The Dockerfile is distroless/static with no shell, so the binary must

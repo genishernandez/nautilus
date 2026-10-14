@@ -11,6 +11,13 @@ claims:
     source: "#2-scaffold-a-project"
     tests:
       - go ./cmd/naut TestScaffoldVariants
+    partial: true
+    note: >-
+      Asserts each template's file set (the tour's program.fbd, sim.st and
+      interlocks.ld; minimal's one program file and test file; sdk's go.mod,
+      main.go and driver.go; sdk-demo's plant.go) and that the program
+      compiles. The tour manifest declaring three tasks, and minimal holding
+      exactly one task and one test, are not asserted.
   - id: GS-002
     claim: >-
       A freshly scaffolded project can be run, tested and shipped with the

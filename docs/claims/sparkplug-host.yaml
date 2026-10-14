@@ -203,6 +203,12 @@ claims:
     tests:
       - go ./sparkplug/host TestStateSweepStale
       - go ./sparkplug/host TestQualityStaleSweepMarksStale
+    partial: true
+    note: >-
+      Both tests call `sweepStale` directly with a synthetic clock; the
+      ticker `Start` runs it on (`staleLoop`), and the manifest's
+      `stale-after` reaching the driver, are not exercised, so a driver
+      that never swept would pass.
   - id: SPH-021
     claim: >-
       Output writes leave as NCMD (node metrics) or DCMD (device metrics),
@@ -409,6 +415,12 @@ claims:
       - go ./sparkplug/host TestStateUnknownMetricDiscovery
       - go ./sparkplug/host TestStateDiscoveryPolicies
       - go ./internal/project TestHostStatusStates
+    partial: true
+    note: >-
+      Only `strict` degrading the driver is asserted (the policy is set on
+      the driver directly). That `log` logs an unbound metric and `ignore`
+      stays silent is not: all three modes count unknowns the same, so a
+      `log` that never logged would pass.
   - id: SPH-042
     claim: >-
       Only the configured group(s) are consumed from the broker.

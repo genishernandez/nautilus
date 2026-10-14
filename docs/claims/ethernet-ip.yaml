@@ -397,6 +397,11 @@ claims:
     source: "#no-plc-the-logix-emulator"
     tests:
       - go ./cmd/naut TestLogixEmulateRamp
+    partial: true
+    note: >-
+      Only a REAL leaf is asserted to drift; that integer leaves drift is
+      not. The client write is simulated by writing the emulator's tag store
+      directly rather than over CIP.
   - id: EIP-039
     claim: >-
       Client writes land in the emulator, so a project's outputs read back
