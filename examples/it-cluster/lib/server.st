@@ -307,6 +307,44 @@ P.InputV := SEL(F.InputLost, B.InputV, 0.0);
 P.Fault := NOT Up;
 END_FUNCTION_BLOCK
 
+FUNCTION_BLOCK PsuUnit
+(* One of N supplies (three or more; one and two have PsuSingle and
+   PsuPair). The server's draw is shared equally across the supplies that
+   are up: each carries LoadW / UpCount, a supply that is down carries 0,
+   and with every supply down nobody carries anything (the server is
+   Unpowered, plant.st). UpCount is the number of supplies up, counted by
+   plant.st from the same fault inputs in the same scan, before any unit
+   runs, so a supply failing moves the share to the others in that scan,
+   not the next. Each unit's own Up is the same test the count uses. *)
+VAR_INPUT
+  Rec     : PSU;
+  F       : SimPSU;
+  LoadW   : REAL;
+  UpCount : DINT; (* supplies up on this server, this scan *)
+  Live    : BOOL;
+END_VAR
+VAR_IN_OUT
+  P : PSU;
+END_VAR
+VAR
+  B    : PSU;
+  Init : BOOL;
+  Up   : BOOL;
+END_VAR
+IF NOT Init THEN
+  B := P;
+  Init := TRUE;
+END_IF;
+IF Live THEN
+  B.InputV := Rec.InputV;
+END_IF;
+Up := NOT (F.InputLost OR F.Fail);
+P.OutputW := SEL(Up AND UpCount > 0, 0.0, LoadW / INT_TO_REAL(MAX(UpCount, 1)));
+P.InputOk := NOT F.InputLost;
+P.InputV := SEL(F.InputLost, B.InputV, 0.0);
+P.Fault := NOT Up;
+END_FUNCTION_BLOCK
+
 FUNCTION_BLOCK DrivePlant
 VAR_INPUT
   F : SimDrive;
