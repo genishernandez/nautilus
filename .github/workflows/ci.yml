@@ -33,6 +33,12 @@ jobs:
         run: node examples/spatial-rig/hmi/fetch-assets.mjs
       - name: naut check (examples)
         run: go run ./cmd/naut check examples
+      - name: naut check + naut test (psu-lab fixture)
+        # testdata/projects/psu-lab links examples/it-cluster's lib/server.st,
+        # so it gates here; the other testdata projects are read by go test.
+        run: |
+          go run ./cmd/naut check testdata/projects/psu-lab
+          go run ./cmd/naut test testdata/projects/psu-lab
       - name: naut check + naut test (every example project's every manifest)
         # Discovers project roots by their nautilus.yaml (so go-sdk, which
         # has none, is skipped automatically) and, in each one, every

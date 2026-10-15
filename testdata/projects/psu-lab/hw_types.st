@@ -1,0 +1,1 @@
+../../../examples/it-cluster/hw_types.st
