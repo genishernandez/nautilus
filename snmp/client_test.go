@@ -422,6 +422,10 @@ func TestPollAgentRestartIsNotAWrap(t *testing.T) {
 		// A stand-in serving a recorded constant: t − U creeps past the
 		// last sample, but nothing went backwards — no restart.
 		{"uptime frozen", 1, 1, true},
+		// Backwards, but to 42 s: a restart long before the last sample
+		// (40 ms ago) — what a plant setting UptimeS does. The counter
+		// never started over, so the sample is kept and the step rates.
+		{"uptime back to before the last sample", 1_000_000, 4200, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &memGetter{w: portWalk(1)}
