@@ -32,6 +32,10 @@ naut redfish import --tag NODE1 --host https://bmc1 --user mon --password-env BM
 naut prometheus import --tag HOST1 --url http://host1:9100/metrics
 ```
 
+A live Prometheus import needs the whole scrape: one that does not finish
+within `--timeout` (default 5 s) fails rather than generating a manifest
+from the part that arrived.
+
 Each importer writes `<proto>_manifest.yaml`, `tags/<proto>.yaml` and
 `hw_types.st` — generated, never hand-edited, byte-identical on re-run.
 All three write the same `hw_types.st`, so a project with a switch and a
@@ -82,8 +86,13 @@ be on; MD5 and DES are accepted with a warning.
   `UPS` mirrors the same verdict. `<id>__LastPollMs` is the poll clock.
 - **Rates:** `InBps`, `OutBps`, `ErrorRate` are per-second rates of wire
   counters, with 32-bit wrap and 64-bit reset handled (a step backwards on
-  a 64-bit counter is a reboot, not a wrap). They read 0 for exactly one
-  interval after a source connects.
+  a 64-bit counter is a reboot, not a wrap). A 32-bit counter can reset
+  too: a step backwards that would mean more than half its range in one
+  interval is read as a reset, and an SNMP source's `sysUpTime` going
+  backwards marks every rate across the restart as a reset whatever the
+  counter did. A reset delivers no rate for that interval; the rate before
+  it is kept. Rates read 0 for exactly one interval after a source
+  connects.
 - **Bad, per tag:** a refused OID, a 404 resource or a metric the exporter
   no longer carries marks that tag Bad and leaves its siblings Good. A
   transport failure (timeout, refused, bad credentials) climbs a backoff
@@ -117,6 +126,11 @@ writes:
   - { name: PDU1_Outlet03_Cmd, tag: PDU1_Outlet03, member: On, oid: 1.3.6.1.4.1.3808..., set: { true: 1, false: 2 } }
   - { name: NODE1_PowerCmd, tag: NODE1, member: PowerOn, target: /redfish/v1/Systems/1/Actions/ComputerSystem.Reset }
 ```
+
+SNMP has no boolean type, so a BOOL command over SNMP must say what each
+value writes: `set:` maps `true` and `false` to the INTEGERs the object
+takes (TruthValue is `{ true: 1, false: 2 }`; vendor MIBs vary), and
+`naut check` refuses a BOOL write without it rather than send 0 for false.
 
 `NODE1_PowerCmd` is an INT: 0 none, 1 on, 2 graceful shutdown, 3 force
 off, 4 restart — posted once on the change to a non-zero value; the program

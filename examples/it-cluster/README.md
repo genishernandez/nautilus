@@ -104,8 +104,16 @@ curl -X POST localhost:8087/api/tags -d '{"name":"Scenario","value":"cpu-overhea
 ## The replay clock is tags too
 
 `Replay_Speed` (default 60: the 68 h in 68 min), `Replay_Pause` and
-`Replay_SeekS` (unix seconds; a change jumps there) steer it; `Replay_At`,
+`Replay_SeekS` (unix seconds; a change jumps there, and 0 re-arms it, so a
+program pulsing T then 0 jumps to T every time) steer it; `Replay_At`,
 `Replay_From` and `Replay_To` report it. The node-3d HMI's clock writes them.
+
+The recording loads when the plant starts. If it is missing or unreadable,
+or `from:`/`to:` leave no window to loop, the replayed tags read
+NotConnected and `/api/drivers` gives the reason; the driver looks again
+every 10 s and loads the file once it changes, with no restart. A replayed
+tag the recording has no series for reads Bad: its constants are all it
+can deliver.
 
 ## Serving a monitoring project
 

@@ -391,6 +391,96 @@ func TestPollTransportErrorRedials(t *testing.T) {
 	}
 }
 
+// sysUpTime tells an agent restart from a wrap. A 32-bit counter high in
+// its range that comes back small is a plausible wrap by itself; when the
+// agent's uptime went backwards (it restarted after the last sample), no
+// rate is computed across it. With the uptime still climbing — or frozen,
+// as a stand-in's recorded value is — the same step is a wrap and rates.
+func TestPollAgentRestartIsNotAWrap(t *testing.T) {
+	const counter, uptime = "1.3.6.1.2.1.31.1.1.1.6.1", "1.3.6.1.2.1.1.3.0"
+	set := func(g *memGetter, oid string, v uint64) {
+		for i := range g.w {
+			if g.w[i].OID == oid {
+				g.w[i].Uint = v
+			}
+		}
+	}
+	m := portManifest(1)
+	mb := m.Tags[1].Members["InBps"]
+	mb.Width = 32
+	m.Tags[1].Members["InBps"] = mb
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		first   uint64 // uptime ticks at the first poll
+		uptime  uint64 // and at the second
+		wantHit bool
+	}{
+		{"agent restarted", 12345, 1, false},
+		{"agent up all along", 12345, 12345 + 5, true},
+		// A stand-in serving a recorded constant: t − U creeps past the
+		// last sample, but nothing went backwards — no restart.
+		{"uptime frozen", 1, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &memGetter{w: portWalk(1)}
+			d, _ := newMem(t, m, g)
+			set(g, counter, 1<<32-1000)
+			set(g, uptime, tc.first)
+			if _, err := d.poll(ctx, "SW1", hw.DefaultClass); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(40 * time.Millisecond) // the restart lands after the first sample
+			set(g, counter, 400)
+			set(g, uptime, tc.uptime)
+			res, err := d.poll(ctx, "SW1", hw.DefaultClass)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, ok := update(res, "SW1_Port01", "InBps")
+			if ok != tc.wantHit {
+				t.Fatalf("InBps delivered = %v (%v), want %v", ok, v.F, tc.wantHit)
+			}
+			if !tc.wantHit {
+				// The sample after the restart is the new baseline.
+				time.Sleep(20 * time.Millisecond)
+				set(g, counter, 1400)
+				set(g, uptime, tc.uptime+3)
+				res, _ = d.poll(ctx, "SW1", hw.DefaultClass)
+				if _, ok := update(res, "SW1_Port01", "InBps"); !ok {
+					t.Fatal("the poll after a restart must rate again")
+				}
+			}
+		})
+	}
+
+	// A class with rate bindings reads sysUpTime even when no member binds
+	// it — one OID on a Get the class may not otherwise send — and an agent
+	// without it costs nothing but the detection: no tag turns Bad.
+	m = portManifest(1)
+	m.Tags = m.Tags[1:] // drop the Switch tag that binds UptimeS
+	g := &memGetter{w: portWalk(1)}
+	d, _ := newMem(t, m, g)
+	res, err := d.poll(ctx, "SW1", hw.DefaultClass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(g.calls, "|"), "get 3") { // OperUp.1, InBps.1 (below the walk threshold) + sysUpTime
+		t.Errorf("calls = %v", g.calls)
+	}
+	var kept walk.Walk
+	for _, v := range g.w {
+		if v.OID != uptime {
+			kept = append(kept, v)
+		}
+	}
+	g.w = kept
+	if res, err = d.poll(ctx, "SW1", hw.DefaultClass); err != nil || len(res.Bad) != 0 {
+		t.Fatalf("an agent without sysUpTime: err %v, Bad %v", err, res.Bad)
+	}
+}
+
 // The explanation a commissioning tech gets for each failure.
 func TestExplain(t *testing.T) {
 	s := &session{src: Source{ID: "SW1", Host: "192.0.2.2", Version: V3, User: "nautilus"}}
@@ -415,13 +505,14 @@ func TestExplain(t *testing.T) {
 }
 
 // Writes: set: maps the command value; a value set: does not name is an
-// error naming the keys; without set:, BOOL is 1/0.
+// error naming the keys; without set:, an INT is written as itself (a BOOL
+// without set: never gets this far — Validate refuses it).
 func TestWriteMapping(t *testing.T) {
 	g := &memGetter{w: portWalk(1)}
 	m := portManifest(1)
 	m.Writes = []Write{
 		{Name: "SW1_Port01_Cmd", Tag: "SW1_Port01", Member: "OperUp", OID: "1.3.6.1.2.1.2.2.1.7.1", Set: map[string]int64{"true": 1, "false": 2}},
-		{Name: "SW1_Raw_Cmd", Tag: "SW1_Port01", Member: "OperUp", OID: "1.3.6.1.2.1.2.2.1.7.1"},
+		{Name: "SW1_Raw_Cmd", Tag: "SW1_Port01", Member: "Index", OID: "1.3.6.1.2.1.2.2.1.7.1"},
 	}
 	d, _ := newMem(t, m, g)
 	ctx := context.Background()
@@ -431,8 +522,11 @@ func TestWriteMapping(t *testing.T) {
 	if err := d.write(ctx, "SW1", hw.WriteDecl{Name: "SW1_Port01_Cmd"}, ir.IntVal(7)); err == nil || !strings.Contains(err.Error(), "false, true") {
 		t.Errorf("unmapped value = %v", err)
 	}
-	if err := d.write(ctx, "SW1", hw.WriteDecl{Name: "SW1_Raw_Cmd"}, ir.BoolVal(true)); err != nil {
+	if err := d.write(ctx, "SW1", hw.WriteDecl{Name: "SW1_Raw_Cmd"}, ir.IntVal(2)); err != nil {
 		t.Fatal(err)
+	}
+	if err := d.write(ctx, "SW1", hw.WriteDecl{Name: "SW1_Raw_Cmd"}, ir.BoolVal(false)); err == nil || !strings.Contains(err.Error(), "needs set:") {
+		t.Errorf("a BOOL with no set: must not be guessed at: %v", err)
 	}
 	if strings.Join(g.calls, "|") != "set 1.3.6.1.2.1.2.2.1.7.1|set 1.3.6.1.2.1.2.2.1.7.1" {
 		t.Errorf("calls = %v", g.calls)

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/joyautomation/nautilus/hw"
+	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/snmp/walk"
 	"gopkg.in/yaml.v3"
 )
@@ -157,7 +158,8 @@ type Member struct {
 // is SET to OID. Set maps the command value (its string form: "true",
 // "false", "3") to the INTEGER put on the wire — {true: 1, false: 2} for a
 // CyberPower outlet (immediateOn / immediateOff); without Set, an INT
-// command is written as itself and a BOOL as 1/0.
+// command is written as itself. A BOOL command must have Set: SNMP has no
+// boolean, and no one integer pair is "true/false" across MIBs.
 type Write struct {
 	Name   string
 	Tag    string
@@ -342,6 +344,10 @@ func (m Manifest) Validate() error {
 		}
 	}
 
+	tagType := map[string]string{}
+	for _, t := range m.Tags {
+		tagType[t.Name] = t.Type
+	}
 	wnames := map[string]bool{}
 	for _, w := range m.Writes {
 		if w.Name == "" {
@@ -362,6 +368,14 @@ func (m Manifest) Validate() error {
 			if k == "" {
 				errs = append(errs, fmt.Errorf("write %s: set: has an empty key", w.Name))
 			}
+		}
+		// SNMP has no boolean type, and a BOOL command has no wire value
+		// that is right everywhere: TruthValue (SNMPv2-TC) is true(1) /
+		// false(2), and most vendor MIBs use 1/2 or their own enum, so an
+		// implicit 1/0 sends a "false" the agent refuses (wrongValue) or
+		// reads as something else. The manifest must say what false is.
+		if _, f, ok := hw.FieldOf(tagType[w.Tag], w.Member); ok && f.Kind == ir.TypeBool && len(w.Set) == 0 {
+			errs = append(errs, fmt.Errorf("write %s: %s.%s is a BOOL, and SNMP has no booleans — add set: to name the INTEGER each value writes (TruthValue is set: {true: 1, false: 2}; check the object's SYNTAX in its MIB)", w.Name, w.Tag, w.Member))
 		}
 	}
 	return errors.Join(errs...)
