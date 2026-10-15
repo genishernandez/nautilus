@@ -1,10 +1,12 @@
 (* scenarios.st: compiled by gen.py from scenarios.yaml. Do not edit:
    add or change a scenario there. Writing Scenario starts it: a set: at
    once, a timeline step by step (Phase, seconds from the write, wrapping
-   every repeat:). "normal" clears every fault. *)
+   every repeat:). "normal" clears every fault. ScenarioRestart (a pulse)
+   runs the one written again from its start: writing the same name twice
+   is no change, so it alone cannot. *)
 PROGRAM Scenarios
 VAR_EXTERNAL
-  Scenario : STRING; ClearFaults : BOOL; ScenarioUnknown : BOOL;
+  Scenario : STRING; ClearFaults : BOOL; ScenarioUnknown : BOOL; ScenarioRestart : BOOL;
   ScenarioCatalog : STRING; (* for the scenario panel: every name and what it does *)
   ScenarioS : REAL; ScenarioDtS : REAL;
   Sim_Cable_NODE1_Nic_Slot2_P1 : SimCable;
@@ -67,8 +69,9 @@ VAR
   S23_10 : BOOL;
   S23_11 : BOOL;
 END_VAR
-IF Scenario <> Last THEN
+IF Scenario <> Last OR ScenarioRestart THEN
   Last := Scenario;
+  ScenarioRestart := FALSE;
   ScenarioS := 0.0;
   Phase := 0.0;
   ScenarioUnknown := FALSE;

@@ -91,6 +91,29 @@ tests:
       - advance: 1s
         expect: { SW3_Port25.OperUp: true, NODE3_Nic_Slot3_P2.LinkUp: true, SW3.UptimeS: { lt: 10 } }
 
+  - name: ClearFaults ends a reboot in progress
+    steps:
+      - given: { Scenario: "switch-reboot" }
+        advance: 10s
+        expect: { SW3.Online: false }
+      - given: { Scenario: "normal" }
+        advance: 2s
+        expect: { SW3.Online: true, SW3_Port25.OperUp: true, NODE3_Nic_Slot3_P2.LinkUp: true }
+
+  - name: a speed fault at one end of a switch-to-switch link renegotiates both ends
+    steps:
+      # let the start-up Scenario 'normal' clear the faults first
+      - advance: 2s
+      - given: { Sim_SW1_Port27.SpeedMbps: 1000.0 }
+        advance: 1s
+        expect: { SW1_Port27.SpeedMbps: 1000.0, SW2_Port28.SpeedMbps: 1000.0, SW2_Port27.SpeedMbps: 10000.0 }
+      - given: { Sim_SW2_Port28.SpeedMbps: 100.0 }
+        advance: 1s
+        expect: { SW1_Port27.SpeedMbps: 100.0, SW2_Port28.SpeedMbps: 100.0 }
+      - given: { Sim_SW1_Port27.SpeedMbps: 0.0, Sim_SW2_Port28.SpeedMbps: 0.0 }
+        advance: 1s
+        expect: { SW1_Port27.SpeedMbps: 10000.0, SW2_Port28.SpeedMbps: 10000.0 }
+
   - name: fan-fail stops the fan, the others ramp, the CPU warms but holds
     steps:
       - given: { Scenario: "fan-fail" }
@@ -118,6 +141,18 @@ tests:
         advance: 2s
         expect: { NODE1_PSU2.InputOk: false, NODE1_PSU2.InputV: 0.0, NODE1_PSU2.OutputW: 0.0, NODE1_PSU2.Fault: true, NODE1_PSU1.OutputW: 199.0, NODE1_PSU1.Fault: false, NODE1.PowerOn: true }
 
+  - name: both supplies down is no power at all, not one supply carrying the load
+    steps:
+      # let the start-up Scenario 'normal' clear the faults first
+      - advance: 2s
+      - given: { Sim_NODE1_PSU1.Fail: true, Sim_NODE1_PSU2.InputLost: true }
+        advance: 2s
+        expect: { NODE1_PSU1.OutputW: 0.0, NODE1_PSU2.OutputW: 0.0, NODE1_PSU1.Fault: true, NODE1_PSU2.Fault: true,
+                  NODE1.PowerOn: false, NODE1.PowerW: 0.0, NODE1.Online: false, NODE1_Nic_BMC.LinkUp: false, SW1_Port24.OperUp: false, SW1_Port25.OperUp: false }
+      - given: { Sim_NODE1_PSU1.Fail: false }
+        advance: 2s
+        expect: { NODE1.PowerOn: true, NODE1.Online: true, NODE1_PSU1.OutputW: 199.0, NODE1_PSU2.OutputW: 0.0, NODE1_Nic_BMC.LinkUp: true }
+
   - name: drive-pull and drive-failing
     steps:
       - given: { Scenario: "drive-pull" }
@@ -127,11 +162,12 @@ tests:
         advance: 2s
         expect: { NODE3_Drive_NVMe1.PredictedFailure: true, NODE3_Drive_NVMe1.Health: 1, NODE3_Drive_NVMe1.Fault: true, NODE3_Drive_NVMe2.Present: false }
 
-  - name: node-off drops its links and cools to the inlet
+  - name: node-off drops its host links and cools to the inlet; the BMC stays up on standby power
     steps:
       - given: { Scenario: "node-off" }
         advance: 2s
-        expect: { NODE2.PowerOn: false, NODE2.PowerW: 12.0, NODE2_Fan1.RPM: 0.0, SW2_Port25.OperUp: false, SW2_Port25.Down: true, NODE2_Nic_BMC.LinkUp: false }
+        expect: { NODE2.PowerOn: false, NODE2.PowerW: 12.0, NODE2_Fan1.RPM: 0.0, SW2_Port25.OperUp: false, SW2_Port25.Down: true,
+                  NODE2.Online: true, NODE2_Nic_BMC.LinkUp: true, SW2_Port24.OperUp: true }
       - advance: 1200s
         expect: { NODE2_Temp_CPU.Value: { lt: 30 }, NODE2.Online: true }
 
@@ -206,6 +242,23 @@ tests:
         expect: { Sim_Room.InletDeltaC: 10.0 }
       - advance: 300s
         expect: { Sim_Room.InletDeltaC: 20.0, NODE1.InletTempC: { gt: 44 } }
+
+  - name: ScenarioRestart runs the active scenario again from its start
+    steps:
+      - given: { Scenario: "bmc-reboot" }
+        advance: 5s
+        expect: { NODE3.Online: false }
+      - given: { Sim_NODE3.Dark: false }
+        advance: 2s
+        expect: { NODE3.Online: true }
+      # writing the same name again is no change, so nothing restarts...
+      - given: { Scenario: "bmc-reboot" }
+        advance: 2s
+        expect: { NODE3.Online: true, ScenarioS: { gt: 8 } }
+      # ...the pulse does
+      - given: { ScenarioRestart: true }
+        advance: 2s
+        expect: { NODE3.Online: false, ScenarioRestart: false, ScenarioS: { lt: 3 } }
 
   - name: an unknown scenario is flagged, and changes nothing
     steps:

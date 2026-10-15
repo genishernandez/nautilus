@@ -16,6 +16,7 @@ export class PlantFaults {
 	/** Seconds since `Scenario` was written. */
 	since = $state<number | undefined>(undefined);
 	unknown = $state(false);
+	#catalogText: unknown;
 	#timer: ReturnType<typeof setInterval> | undefined;
 
 	async poll() {
@@ -27,8 +28,11 @@ export class PlantFaults {
 			const sims: Record<string, unknown> = {};
 			for (const [k, v] of Object.entries(t)) if (k.startsWith('Sim_')) sims[k] = v;
 			this.state = sims;
-			// The catalog is written once; parse it only when it changes.
-			if (!this.catalog.length) this.catalog = parseCatalog(t.ScenarioCatalog);
+			// Parsed only when it changes (a plant restarted with new scenarios).
+			if (t.ScenarioCatalog !== this.#catalogText) {
+				this.#catalogText = t.ScenarioCatalog;
+				this.catalog = parseCatalog(t.ScenarioCatalog);
+			}
 			this.scenario = typeof t.Scenario === 'string' ? t.Scenario : '';
 			this.since = typeof t.ScenarioS === 'number' ? t.ScenarioS : undefined;
 			this.unknown = t.ScenarioUnknown === true;
@@ -52,7 +56,9 @@ export class PlantFaults {
 		}).catch(() => {});
 		await this.poll();
 	}
-	run = (scenario: string) => this.write('Scenario', scenario);
+	// The plant acts on a CHANGE of Scenario, so the one already running is
+	// run again from its start with the ScenarioRestart pulse.
+	run = (scenario: string) => (scenario === this.scenario ? this.write('ScenarioRestart', true) : this.write('Scenario', scenario));
 	// The plant acts on a CHANGE of Scenario: once it reads normal, faults
 	// set by hand since are cleared with the ClearFaults pulse instead.
 	clearAll = () => (this.scenario === 'normal' ? this.write('ClearFaults', true) : this.run('normal'));

@@ -2,7 +2,7 @@
 	// A part's faults, where it was right-clicked: the members of its
 	// Sim_* structs (faults.ts faultsFor), each a toggle that writes the
 	// plant. Grouped by struct: the part, the cable on it, its device.
-	import { faultsFor, who } from './faults';
+	import { faultsFor, who, type PortVlanContext } from './faults';
 	import type { PlantFaults } from './faults.svelte';
 
 	let {
@@ -11,10 +11,11 @@
 		y,
 		title,
 		simTags,
+		vlans,
 		onclose
-	}: { faults: PlantFaults; x: number; y: number; title: string; simTags: string[]; onclose: () => void } = $props();
+	}: { faults: PlantFaults; x: number; y: number; title: string; simTags: string[]; vlans?: PortVlanContext; onclose: () => void } = $props();
 
-	let items = $derived(faultsFor(faults.state, simTags));
+	let items = $derived(faultsFor(faults.state, simTags, vlans));
 	let groups = $derived(simTags.map((t) => ({ tag: t, items: items.filter((f) => f.tag === t) })).filter((g) => g.items.length));
 	let menu = $state<HTMLElement>();
 	// Kept on screen: flipped left / up when it would run off an edge.

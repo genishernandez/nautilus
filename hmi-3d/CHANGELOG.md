@@ -1,5 +1,25 @@
 # Changelog — @joyautomation/nautilus-hmi-3d
 
+## Unreleased
+
+**Fixed.** The VLAN view held one ERPS state for the whole site: a failed
+link in one ring opened every ring's protection link. Each ring's RPL is
+now blocked or open by its own ring alone (`ringsOf`): the ring links joined
+through shared switches, or the new `TopoLink.ring` name where two rings
+share a switch. `TopoLink.rpl` is now typed. (#153)
+
+**Fixed.** A fan or PSU whose RPM or OutputW is not published read `0 rpm`
+or `0 W`; it now reads `no data`. A reported 0 still reads 0. (#153)
+
+**Fixed.** `PartModel` kept the previous model's materials and named meshes
+when `src` changed (LEDs, accents and ports of the old model were still
+driven, and its materials never freed), and rebuilt every material's shader
+on each prop change; it now releases them on a new model and sets
+`needsUpdate` only when the blending changes. `GltfNode` cloned a mesh's
+material from what it wore at the time, which under bad quality was the
+stale grey, so the part stayed grey once good again; it now clones the
+model's own material, and releases its clones when the model changes. (#153)
+
 ## 0.1.3 — 2026-10-05
 
 **Added.** `TopoLink.expect: 'up' | 'down'`. A link declared down (a

@@ -67,12 +67,26 @@
 	let portMeshes: Object3D[] = [];
 	let failed = $state(false);
 
+	/** Let go of the previous model's materials and named meshes (a new
+	 * `src`, or the component going away). */
+	function release() {
+		for (const m of mats) m.dispose();
+		mats.length = 0;
+		base.clear();
+		ledMats = [];
+		accentMats = [];
+		portMeshes = [];
+		rotor = undefined;
+	}
+
 	$effect(() => {
 		const url = src;
 		let live = true;
+		failed = false;
 		loadPart(url).then(
 			(g) => {
 				if (!live) return;
+				release();
 				const o = g.scene.clone(true);
 				o.traverse((n) => {
 					if (!(n instanceof Mesh)) return;
@@ -113,21 +127,26 @@
 		for (const m of mats) {
 			m.color.copy(base.get(m) ?? m.color);
 			if (t) m.color.lerp(t, 0.7);
-			m.emissive = t ? t.clone().multiplyScalar(0.35) : new Color(0);
+			if (t) m.emissive.copy(t).multiplyScalar(0.35);
+			else m.emissive.setRGB(0, 0, 0);
 			m.emissiveIntensity = t ? 1 : 0;
 		}
 		for (const m of ledMats) {
 			if (t) continue;
 			m.color.set(led ?? '#111');
-			m.emissive = new Color(led ?? '#000');
+			m.emissive.set(led ?? '#000');
 			m.emissiveIntensity = led ? 1.6 : 0;
 		}
 		if (!t) for (const m of accentMats) if (accent) m.color.set(accent);
+		const transparent = opacity < 1;
 		for (const m of mats) {
-			m.transparent = opacity < 1;
+			// Only a change of blending needs the program rebuilt.
+			if (m.transparent !== transparent) {
+				m.transparent = transparent;
+				m.needsUpdate = true;
+			}
 			m.opacity = opacity;
-			m.depthWrite = opacity >= 1;
-			m.needsUpdate = true;
+			m.depthWrite = !transparent;
 		}
 		portMeshes.forEach((p) => {
 			const n = Number(p.name.slice(4));
@@ -139,7 +158,7 @@
 		if (rotor && spin) rotor.rotation.z = (rotor.rotation.z + spin * 2 * Math.PI * dt) % (2 * Math.PI);
 	});
 
-	onDestroy(() => mats.forEach((m) => m.dispose()));
+	onDestroy(release);
 </script>
 
 {#if root}

@@ -50,14 +50,14 @@ takes both ends down.
 |---|---|
 | `Sim_SW1_Port25.Down` | link lost: `OperUp` false, no traffic, `AdminUp` stays true (the monitor raises "link down"), and the server port at the other end loses link too |
 | `Sim_SW1_Port25.AdminDown` | shut by an operator: `AdminUp` and `OperUp` false, no alarm; the far end loses link |
-| `Sim_SW1_Port25.SpeedMbps` | negotiated speed override (10000 → 1000) at both ends, traffic capped to the line; 0 = as recorded |
+| `Sim_SW1_Port25.SpeedMbps` | negotiated speed override (10000 → 1000) at both ends (a switch or a server at the far end; set at both, the slower wins), traffic capped to the line; 0 = as recorded |
 | `Sim_SW1_Port25.ErrorRate` | errors per second added to the recording |
 | `Sim_Cable_SW3_Port25.Pulled` | the cable itself: both ends down |
-| `Sim_SW1.Dark` / `.Reboot` | the switch goes dark (its stand-in stops answering) / reboots: dark for 90 s, back with its uptime reset |
+| `Sim_SW1.Dark` / `.Reboot` | the switch goes dark (its stand-in stops answering) / reboots: dark for 90 s, back with its uptime reset (clearing the faults ends a reboot early) |
 | `Sim_NODE2.CpuLoad` | % busy, 0 = as recorded: power and the thermal model follow |
-| `Sim_NODE2.PowerOff` / `.Dark` | host off (standby power, fans stop, temperatures fall to the inlet, links drop) / the BMC stops answering |
+| `Sim_NODE2.PowerOff` / `.Dark` | host off (standby power, fans stop, temperatures fall to the inlet, host links drop; the BMC and its link stay up) / the BMC stops answering |
 | `Sim_NODE1_Fan3.Fail` | the fan stops; the others ramp; temperatures climb |
-| `Sim_NODE1_PSU2.InputLost` / `.Fail` | output 0, the other supply carries the load, the server stays up |
+| `Sim_NODE1_PSU2.InputLost` / `.Fail` | output 0, the other supply carries the load, the server stays up; every supply down is no power at all: host and BMC off, every link down |
 | `Sim_NODE3_Drive_NVMe2.Pulled` / `.Failing` | `Present` false / `PredictedFailure` and health Warning |
 | `Sim_NODE1_Nic_Slot2_P1.Down` | the server's port loses link (and the far end) |
 | `Sim_Room.InletDeltaC` | the room runs hot: every inlet, and everything behind it, rises |
@@ -76,7 +76,9 @@ it is a named constant there, to tune against a real box.
 
 `Scenario` (a STRING) sets a preset of fault inputs, so a demo is one write
 (`scenarios.st`). Presets only set inputs, so they compose; `normal` clears
-every fault (so does the `ClearFaults` pulse).
+every fault (so does the `ClearFaults` pulse). Writing the name already
+running is no change, so it does nothing; the `ScenarioRestart` pulse runs
+it again from its start.
 
 | Scenario | Sets |
 |---|---|
