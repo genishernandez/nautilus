@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -86,18 +87,22 @@ func TestDeployStreamOnlineEdit(t *testing.T) {
 // choice the editor sent.
 func TestDeployStreamDownload(t *testing.T) {
 	var calls int
-	var gotMode bool
+	var gotMode, gotReset bool
 	plane := &ProgramPlane{
 		Source: ladderA, CommPath: `AB_ETH-1\10.0.0.5\Backplane\0`,
 		Deploy: func(context.Context, string, func(string)) (*deploy.Report, error) {
 			t.Error("a download ran the online-edit path")
 			return &deploy.Report{}, nil
 		},
-		Download: func(_ context.Context, src string, programMode bool, progress func(string)) (*deploy.Report, error) {
+		Download: func(_ context.Context, src string, o DownloadOptions, progress func(string)) (*deploy.Report, error) {
 			calls++
-			gotMode = programMode
+			gotMode, gotReset = o.ProgramMode, o.ResetValues
 			progress("imported and built")
-			return &deploy.Report{Applied: deploy.Download, Verified: true, ModeBefore: "Run", ModeAfter: "Program"}, nil
+			rep := &deploy.Report{Applied: deploy.Download, Verified: true, ModeBefore: "Run", ModeAfter: "Program"}
+			if !o.ResetValues {
+				rep.Values = &deploy.ValuePlan{Kept: []string{"HiLevelSP", "SpareSP"}, Reset: []string{"Spare2: DINT → REAL"}}
+			}
+			return rep, nil
 		},
 	}
 	url := startPlaneWith(t, plane)
@@ -121,8 +126,15 @@ func TestDeployStreamDownload(t *testing.T) {
 	if len(done) != 1 || done[0]["applied"] != "download" || done[0]["mode"] != "Program" || done[0]["modeBefore"] != "Run" {
 		t.Fatalf("done = %v", lines)
 	}
+	if done[0]["valuesKept"] != float64(2) || fmt.Sprint(done[0]["resets"]) != "[Spare2: DINT → REAL]" || gotReset {
+		t.Errorf("values: done = %v, resetValues %v", done[0], gotReset)
+	}
 	if getProgram(t, url)["source"] != ladderB {
 		t.Error("a download did not become the served source")
+	}
+	_, lines = postDeploy(t, url, map[string]any{"mode": "download", "source": ladderA, "yes": true, "resetValues": true})
+	if done := events(lines, "done"); !gotReset || len(done) != 1 || done[0]["valuesKept"] != float64(-1) {
+		t.Errorf("resetValues: %v (passed %v)", lines, gotReset)
 	}
 
 	noDL := startPlaneWith(t, &ProgramPlane{Source: ladderA, Deploy: plane.Deploy})

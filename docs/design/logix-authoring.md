@@ -203,7 +203,11 @@ and a running controller's values always move.
    comm path, firmware revision) so `naut check`, the editor's Download
    button and the deploy command all know what they are aiming at.
 4. **Tag-value preservation across downloads.** Open since `logix-target.md`
-   §15.2. Needed before anyone downloads to a plant.
+   §15.2. Needed before anyone downloads to a plant. **Decided and built
+   (2026-10-14, #273):** a download keeps the controller's values of the
+   tags that survive it unchanged, taken from the upload that precedes the
+   build; `--reset-values` opts out. The rule and the Echo results are in
+   §7b, "Follow-up — a download keeps the controller's values".
 5. **Names for generated tags** (edge storage, rewritten timers) must be
    stable across regenerations, or every regeneration looks like drift.
 
@@ -1634,6 +1638,80 @@ Two things are left as they are: a download's summary arrives only after
 the next edit's session has reopened (about 50 s after "verified", with
 "opening the online session for the next edit" on screen meanwhile), and
 an edit's summary time counts the edit, not the session open before it.
+
+**An ST routine's warm online edit in Run (#272, measured 2026-10-14 with
+#273):** the same endpoint, an ST version of DemoLine
+(`MainProgram.st`, 11 lines, one comparison changed per edit), the
+session opened after an editor download, the controller then put in Run:
+
+| edit, controller in Run | wall time | result |
+|---|---|---|
+| first after the mode change | 3.7 s | routine replaced, verified, Run kept |
+| second, third, fourth | 1.9 s, 1.9 s, 1.85 s | routine replaced, verified, Run kept |
+
+Phase B measured 4.0 s for an ST edit in Program; in Run the warm ST edit
+is under 2 s, about the ladder edit's 1.5 s plus the larger routine
+export that verifies it.
+
+### Follow-up — a download keeps the controller's values (2026-10-14, #273)
+
+**Before:** a download sent the project as written, so every tag went back
+to its initial value. Checked on Echo (v38, ws-test) with a scratch
+DemoLine carrying a nested UDT (`Pump1 : Pump`), a REAL array, a TIMER and
+a COUNTER: HiLevelSP 72.5, SpareSP 42, Pump1.Speed 55.5,
+Pump1.Status.Mode 3, LevelLog[2] 12.25 and the counter's accumulator 17,
+all written over EtherNet/IP with the controller in Run, came back as 85,
+5, 40, 0, 0 and 0 after `naut logix deploy --download` of the same
+project. The upload the deploy already made carried every one of those
+values, in both the L5K and the Decorated form.
+
+**Now:** for a download, the deploy uploads the running controller first
+(the upload it made anyway, moved ahead of the import), plans the values
+tag by tag (`deploy.PlanValues`, a pure function over the generated
+project and the upload's L5X), and splices the controller's `<Data>`
+elements into the project before import and build (`ValuePlan.Apply`;
+the skeleton and the program partial of the two-step AOI build too).
+The rule:
+
+- **kept:** a Base tag with the same name (case-insensitive) and scope
+  (controller, or the same program) on both sides, the same data type and
+  dimensions, and for a UDT or AOI type the same definition on both sides
+  (visible members; AOI parameters and local tags; nested types expanded).
+  Its data is copied as the SDK exported it.
+- **except a TIMER's or COUNTER's preset,** which is the project's: a
+  literal `PT := T#30S` lives only in the tag's PRE, so it is code, and a
+  changed one must take effect. The accumulator and status bits are kept.
+  (An ST timer is an `FBD_TIMER` whose PRE the routine assigns every scan;
+  kept whole.)
+- **reset, with the reason reported:** type, dimensions or definition
+  changed; constant in the project; no data in the upload.
+- **new:** only in the project, at its initial value. **Dropped:** only on
+  the controller; reported, removed by the download.
+
+The values are the upload's, taken about 30 s (the import + build) before
+the download stops the controller; what the program changes in that window
+is not carried. A changed `init:` in `nautilus.yaml` does not override a
+kept value. `--reset-values` (CLI), `"resetValues": true` (endpoint) and
+`nautilus.logix.resetValuesOnDownload` (extension) start every tag at the
+project's value. A build without `--download` reports what a download
+would do. Total download time is unchanged (the upload moved, it was not
+added): 1 m 57 s to verified, against 2 m 0 s before.
+
+**On Echo** (ws-test, controller in Run with the values above written):
+
+| step | result |
+|---|---|
+| `naut logix deploy --download --yes --program-mode` of a changed project: a new rung, a new tag `NewSP` (init 7), `SpareSP` DINT → REAL (init 5.0), the timer's `PT` 30 s → 45 s | "tag values: 11 kept from the controller, 1 reset to the project's value (SpareSP: DINT → REAL), 1 new (NewSP)"; verified in 1 m 57 s |
+| read back over EtherNet/IP | HiLevelSP 72.5, Pump1.Speed 55.5, Pump1.Status.Mode 3, LevelLog[2] 12.25, counter ACC 17 (PRE 1000): kept. SpareSP 5.0: reset. NewSP 7: initial. Timer PRE 45000: the project's |
+| Run, StartPB pulsed | RunCmd sealed in, the counter counted on from the kept 17 to 18, Pump1.Run on (from the kept speed), the scan counter counting |
+| download from the editor endpoint (`POST /api/logix/deploy`, Switch to Program Mode) of the project rewritten in ST, after writing HiLevelSP 66, SpareSP 9.5, NewSP 12 | "11 kept, 2 reset (MainProgram.RunTmr: TIMER → FBD_TIMER; MainProgram.Starts: COUNTER → FBD_COUNTER)"; done event `valuesKept: 11` and the two `resets`; HiLevelSP 66, SpareSP 9.5, NewSP 12, Pump1 and LevelLog read back kept |
+
+`TestHardwareDownloadKeepsValuesUnlessReset` (LGA-037, LGA-047) is the
+repeatable check: download with values reset (85), write 70, online edit
+(70 kept), download (70 kept), download with ResetValues (85). Passed on
+Echo in 466 s, after a fix: it held one EtherNet/IP connection across the
+downloads, and a download resets every connection open before it, so it
+now dials per access.
 
 
 ## 8. The demo this enables

@@ -46,6 +46,15 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Changed
 
+- **Download Project to Logix Controller keeps the controller's tag
+  values.** Each tag whose name, scope, type and dimensions are unchanged
+  starts with the value it had on the controller; new and changed tags
+  start at the project's values, and a timer's or counter's preset comes
+  from the project. The modal says so, and the summary after the download
+  says how many values were kept and which tags were reset, and why. The
+  new setting `nautilus.logix.resetValuesOnDownload` starts every tag at
+  the project's value instead, and the modal says that when it is on.
+  Needs a `naut` newer than 0.17.0.
 - **Breaking: a manifest tag can no longer be an array of function
   blocks.** `type: ARRAY[1..2] OF TON` used to load; it is now refused, as
   `type: TON` already was, with `tag Timers: ARRAY[1..2] OF TON — TON is a

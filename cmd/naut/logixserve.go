@@ -59,7 +59,9 @@ Flags:
               that does it. POST /api/logix/deploy is the editor's
               "Push Online Edit" and "Download Project" commands: the same
               online edit, or a DOWNLOAD (stops the controller; the body
-              must say "yes": true), with progress streamed as NDJSON.
+              must say "yes": true; tag values are kept as by
+              naut logix deploy --download unless the body says
+              "resetValues": true), with progress streamed as NDJSON.
               --host defaults to target.logix.host.
 
 Writes are open to non-browser clients and same-origin pages, like
@@ -260,7 +262,7 @@ func logixProgramPlane(dir string, p *logixProject, client *logixd.Client) (plan
 			}
 			return sess.Edit(ctx, src)
 		},
-		Download: func(ctx context.Context, src string, programMode bool, progress func(string)) (*deploy.Report, error) {
+		Download: func(ctx context.Context, src string, do facade.DownloadOptions, progress func(string)) (*deploy.Report, error) {
 			defer attach(progress)()
 			mu.Lock()
 			defer mu.Unlock()
@@ -284,7 +286,7 @@ func logixProgramPlane(dir string, p *logixProject, client *logixd.Client) (plan
 				logf("warning: %s", w)
 			}
 			o := dopts
-			o.Target, o.Mode, o.ProgramMode = fresh.target, deploy.Download, programMode
+			o.Target, o.Mode, o.ProgramMode, o.ResetValues = fresh.target, deploy.Download, do.ProgramMode, do.ResetValues
 			rep, err := deploy.Run(ctx, src, o)
 			if err != nil {
 				return rep, err

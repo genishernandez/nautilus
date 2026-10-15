@@ -215,6 +215,7 @@ server.
 | `nautilus.liveValues.enabled` | `true` | Show live values inline and on diagrams when a controller is reachable. |
 | `nautilus.token` | `""` | Bearer token for writes to a controller started with `NAUTILUS_TOKEN`. Set it in workspace settings. |
 | `nautilus.confirmControllerWrites` | `true` | Confirm before Download or Rollback changes what a controller runs. Leave it on for anything that might be live. |
+| `nautilus.logix.resetValuesOnDownload` | `false` | Download Project to Logix Controller keeps the controller's tag values where the tag is unchanged; turn this on to start every tag at the project's value (`naut logix deploy --download --reset-values`). |
 | `nautilus.mimic.snapToGrid` | `true` | Snap dragged equipment, labels and pipe points to the grid in the mimic editor. |
 
 ## Commands

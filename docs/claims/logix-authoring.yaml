@@ -524,6 +524,40 @@ claims:
     partial: true
     note: Verified against a fake agent that returns the sent logic.
 
+  - id: LGA-047
+    claim: >-
+      `naut logix deploy --download` keeps the controller's tag values: it
+      uploads the running controller before the build and writes into the
+      project the value of every tag with the same name, scope, type and
+      dimensions on both sides (a UDT's or Add-On Instruction's definition
+      the same too) that the project does not mark constant; a TIMER's or
+      COUNTER's preset comes from the project, its accumulator from the
+      controller. A tag whose type, dimensions or definition changed starts
+      at the project's value and is reported, as are new and removed tags.
+      `--reset-values` starts every tag at the project's value.
+    source: "#what-a-download-does-with-tag-values"
+    tests:
+      - go ./logix/deploy TestKeepValuesCarriesEveryKindOfValue
+      - go ./logix/deploy TestKeepValuesTakesPresetsFromTheProject
+      - go ./logix/deploy TestKeepValuesResetsWhatChanged
+      - go ./logix/deploy TestKeepValuesMatchesNamesWithoutCase
+      - go ./logix/deploy TestKeepValuesLeavesTheLogicAlone
+      - go ./logix/deploy TestDownloadKeepsTheControllersValues
+      - go ./logix/deploy TestBuildReportsTheValuePlan
+      - go ./logix/deploy TestHardwareDownloadKeepsValuesUnlessReset
+    partial: true
+    note: >-
+      The merge is tested against a real SDK upload of an Echo controller
+      (testdata/running.L5X: REAL, DINT, a nested UDT, a REAL array, a TIMER
+      and a COUNTER, controller and program scope) and, through the deploy,
+      against the fake agent (the upload precedes the import; with
+      ResetValues the project's values go). On an Echo controller (v38,
+      2026-10-14, #273) a changed project downloaded with every value kept, a
+      DINT → REAL tag reset, a new tag at its initial value, a changed timer
+      preset from the project and a counter's accumulator kept, and the
+      controller ran the new logic from the kept values; the hardware test
+      skips in CI.
+
   - id: LGA-031
     claim: >-
       A program the target cannot express is refused before anything is
@@ -608,19 +642,21 @@ claims:
 
   - id: LGA-037
     claim: >-
-      A download resets tag values to the project's values; an online edit
-      keeps them.
+      An online edit keeps every value the controller holds; a download
+      keeps the values of the tags it can match and still stops the
+      controller.
     source: "#what-it-does-not-do-yet"
     tests:
-      - go ./logix/deploy TestHardwareDownloadResetsValuesAndAnOnlineEditKeepsThem
+      - go ./logix/deploy TestHardwareDownloadKeepsValuesUnlessReset
     partial: true
     note: >-
-      Verified on hardware only: the test downloads DemoLine, sets HiLevelSP
-      to 70 over EtherNet/IP, makes an online edit and expects 70 kept, then
-      downloads again and expects the project's 85. It needs a controller that
-      may be stopped (NAUTILUS_LOGIX_DOWNLOAD_COMM_PATH, NAUTILUS_LOGIX_HOST)
-      and logixd; skipped in CI and not yet run (the SDK machine is
-      unavailable).
+      Verified on hardware only: the test downloads DemoLine with its values
+      reset, sets HiLevelSP to 70 over EtherNet/IP, makes an online edit and
+      expects 70 kept, downloads again and expects 70 kept, then downloads
+      with ResetValues and expects the project's 85. It needs a controller
+      that may be stopped (NAUTILUS_LOGIX_DOWNLOAD_COMM_PATH,
+      NAUTILUS_LOGIX_HOST) and logixd, and skips in CI. Passed on an Echo
+      controller (v38) on 2026-10-14 in 466 s.
 
   - id: LGA-046
     claim: >-
@@ -680,6 +716,25 @@ claims:
       the next edit makes no upload; a tag description added to
       nautilus.yaml after the server started is in the project sent. Not yet
       run against a controller.
+
+  - id: LGA-048
+    claim: >-
+      A download from the editor keeps the controller's tag values as the
+      CLI does unless the request says resetValues (the extension sends it
+      when nautilus.logix.resetValuesOnDownload is on), and its result
+      carries how many values were kept and which tags were reset, and why.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamDownload
+    partial: true
+    note: >-
+      Against a stand-in download function: resetValues reaches it, and the
+      done event carries valuesKept and resets (valuesKept -1 when values
+      were reset). On an Echo controller (2026-10-14, #273) a download from
+      the endpoint of an ST version of a ladder project kept 11 values and
+      reported the two tags whose type changed (TIMER → FBD_TIMER, COUNTER →
+      FBD_COUNTER). The modal wording and the setting are the extension's
+      (logixDeployLogic.test.ts).
 
   - id: LGA-043
     claim: >-

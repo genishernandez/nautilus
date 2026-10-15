@@ -26,7 +26,7 @@ func (lw *lowered) side() {
 		lw.diag(ruleName, 0, "", "side code: heartbeat tag %s clashes with a declared variable; pick another name (target.logix.side.heartbeat)", hb)
 		return
 	}
-	lw.ctrlTags = append(lw.ctrlTags, tagDef{Name: hb, DataType: "DINT", Desc: "nautilus side code: task scans since download (wraps)"})
+	lw.ctrlTags = append(lw.ctrlTags, tagDef{Name: hb, DataType: "DINT", Desc: "nautilus side code: a count of task scans (wraps)"})
 	lw.sideRungs = append(lw.sideRungs, rungOut{
 		Comment: "nautilus side code: one count per task scan — a live test waits on this to spend exactly N scans",
 		Text:    "ADD(" + hb + ",1," + hb + ")",

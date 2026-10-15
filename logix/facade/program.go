@@ -29,13 +29,24 @@ import (
 //
 // POST /api/logix/deploy is the same flow with its progress streamed, and
 // the one route to a DOWNLOAD from the editor: {mode: "online"|"download",
-// source, baseHash, programMode, yes}. A download stops the controller, so
+// source, baseHash, programMode, resetValues, yes}. A download stops the
+// controller and, unless resetValues is set, keeps its tag values (the
+// rule is logix/deploy's PlanValues), so
 // it needs "yes": true in the body — the extension sends it only after a
 // modal that says so — and it is never what the plain PUT does. The answer
 // is NDJSON: {"event":"progress","message":…} lines as the deploy logs,
 // then one {"event":"done",…report} or {"event":"error","status":…,
 // "error":…}. Refusals that need no controller (a stale base, a deploy
 // already running, no "yes") are ordinary HTTP errors before the stream.
+
+// DownloadOptions are the choices a download request carries.
+type DownloadOptions struct {
+	// ProgramMode asks for Program mode before the download.
+	ProgramMode bool
+	// ResetValues starts every tag at the project's value instead of
+	// keeping the controller's.
+	ResetValues bool
+}
 
 // ProgramPlane is the deployable program behind the program endpoints.
 type ProgramPlane struct {
@@ -48,9 +59,9 @@ type ProgramPlane struct {
 	// with their own status codes.
 	Deploy func(ctx context.Context, src string, progress func(string)) (*deploy.Report, error)
 	// Download, when set, sends src as a whole project — stopping the
-	// controller — and reports. programMode asks for Program mode first.
-	// Nil leaves POST /api/logix/deploy's download mode refused.
-	Download func(ctx context.Context, src string, programMode bool, progress func(string)) (*deploy.Report, error)
+	// controller — and reports. Nil leaves POST /api/logix/deploy's
+	// download mode refused.
+	Download func(ctx context.Context, src string, o DownloadOptions, progress func(string)) (*deploy.Report, error)
 	// Controller and CommPath name the target on GET /api/program, so a
 	// confirmation can say where a download goes.
 	Controller, CommPath string
@@ -183,8 +194,27 @@ func (p *programPlane) applied(src string, rep *deploy.Report) map[string]any {
 	return map[string]any{
 		"hash": hash, "task": "main", "applied": rep.Applied.String(), "same": rep.Same,
 		"replaced": rep.Replaced, "verified": rep.Verified, "modeBefore": rep.ModeBefore, "mode": rep.ModeAfter,
-		"elapsedMs": rep.Elapsed.Milliseconds(), "resets": []string{},
+		"elapsedMs": rep.Elapsed.Milliseconds(), "resets": resets(rep),
+		"valuesKept": valuesKept(rep),
 	}
+}
+
+// resets are the tags whose values a download put back to the project's,
+// each with its reason; valuesKept counts the ones it kept, -1 when the
+// values were not kept at all (an online edit, or a download asked to
+// reset them).
+func resets(rep *deploy.Report) []string {
+	if rep.Values == nil || rep.Applied != deploy.Download {
+		return []string{}
+	}
+	return append([]string{}, rep.Values.Reset...)
+}
+
+func valuesKept(rep *deploy.Report) int {
+	if rep.Values == nil || rep.Applied != deploy.Download {
+		return -1
+	}
+	return len(rep.Values.Kept)
 }
 
 // deployError is the status and message a refused or failed deploy is
@@ -221,6 +251,7 @@ func (p *programPlane) deployStream(w http.ResponseWriter, r *http.Request) {
 		Source      string `json:"source"`
 		BaseHash    string `json:"baseHash"`
 		ProgramMode bool   `json:"programMode"`
+		ResetValues bool   `json:"resetValues"`
 		Yes         bool   `json:"yes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Source == "" {
@@ -235,7 +266,7 @@ func (p *programPlane) deployStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !req.Yes {
-			writeJSON(w, http.StatusBadRequest, "a download STOPS the controller and resets its tags to project values; send \"yes\": true when you mean it")
+			writeJSON(w, http.StatusBadRequest, "a download STOPS the controller (and, with \"resetValues\", resets its tags to project values); send \"yes\": true when you mean it")
 			return
 		}
 	default:
@@ -275,7 +306,7 @@ func (p *programPlane) deployStream(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if req.Mode == "download" {
 		progress("starting a download to " + p.cfg.CommPath)
-		rep, err = p.cfg.Download(ctx, req.Source, req.ProgramMode, progress)
+		rep, err = p.cfg.Download(ctx, req.Source, DownloadOptions{ProgramMode: req.ProgramMode, ResetValues: req.ResetValues}, progress)
 	} else {
 		rep, err = p.cfg.Deploy(ctx, req.Source, progress)
 	}

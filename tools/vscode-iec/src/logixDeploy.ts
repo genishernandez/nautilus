@@ -168,14 +168,15 @@ export class LogixDeploy implements vscode.Disposable {
       void notifyError(`nautilus: the server at ${runtimeUrl()} does not take downloads — run \`naut logix deploy --download --yes\``);
       return;
     }
+    const resetValues = vscode.workspace.getConfiguration("nautilus").get<boolean>("logix.resetValuesOnDownload", false);
     const pick = await notifyWarning(
-      downloadConfirmMessage(info, prog.programFile),
+      downloadConfirmMessage(info, prog.programFile, resetValues),
       { modal: true },
       DOWNLOAD,
       DOWNLOAD_PROGRAM_MODE
     );
     if (pick !== DOWNLOAD && pick !== DOWNLOAD_PROGRAM_MODE) return;
-    await this.deploy("download", info, prog, { yes: true, programMode: pick === DOWNLOAD_PROGRAM_MODE });
+    await this.deploy("download", info, prog, { yes: true, programMode: pick === DOWNLOAD_PROGRAM_MODE, resetValues });
   }
 
   private async deploy(
