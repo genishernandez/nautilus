@@ -406,7 +406,7 @@ claims:
       the export, of a whole TIMER, of a member the target lacks, and a
       program-scoped alias tag.
 
-  - id: LGA-041
+  - id: LGA-044
     claim: >-
       An imported project writes back with the export's tags where the
       export had them: a controller-scoped timer, counter or Add-On
