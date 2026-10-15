@@ -42,7 +42,8 @@ func TestLogixServePlaneDownloadRewarmsTheSession(t *testing.T) {
 	var lines []string
 	progress := func(s string) { lines = append(lines, s) }
 	stderr, _ := captureStderr(t, func() int {
-		plane := logixProgramPlane(dir, p, logixd.New(url, ""))
+		plane, release := logixProgramPlane(dir, p, logixd.New(url, ""))
+		defer release()
 		if plane.Controller != "Line" || !strings.Contains(plane.CommPath, "10.0.0.5") || plane.Download == nil {
 			t.Fatalf("plane = %+v", plane)
 		}
@@ -116,7 +117,8 @@ func TestLogixServePlaneReleasesTheSessionBeforeADownload(t *testing.T) {
 		t.Fatal(err)
 	}
 	captureStderr(t, func() int {
-		plane := logixProgramPlane(dir, p, logixd.New(url, ""))
+		plane, release := logixProgramPlane(dir, p, logixd.New(url, ""))
+		defer release()
 		_, _ = plane.Deploy(context.Background(), fillLadder, func(string) {}) // opens a session
 		// The manifest changes after the server started: the download
 		// takes it as it is now.
@@ -140,6 +142,42 @@ func TestLogixServePlaneReleasesTheSessionBeforeADownload(t *testing.T) {
 		}
 		if !strings.Contains(sent, "conveyor speed setpoint") {
 			t.Error("the download did not take nautilus.yaml as it is now")
+		}
+		return 0
+	})
+}
+
+// Stopping the serve closes the online session an edit opened, rather
+// than leaving logixd to hold the project online until its idle reaper
+// (seen on Echo, #375: every stopped serve left one).
+func TestLogixServePlaneReleaseClosesTheSession(t *testing.T) {
+	t.Setenv("NAUTILUS_LOGIXD_URL", "")
+	f, url, stop := newFakeLogixd(t)
+	defer stop()
+	f.controllerL5X = emptyLine
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "nautilus.yaml"), []byte(fillManifest(url, "    comm-path: AB_ETH-1\\10.0.0.5\\Backplane\\0\n")), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "Fill.ld"), []byte(fillLadder), 0o644)
+	p, err := loadLogixProject(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureStderr(t, func() int {
+		plane, release := logixProgramPlane(dir, p, logixd.New(url, ""))
+		release() // nothing open: nothing to do
+		if indexOf(f.seen, "DELETE /v1/sessions/") >= 0 {
+			t.Errorf("release closed a session that was never opened: %v", f.seen)
+		}
+		_, _ = plane.Deploy(context.Background(), fillLadder, func(string) {}) // opens a session
+		f.seen = nil
+		release()
+		if indexOf(f.seen, "/offline") < 0 || indexOf(f.seen, "DELETE /v1/sessions/") < 0 {
+			t.Errorf("release did not take the session offline and close it: %v", f.seen)
+		}
+		f.seen = nil
+		release() // once is enough
+		if len(f.seen) != 0 {
+			t.Errorf("a second release called the agent: %v", f.seen)
 		}
 		return 0
 	})

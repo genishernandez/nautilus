@@ -444,3 +444,40 @@ func TestDeployBuildsAnAOIProjectInTwoSteps(t *testing.T) {
 		}
 	}
 }
+
+// A project with side code has two programs with a MainRoutine: the
+// program's and the side program "Nautilus". The session must edit the
+// program's, whatever order the controller's routines come back in — a
+// map — so this connects several times; before the fix about half the
+// sessions picked Nautilus/MainRoutine and refused the edit as "does not
+// run this program's routine yet" (found on Echo, #375).
+func TestSessionEditsTheProgramNotTheSideProgram(t *testing.T) {
+	src := demoSource(t)
+	tgt := target()
+	tgt.Side = writer.Side{Heartbeat: "Nautilus_Scan"}
+	same, _, err := writer.Write(src, writer.Options{Controller: "DemoLine", Side: tgt.Side})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(same), `<Program Name="`+writer.SideProgram+`"`) {
+		t.Fatal("fixture has no side program")
+	}
+	edited := strings.Replace(src, "/StopPB ( RunCmd )", "/StopPB /HiLevelAlm ( RunCmd )", 1)
+	for i := 0; i < 12; i++ {
+		_, c := newFakeAgent(t, same)
+		s, err := Connect(context.Background(), Options{Client: c, Target: tgt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rep, err := s.Edit(context.Background(), edited)
+		if err != nil || rep.Applied != Online || !rep.Verified || rep.Program != "MainProgram" {
+			t.Fatalf("connect %d: err=%v report=%+v", i, err, rep)
+		}
+		// And the next edit compares with what the first left.
+		rep, err = s.Edit(context.Background(), edited)
+		if err != nil || !rep.Same {
+			t.Fatalf("connect %d, again: err=%v report=%+v", i, err, rep)
+		}
+		_ = s.Close(context.Background())
+	}
+}

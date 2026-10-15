@@ -1548,6 +1548,63 @@ logic: four differences, and each one has a name — one is a spelling, the
 timer moved into the program, and one tag no rung uses isn't written."*
 If #372 lands first the spelling line disappears.
 
+### Follow-up — deploy from the editor, verified on a controller (2026-10-14, #375)
+
+The editor's **Push Online Edit** and **Download Project** commands
+(#271) post to `POST /api/logix/deploy` on `naut logix serve --project`
+and read its NDJSON stream. Verified on an Echo controller (v38,
+1756-L85E emulation) with the DemoLine project
+(`logix/writer/testdata/project`, its target pointed at that controller in
+a scratch copy), driving the endpoints with the request the extension
+sends and running each recorded stream through the extension's own
+splitter and summary (`logixDeployLogic.ts`). Live values were read from
+`/api/stream` throughout.
+
+| step | wall time | result |
+|---|---|---|
+| Download, controller in Run, no Program-mode switch | 81 s to the refusal | refused by the SDK after import + build (29 s) and the logic diff (39 s): `RxE_INVALID_START_STATE - Invalid start state.  Internal error.`, shown verbatim with the SDK's status lines |
+| Download with *Switch to Program Mode and Download* | 120 s to verified, 173 s to the summary | import + build 33 s, diff 37 s, download 16 s, verify 34 s; the reopened online session 53 s more. Summary: "downloaded to DemoLine and verified in 120 s — the controller is in Program mode" |
+| first online edit after the serve starts | 50.2 s | session open 47.2 s, then the edit 3.0 s; 2 rungs replaced, verified, Run kept. Largest gap between stream chunks 47.2 s, well inside undici's 300 s body timeout |
+| warm online edits, Run | 1.6 s, 1.5 s | 2 rungs replaced, verified, Run kept |
+| online edit that adds a tag | immediate | 422: "the tag set changed (1 difference(s)); an online edit cannot create or retype tags, so a download is needed. Download the project to the controller (nautilus: Download Project to Logix Controller, …)"; the extension reads it as needs-download and offers **Download Project…** |
+| that download (the tag added to `nautilus.yaml` after the serve started) | 108 s to verified, 154 s to the summary | the held session closed in 0.6 s, then logixd took the download's own project at once; session reopened in 45 s |
+| the next online edit, controller in Program | 2.9 s | 2 rungs replaced, verified, Program kept |
+
+Through the edits the live stream never paused (no gap over 2 s) and the
+controller's scan counter kept counting; a rung change (`GE` → `GT` with
+`LevelPct` = `HiLevelSP` = 85) turned `HiLevelAlm` off on the stream as the
+edit finalized. Across a download, tag reads failed for about 3 s and
+then recovered with the project's values (`LevelPct` back to 0); the tag
+the download added was not served until the serve restarted, the
+documented limitation (the facade browses once at startup).
+
+Found and fixed on the way:
+
+- **The warm session could pick the side program's routine.** With
+  `side: heartbeat`, the controller has two `MainRoutine`s
+  (`MainProgram` and `Nautilus`), and the session chose one in map order:
+  after the first download it held `Nautilus/MainRoutine` and refused the
+  next edit with "does not run this program's routine yet". The session
+  now keeps every routine from the upload and picks by the program each
+  edit writes, and compares only that routine (the side routine had also
+  kept an unchanged program from ever reading as "already runs this
+  logic").
+- **A stopped serve left its online session open** in logixd until the
+  idle reaper (30 minutes). Stopping the serve now takes the session
+  offline and closes it (checked on the controller: logixd listed the
+  session before Ctrl+C and none after).
+
+The buttons themselves: smoke check 19 (`tools/rig/smoke/19-logix-deploy-buttons.sh`)
+opens DemoLine's `MainProgram.ld` in the text and the diagram editor and
+finds **Push Online Edit** in the title bar and **Download Project** in
+the `…` menu, and finds neither on a `naut new` project.
+
+Two things are left as they are: a download's summary arrives only after
+the next edit's session has reopened (about 50 s after "verified", with
+"opening the online session for the next edit" on screen meanwhile), and
+an edit's summary time counts the edit, not the session open before it.
+
+
 ## 8. The demo this enables
 
 James's target demo (2026-10-03), which replaces the Tier A `ab01` draft in the
