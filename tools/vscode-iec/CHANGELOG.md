@@ -5,14 +5,34 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-15
+
+The pre-release line after the stable release 0.18.0. Same contents as
+[0.18.0]; pre-release builds from `main` carry new work under
+`[Unreleased]` from here on. Requires naut 0.18.0 or later.
+
+## [0.18.0] - 2026-10-15
+
+The fourth stable release, for everyone on the stable channel since
+[0.16.0]. **Requires naut 0.18.0 or later.**
+
+Highlights: **deploy to a Logix controller without leaving the editor**
+(Push Online Edit and Download Project, with the controller's tag values
+kept across a download); an imported Logix project writes back with the
+same logic, tags where the export had them, and the right `Local` module
+for ControlLogix 5580 and CompactLogix 5370/5380; conversions and integer
+division on a Logix target are written exactly or squiggle; and new
+`nautilus.yaml` options for Sparkplug (`primary-host-offline`,
+`store-forward-file`). **Breaking:** a function block can no longer be a
+tag's type, and a ladder rung with no coil must end at its last block.
+
 ### Added
 
 - **`sparkplug.store-forward-file` in `nautilus.yaml`.** Completion and
   validation for the new option that journals the store-and-forward
   buffer to a file, so a restart during a broker or primary-host outage
   no longer loses it: the next start replays it, marked historical, after
-  its first birth. Omitted, the buffer stays in memory, as before. Needs a
-  `naut` newer than 0.17.0.
+  its first birth. Omitted, the buffer stays in memory, as before.
 
 - **Deploy to a Logix controller without leaving the editor.** In a
   project whose `nautilus.yaml` has a `target: logix` section, with
@@ -27,19 +47,18 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   the **nautilus Logix** output channel; live values keep streaming
   throughout. **nautilus: Download Program to Controller** on a Logix
   server now runs the same online edit. If nothing answers, the commands
-  offer to start `naut logix serve --project` in a terminal. Needs a
-  `naut` newer than 0.17.0.
+  offer to start `naut logix serve --project` in a terminal.
 
 - **`sparkplug.primary-host-offline` in `nautilus.yaml`.** Completion
   and validation for the new option that says what an edge node does when
   its primary host goes offline: `buffer` (the default, as before) keeps
   the session and holds data back, and `disconnect` ends the session as
   Sparkplug 3.0 has it (NDEATH, reconnect, and birth once the host is
-  back). Needs a `naut` newer than 0.17.0.
+  back).
 - **`target.logix.continuous` in `nautilus.yaml`.** Completion and
   validation for the option that schedules the program in a CONTINUOUS
   Logix task, as the controller it was imported from did; `naut logix
-  import --project` sets it. Needs a `naut` newer than 0.17.0.
+  import --project` sets it.
 - **`target.logix.all-tags` and `target.logix.controller-scoped` in
   `nautilus.yaml`.** Completion and validation for the two options
   `naut logix import --project` now sets, so an imported project writes
@@ -49,7 +68,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   client writes is still the controller's), and `controller-scoped` lists program variables, such as
   a timer the export had at controller scope, written back as controller
   tags with their descriptions. Without `all-tags`, a tag no program names
-  is still not written. Needs a `naut` newer than 0.17.0.
+  is still not written.
 
 ### Changed
 
@@ -59,7 +78,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   and Download" offer in seconds, instead of after the whole upload,
   import and build (~76 s). A failed mode read does not block the
   download. An online edit's result no longer carries the download-only
-  `valuesKept` and `resets`. Needs a `naut` newer than 0.17.0.
+  `valuesKept` and `resets`.
 
 - **Logix deploys from the editor report sooner and say more.** A
   download's summary now shows as soon as the download is verified,
@@ -71,8 +90,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   edit shows its progress as it happens. A plain **Download** the
   controller refuses because it is in Run says so in plain words, with
   the SDK's own text in the output channel, and offers **Switch to
-  Program Mode and Download** as a button. Needs a `naut` newer than
-  0.17.0.
+  Program Mode and Download** as a button.
 
 - **Download Project to Logix Controller keeps the controller's tag
   values.** Each tag whose name, scope, type and dimensions are unchanged
@@ -82,7 +100,6 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   says how many values were kept and which tags were reset, and why. The
   new setting `nautilus.logix.resetValuesOnDownload` starts every tag at
   the project's value instead, and the modal says that when it is on.
-  Needs a `naut` newer than 0.17.0.
 - **Breaking: a manifest tag can no longer be an array of function
   blocks.** `type: ARRAY[1..2] OF TON` used to load; it is now refused, as
   `type: TON` already was, with `tag Timers: ARRAY[1..2] OF TON — TON is a
@@ -94,20 +111,18 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   refused as `tag Timers: program Main declares it ARRAY[1..2] OF TON — …`.
   A project that declared one no longer loads
   (`naut run`, `naut check`): move the instances into the program's `VAR`
-  and publish the values they produce as tags. Needs a `naut` newer than
-  0.17.0.
+  and publish the values they produce as tags.
 
 - **A ladder rung with no coil must end at its last block.** In
   `Start t1:TON(PT := T#5S) Stop`, the `Stop` contact drove nothing and was
   dropped without a word; it is now an error that says to end the rung
   with a coil or at the block. A block mid-rung with a coil after it is
-  unchanged. Needs a `naut` newer than 0.17.0.
+  unchanged.
 
 - **SFC indicator variables are named as such.** `Valve(N, Ind);` was
   reported as a time argument on an untimed qualifier, and
   `TRANSITION t FROM S0 TO S1 (Ind) := ...` as `expected ':='`; both now
   say indicator variables are not supported and list the forms that are.
-  Needs a `naut` newer than 0.17.0.
 
 - **Logix target squiggles say what to write instead.** More `logix/*`
   diagnostics name the alternative: a tag name with doubled or trailing
@@ -115,8 +130,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   parameters, a timer or counter member lists the readable ones, and a
   BOOL array gives the size to declare. A manifest tag typed as a
   FUNCTION_BLOCK the project declares now reads "is a function block", as
-  a standard block does, not "unknown type". Needs a `naut` newer than
-  0.17.0.
+  a standard block does, not "unknown type".
 
 ### Fixed
 
@@ -129,8 +143,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   otherwise divide as integers, BOOL to a number as an `IF`), or it
   squiggles with the new rule `logix/conversion` and says what to write
   instead: REAL to an integer inside an expression, unsigned and
-  bit-string types, LINT, LTIME and STRING. Needs a `naut` newer than
-  0.17.0. (#255)
+  bit-string types, LINT, LTIME and STRING. (#255)
 
 - **`REAL_TO_DINT(r)` no longer squiggles as a whole right-hand side.**
   A Logix controller rounds a REAL halves to even as it stores it into an
@@ -139,7 +152,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   forms are written as a plain store when the tag is of the conversion's
   own type. Inside an expression, into a tag of another type, or from an
   LREAL it still squiggles. Out of range the controller wraps silently
-  where nautilus faults. Needs a `naut` newer than 0.17.0.
+  where nautilus faults.
 
 - **An integer division that meets a REAL squiggles on a Logix target.**
   The controller divides integers in REAL once the quotient is stored
@@ -147,8 +160,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   gave 3.5 on the controller for `a = 7`, where nautilus gives 3, and
   `a / 2 > x` with `x` REAL compared differently. These now squiggle with
   `logix/conversion` and say to compute the quotient into a DINT tag
-  first; an all-integer division is written unchanged. Needs a `naut`
-  newer than 0.17.0. (#361)
+  first; an all-integer division is written unchanged. (#361)
 
 - **The same integer division squiggles on a ladder rung, and so does an
   expression bound to a block input in ST.** On a Logix controller,
@@ -158,7 +170,7 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   written as before. In an ST call to a user block, `p(x := a / b)` used to
   be written as-is, and Logix rejects any expression as a block input at
   build time. It now squiggles with `logix/fb-pin` and says to compute the
-  value into a tag first. Needs a `naut` newer than 0.17.0. (#368)
+  value into a tag first. (#368)
 
 ## [0.17.0] - 2026-10-14
 
