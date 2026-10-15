@@ -57,7 +57,7 @@ takes both ends down.
 | `Sim_NODE2.CpuLoad` | % busy, 0 = as recorded: power and the thermal model follow |
 | `Sim_NODE2.PowerOff` / `.Dark` | host off (standby power, fans stop, temperatures fall to the inlet, host links drop; the BMC and its link stay up) / the BMC stops answering |
 | `Sim_NODE1_Fan3.Fail` | the fan stops; the others ramp; temperatures climb |
-| `Sim_NODE1_PSU2.InputLost` / `.Fail` | output 0, the other supply carries the load, the server stays up; every supply down is no power at all: host and BMC off, every link down |
+| `Sim_NODE1_PSU2.InputLost` / `.Fail` | output 0, the others carry the load (two supplies: by their recorded shares; three or more: equally across the supplies that are up), the server stays up; every supply down is no power at all: host and BMC off, every link down |
 | `Sim_NODE3_Drive_NVMe2.Pulled` / `.Failing` | `Present` false / `PredictedFailure` and health Warning |
 | `Sim_NODE1_Nic_Slot2_P1.Down` | the server's port loses link (and the far end) |
 | `Sim_Room.InletDeltaC` | the room runs hot: every inlet, and everything behind it, rises |

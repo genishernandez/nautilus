@@ -339,8 +339,6 @@ for s in switches:
     body.append(f"  {s}_M(Dt := PlantDtS, Clear := Clearing, F := Sim_{s}, P := {s});")
 for node in servers:
     psus = children(node, "PSU")
-    if len(psus) > 2:
-        raise SystemExit(f"{node} has {len(psus)} PSUs: the plant models one (PsuSingle) or two (PsuPair), lib/server.st")
     fans = children(node, "Fan")
     cpu = [t for t in children(node, "TempSensor") if t.endswith("_Temp_CPU")]
     fbs.append(f"  {node}_M : ServerPlant;")
@@ -410,6 +408,14 @@ for node in servers:
     if len(psus) == 1:
         fbs.append(f"  {node}_Psu_M : PsuSingle;")
         body.append(f"  {node}_Psu_M(Rec := {rec(psus[0])}, F := Sim_{psus[0]}, LoadW := {m}.LoadW, Live := {live(psus[0])}, P := {psus[0]});")
+    elif len(psus) > 2:
+        # N supplies share the draw equally across the ones that are up: the
+        # up-count is worked out here, in this scan, before any unit runs
+        fbs.append(f"  {node}_PsuUp : DINT;")
+        body.append(f"  {node}_PsuUp := " + " + ".join(f"BOOL_TO_INT(NOT (Sim_{p}.InputLost OR Sim_{p}.Fail))" for p in psus) + ";")
+        for p in psus:
+            fbs.append(f"  {p}_M : PsuUnit;")
+            body.append(f"  {p}_M(Rec := {rec(p)}, F := Sim_{p}, LoadW := {m}.LoadW, UpCount := {node}_PsuUp, Live := {live(p)}, P := {p});")
     elif len(psus) == 2:
         fbs.append(f"  {node}_Psu_M : PsuPair;")
         a, b = psus
