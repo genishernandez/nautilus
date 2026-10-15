@@ -131,6 +131,12 @@ describe('part state', () => {
 	it('labels a drive by capacity and temperature', () => {
 		expect(partStatus('drive', drive, 'ok')).toBe('1.92 TB · 32 °C');
 		expect(partStatus('drive', drive, 'warning')).toBe('1.92 TB · 32 °C · WARNING');
+		// A fan or PSU whose reading is not published says so, not 0.
+		expect(partStatus('fan', { Health: 0, RPM: 8400.4 }, 'ok')).toBe('8400 rpm');
+		expect(partStatus('fan', { Health: 0, RPM: 0 }, 'ok')).toBe('0 rpm');
+		expect(partStatus('fan', { Health: 0 }, 'ok')).toBe('no data');
+		expect(partStatus('psu', { Health: 1 }, 'warning')).toBe('no data · WARNING');
+		expect(partStatus('psu', { Health: 0, OutputW: 212.6 }, 'ok')).toBe('213 W');
 		expect(capacity(240)).toBe('240 GB');
 		expect(capacity(65.536)).toBe('66 GB');
 	});

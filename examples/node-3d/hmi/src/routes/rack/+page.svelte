@@ -82,7 +82,7 @@
 	const alarms = createAlarmClient(rt);
 	// The plant's fault inputs: the scenario panel and a part's right-click.
 	const faults = new PlantFaults();
-	let menu = $state<{ x: number; y: number; title: string; simTags: string[] } | null>(null);
+	let menu = $state<({ x: number; y: number } & ReturnType<typeof faultTargets>) | null>(null);
 	function context(id: string, e: MouseEvent) {
 		const d = byTag.get(deviceOf(id));
 		if (!faults.up || !d) return;

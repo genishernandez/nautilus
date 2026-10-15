@@ -34,7 +34,7 @@
 TYPE
   SimServer : STRUCT
     Dark     : BOOL; (* the BMC stops answering: Online false *)
-    PowerOff : BOOL; (* host off: standby power, fans stop, temps fall to inlet, links drop *)
+    PowerOff : BOOL; (* host off: standby power, fans stop, temps fall to inlet, host links drop; the BMC stays up *)
     CpuLoad  : REAL; (* % busy, 0 = as recorded (the recording is a quiet cluster, about RecLoadPct) *)
   END_STRUCT;
   SimFan : STRUCT
@@ -70,6 +70,7 @@ VAR_INPUT
   CpuRiseNow : REAL; (* the CPU sensor's current rise over the recording, for the fan curve *)
   CpuOverInlet : REAL := 35.0; (* the recorded CPU temperature above the recorded inlet *)
   Live       : BOOL;
+  Unpowered  : BOOL; (* every supply down (plant.st): no standby power either *)
 END_VAR
 VAR_IN_OUT
   P : Server;
@@ -78,6 +79,7 @@ VAR_OUTPUT
   RiseTarget : REAL; (* °C the CPU heads for above the recording *)
   FanBoost   : REAL; (* the fans' speed factor *)
   Off        : BOOL;
+  Dead       : BOOL; (* no power at all: the host off and the BMC with it *)
   LoadW      : REAL; (* the power the PSUs deliver *)
 END_VAR
 VAR
@@ -105,13 +107,14 @@ IF Live THEN
   B.InletTempC := Rec.InletTempC;
   B.MaxTempC := Rec.MaxTempC;
 END_IF;
-Off := F.PowerOff OR NOT B.PowerOn;
-P.Online := NOT F.Dark;
+Dead := Unpowered;
+Off := F.PowerOff OR NOT B.PowerOn OR Dead;
+P.Online := NOT (F.Dark OR Dead);
 P.PowerOn := NOT Off;
 FanBoost := LIMIT(1.0, 1.0 + KBoost * MAX(CpuRiseNow, 0.0), MaxBoost);
 IF Off THEN
   RiseTarget := 0.0;
-  LoadW := StandbyW;
+  LoadW := SEL(Dead, StandbyW, 0.0);
   P.CpuPct := 0.0;
 ELSE
   LoadRise := 0.0;
@@ -219,7 +222,8 @@ END_FUNCTION_BLOCK
 
 FUNCTION_BLOCK PsuPair
 (* Two supplies sharing a load: each carries its recorded share while both
-   are up; one lost, the other carries it all and the server stays up. *)
+   are up; one lost, the other carries it all and the server stays up; both
+   lost, neither carries anything (the server is Unpowered, plant.st). *)
 VAR_INPUT
   Rec1, Rec2 : PSU;
   F1, F2     : SimPSU;
@@ -259,6 +263,10 @@ ELSIF NOT Up1 THEN
 END_IF;
 P1.OutputW := LoadW * Share1;
 P2.OutputW := LoadW * (1.0 - Share1);
+IF NOT (Up1 OR Up2) THEN
+  P1.OutputW := 0.0;
+  P2.OutputW := 0.0;
+END_IF;
 P1.InputOk := NOT F1.InputLost;
 P2.InputOk := NOT F2.InputLost;
 P1.InputV := SEL(F1.InputLost, B1.InputV, 0.0);
@@ -266,6 +274,37 @@ P2.InputV := SEL(F2.InputLost, B2.InputV, 0.0);
 (* a supply with no input reports itself unhealthy, as a real one does *)
 P1.Fault := NOT Up1;
 P2.Fault := NOT Up2;
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK PsuSingle
+(* One supply: it carries the whole load while it is up; lost, the server
+   is Unpowered (plant.st). *)
+VAR_INPUT
+  Rec   : PSU;
+  F     : SimPSU;
+  LoadW : REAL;
+  Live  : BOOL;
+END_VAR
+VAR_IN_OUT
+  P : PSU;
+END_VAR
+VAR
+  B    : PSU;
+  Init : BOOL;
+  Up   : BOOL;
+END_VAR
+IF NOT Init THEN
+  B := P;
+  Init := TRUE;
+END_IF;
+IF Live THEN
+  B.InputV := Rec.InputV;
+END_IF;
+Up := NOT (F.InputLost OR F.Fail);
+P.OutputW := SEL(Up, 0.0, LoadW);
+P.InputOk := NOT F.InputLost;
+P.InputV := SEL(F.InputLost, B.InputV, 0.0);
+P.Fault := NOT Up;
 END_FUNCTION_BLOCK
 
 FUNCTION_BLOCK DrivePlant

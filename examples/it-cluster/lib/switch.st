@@ -10,7 +10,7 @@ TYPE
   SimPort : STRUCT
     Down      : BOOL; (* link lost: OperUp false, no traffic; admin stays up, so the monitor alarms *)
     AdminDown : BOOL; (* shut by an operator: AdminUp and OperUp false, not an alarm *)
-    SpeedMbps : REAL; (* negotiated speed override, 0 = as recorded (10000 to 1000: degraded) *)
+    SpeedMbps : REAL; (* negotiated speed override, both ends of the cable, 0 = as recorded (10000 to 1000: degraded) *)
     ErrorRate : REAL; (* extra errors per second on top of the recording *)
     (* VLANs, applied in plant.st over the configured membership: *)
     Pvid      : DINT; (* native VLAN override, 0 = as configured (a native mismatch) *)
@@ -25,9 +25,25 @@ TYPE
   END_STRUCT;
   SimSwitch : STRUCT
     Dark   : BOOL; (* the switch stops answering: every port down, the agent silent *)
-    Reboot : BOOL; (* a pulse: dark for RebootS, then back with its uptime reset; clears itself *)
+    Reboot : BOOL; (* a pulse: dark for RebootS, then back with its uptime reset; clears itself (ClearFaults ends it early) *)
   END_STRUCT;
 END_TYPE
+
+FUNCTION SlowerMbps : REAL
+(* Two speed overrides on one link, 0 = none: the slower one, as the two
+   ends negotiate it. *)
+VAR_INPUT
+  A : REAL;
+  B : REAL;
+END_VAR
+IF A > 0.0 AND (B <= 0.0 OR A < B) THEN
+  SlowerMbps := A;
+ELSIF B > 0.0 THEN
+  SlowerMbps := B;
+ELSE
+  SlowerMbps := 0.0;
+END_IF;
+END_FUNCTION
 
 FUNCTION_BLOCK PortPlant
 (* One switch port. P is the port as the device reports it: its identity
@@ -41,6 +57,7 @@ VAR_INPUT
   Dark : BOOL;       (* the switch's *)
   Live : BOOL;       (* the recording is playing *)
   LinkOk : BOOL := TRUE; (* its cable, from both ends' faults (plant.st); TRUE unwired *)
+  LinkMbps : REAL := 0.0; (* its cable's speed override, from both ends' faults (plant.st); 0 = none *)
   Net  : SimNet;     (* a storm in the layer-2 domain *)
   Dt   : REAL;       (* seconds since the last scan, for the discard counter *)
 END_VAR
@@ -54,6 +71,7 @@ VAR
   LineBps  : REAL;
   Dropped  : REAL; (* discards not yet whole, so the counter never loses a fraction *)
   DropPps  : REAL; (* frames the line cannot carry, per second *)
+  Mbps     : REAL; (* the speed override in force: this port's, or its cable's if slower *)
 END_VAR
 VAR CONSTANT
   FloodBytes : REAL := 128.0; (* a storm's frames are small: ARP, discovery, a looped packet *)
@@ -75,11 +93,14 @@ P.OperUp := B.OperUp AND LinkOk AND NOT (F.Down OR F.AdminDown OR Dark);
 P.SpeedMbps := B.SpeedMbps;
 P.InBps := B.InBps;
 P.OutBps := B.OutBps;
-IF F.SpeedMbps > 0.0 AND P.OperUp THEN
-  P.SpeedMbps := F.SpeedMbps;
+(* a link runs at one speed: an override at either end of the cable is
+   this end's too *)
+Mbps := SlowerMbps(A := F.SpeedMbps, B := LinkMbps);
+IF Mbps > 0.0 AND P.OperUp THEN
+  P.SpeedMbps := Mbps;
   (* traffic cannot exceed the line *)
-  P.InBps := MIN(P.InBps, F.SpeedMbps * 1000000.0);
-  P.OutBps := MIN(P.OutBps, F.SpeedMbps * 1000000.0);
+  P.InBps := MIN(P.InBps, Mbps * 1000000.0);
+  P.OutBps := MIN(P.OutBps, Mbps * 1000000.0);
 END_IF;
 DropPps := 0.0;
 IF NOT P.OperUp THEN
@@ -122,7 +143,8 @@ FUNCTION_BLOCK SwitchPlant
 (* The chassis: dark, rebooting, and its uptime, which counts while it is
    up and starts again from 0 after a reboot. *)
 VAR_INPUT
-  Dt : REAL;
+  Dt    : REAL;
+  Clear : BOOL; (* ClearFaults this scan: a reboot in progress ends *)
 END_VAR
 VAR_IN_OUT
   F : SimSwitch;
@@ -147,6 +169,9 @@ END_IF;
 IF F.Reboot THEN
   Rebooting := TRUE;
   F.Reboot := FALSE;
+END_IF;
+IF Clear THEN
+  Rebooting := FALSE;
 END_IF;
 T(IN := Rebooting, PT := RebootS);
 IF T.Q THEN

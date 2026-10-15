@@ -282,15 +282,46 @@ export interface VlanDomain {
 	islands: string[][];
 }
 
+/**
+ * Which ring each ring link (`kind: 'ring'`) belongs to, by link index: its
+ * `ring` name where the plan gives one, else the run of unnamed ring links
+ * joined through shared devices. Two separate rings are two rings; two that
+ * share a switch (a major ring and its sub-ring) need names to stay apart.
+ */
+export function ringsOf(t: Topology): Map<number, string> {
+	const parent = new Map<string, string>();
+	const find = (x: string): string => {
+		const p = parent.get(x) ?? x;
+		if (p === x) return x;
+		const r = find(p);
+		parent.set(x, r);
+		return r;
+	};
+	const unnamed: number[] = [];
+	const out = new Map<number, string>();
+	t.links.forEach((l, i) => {
+		if (l.kind !== 'ring') return;
+		if (typeof l.ring === 'string' && l.ring) out.set(i, `ring:${l.ring}`);
+		else {
+			unnamed.push(i);
+			const a = find(parseEnd(l.a).device);
+			const b = find(parseEnd(l.b).device);
+			if (a !== b) parent.set(a, b);
+		}
+	});
+	for (const i of unnamed) out.set(i, `run:${find(parseEnd(t.links[i].a).device)}`);
+	return out;
+}
+
 const declares = (l: TopoLink, id: number) => !!l.vlans && ((l.vlans.tagged ?? []).includes(id) || l.vlans.native === id);
 
 /**
  * Each VLAN as a layer-2 domain: the links that carry it and the devices
  * they join, in islands. A link with no light (`down` in the cable check)
  * carries nothing. An ERPS ring's protection link (`rpl: true`) is held
- * blocked while every other ring link is carrying, so a VLAN pruned from
- * one ring link does not find its way round: the ring is protection for a
- * failed link, not for a missing VLAN.
+ * blocked while every other link of its ring (`ringsOf`) is carrying, so a
+ * VLAN pruned from one ring link does not find its way round: the ring is
+ * protection for a failed link, not for a missing VLAN.
  */
 export function vlanDomains(plant: Plant, vlanChecks: VlanCheck[], tags: Record<string, unknown>, cables?: { check: LinkCheck }[]): VlanDomain[] {
 	const t = plant.topology;
@@ -303,13 +334,17 @@ export function vlanDomains(plant: Plant, vlanChecks: VlanCheck[], tags: Record<
 		if (c.verdict === 'down') return false;
 		return t.links[i].expect !== 'down' || c.verdict === 'contradicted';
 	};
-	const ringUp = t.links.every((l, i) => l.kind !== 'ring' || l.rpl || lit(i));
+	// Each ring's protection link is held blocked while the rest of its own
+	// ring carries: a failed link in one ring opens that ring's RPL only.
+	const rings = ringsOf(t);
+	const ringUp = new Map<string, boolean>();
+	for (const [i, r] of rings) ringUp.set(r, (ringUp.get(r) ?? true) && (!!t.links[i].rpl || lit(i)));
 	return siteVlans(t, tags).map((v) => {
 		const links: DomainLink[] = [];
 		t.links.forEach((l, i) => {
 			const carried = lit(i) && vlanChecks[i].carries.includes(v.id);
 			const declared = declares(l, v.id);
-			if (carried || declared) links.push({ index: i, carried, declared, blocked: carried && !!l.rpl && ringUp });
+			if (carried || declared) links.push({ index: i, carried, declared, blocked: carried && !!l.rpl && ringUp.get(rings.get(i) ?? '') === true });
 		});
 		// Islands: the switches joined by forwarding links (union-find); a
 		// server or the site joins every island it has a carrying link into.

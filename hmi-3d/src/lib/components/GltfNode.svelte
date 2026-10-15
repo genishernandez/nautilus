@@ -65,7 +65,10 @@
 	function ownMaterial(m: Mesh): MeshStandardMaterial | undefined {
 		let mat = owned.get(m);
 		if (mat) return mat;
-		const src = Array.isArray(m.material) ? m.material[0] : m.material;
+		// From the model's own material, never what the mesh wears now: that
+		// may be the stale grey, and a clone of it would stay grey once good.
+		const cur = original.get(m) ?? m.material;
+		const src = Array.isArray(cur) ? cur[0] : cur;
 		if (!(src instanceof MeshStandardMaterial)) return undefined;
 		mat = src.clone();
 		owned.set(m, mat);
@@ -80,6 +83,16 @@
 		return name;
 	}
 
+	/** Let go of the previous clone's meshes and the materials cloned for
+	 * it (a new model, or unmount); the cached glTF's own are never touched. */
+	function release() {
+		for (const m of owned.values()) m.dispose();
+		owned.clear();
+		original.clear();
+		meshes.clear();
+		baseRot.clear();
+	}
+
 	$effect(() => {
 		const url = data.model;
 		if (!url) return;
@@ -87,6 +100,7 @@
 		loadModel(url).then(
 			(gltf) => {
 				if (cancelled) return;
+				release();
 				const clone = gltf.scene.clone(true);
 				clone.traverse((o) => {
 					if (o.name) meshes.set(o.name, o);
@@ -181,7 +195,7 @@
 	});
 
 	onDestroy(() => {
-		for (const m of owned.values()) m.dispose();
+		release();
 		staleMat?.dispose();
 	});
 </script>
