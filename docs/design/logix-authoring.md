@@ -1517,7 +1517,7 @@ output; a new difference fails it):
 
 | difference | class | issue |
 | --- | --- | --- |
-| rung 0 `LES(` → `LT(` | equivalent: spelling. `LES` is the editor caption, `LT` what an export carries (logix-target.md, display/neutral-text split); the yardstick was hand-written with the caption | #372 (correct the example) |
+| rung 0 `LES(` → `LT(` | equivalent: spelling. `LES` is the editor caption, `LT` what an export carries (logix-target.md, display/neutral-text split); the yardstick was hand-written with the caption. Checked on the v38 SDK (2026-10-14, #377): `LT(a,c)` imports, builds and exports as `LT`; `LES(a,c)` imports and exports unchanged but fails the build (`RxCMP_E_AUDIT_INVALIDOPTYPE`, DINT and REAL operands alike), so the writer's `LT` is what a controller takes | #372 (correct the example) |
 | `AcceptTmr` controller → program scope | semantic for an external client (`AcceptTmr.ACC` moves to `Program:MainProgram.AcceptTmr.ACC`); the rungs run the same | #371 |
 | `Line_BatchId` not written | semantic: a tag the skid writes over EtherNet/IP is missing; no routine names it and the writer emits only the tags a program names | #370 |
 
