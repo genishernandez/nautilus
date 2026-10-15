@@ -71,7 +71,10 @@ jobs:
           exit $fail
       # Every acceptance suite again as JSON, tagged with its project root,
       # for the runtime evidence (docs/claims can name a test with
-      # `naut <root> <name>`). Verdicts only: the step above gates.
+      # `naut <root> <name>`). Verdicts only: the step above gates. The
+      # Logix conformance projects run here on nautilus; their controller
+      # half (`naut test --target logix`) needs a Logix controller and is
+      # not in CI.
       - name: naut test -json (runtime evidence)
         run: |
           go build -o "$RUNNER_TEMP/naut" ./cmd/naut
@@ -79,7 +82,7 @@ jobs:
             root=$(dirname "$m")
             ls "$root"/*_test.yaml >/dev/null 2>&1 || continue
             "$RUNNER_TEMP/naut" test -json "$root" | jq -c --arg root "$root" '. + {root: $root}' >> evidence/naut-tests.ndjson || true
-          done < <(find examples testdata/projects -name nautilus.yaml -print0 | sort -z)
+          done < <(find examples testdata/projects logix/writer/testdata/conformance -name nautilus.yaml -print0 | sort -z)
       - name: Keep the results as runtime evidence
         uses: actions/upload-artifact@v4
         with:

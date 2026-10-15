@@ -231,10 +231,10 @@ claims:
       narrowing under either MOD sign rule. The conformance project
       `logix/writer/testdata/conformance/conversions` writes every written
       class into its own tag (and passes a conversion to a user block's
-      input); its 12 scenarios pass on nautilus here and passed unchanged on
-      an Echo v38 controller with `naut test --target logix` (#255,
-      2026-10-14), exact to the bit with float32-exact REAL inputs. The
-      controller run is not in CI.
+      input); its 12 scenarios pass on nautilus in CI (the three cited) and
+      passed unchanged on an Echo v38 controller with `naut test --target
+      logix` (#255, 2026-10-14), exact to the bit with float32-exact REAL
+      inputs. The controller run is not in CI.
 
   - id: LGA-017
     claim: >-
@@ -282,7 +282,7 @@ claims:
       CPT and CMP (#368), not in CI. The written forms (`conformance/division`:
       DIV and CPT into an integer, a CMP against an integer, a quotient
       through a DINT tag into a REAL) passed 4 of 4 scenarios on the same
-      controller.
+      controller; CI runs them on nautilus only.
 
   - id: LGA-040
     claim: >-
