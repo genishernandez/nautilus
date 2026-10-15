@@ -1,6 +1,11 @@
 package writer
 
 import (
+	"bytes"
+	"encoding/xml"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -167,34 +172,158 @@ func TestSoftwareRevisionFollowsTheTarget(t *testing.T) {
 	}
 }
 
-// The Local module is the 1756-L85E's, the only one taken from a real
-// export; any other processor gets the same module with its own catalog
-// number, and a warning that says so (#373) — nothing nautilus has no
-// data for is guessed.
+// A processor in the table gets its own Local module; the default is the
+// 1756-L85E's, unchanged since before #373; a processor with no verified
+// module gets the 1756-L85E's with its own catalog number, and a warning
+// that says so — nothing nautilus has no data for is guessed.
 func TestLocalModule(t *testing.T) {
-	const l85 = `<Module Name="Local" CatalogNumber="%s" Vendor="1" ProductType="14" ProductCode="168" Major="38" Minor="11" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`
-	for _, proc := range []string{"", "1756-L85E", "1769-L33ER"} {
-		doc, diags, err := Write(udtLadder, Options{Libs: []string{udtTypes}, ProcessorType: proc})
+	for _, c := range []struct {
+		proc, module string
+		ports        []string
+		eth          []string
+	}{
+		{"", `<Module Name="Local" CatalogNumber="1756-L85E" Vendor="1" ProductType="14" ProductCode="168" Major="38" Minor="11" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
+			[]string{`<Port Id="1" Address="0" Type="ICP" Upstream="false">`, `<Bus Size="17"/>`, `<Port Id="2" Type="Ethernet" Upstream="false">`},
+			[]string{`<EthernetPort Port="1" Label="1" PortEnabled="true"/>`}},
+		{"1769-L33ER", `<Module Name="Local" CatalogNumber="1769-L33ER" Vendor="1" ProductType="14" ProductCode="107" Major="38" Minor="11" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
+			[]string{`<Port Id="1" Address="0" Type="Compact" Upstream="false">`, `<Bus Size="17"/>`, `<Port Id="2" Type="Ethernet" Upstream="false">`},
+			[]string{`<EthernetPort Port="1" Label="1" PortEnabled="true"/>`, `<EthernetPort Port="2" Label="2" PortEnabled="true"/>`}},
+		{"5069-L320ER", `<Module Name="Local" CatalogNumber="5069-L320ER" Vendor="1" ProductType="14" ProductCode="217" Major="38" Minor="11" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
+			[]string{`<Port Id="1" Address="0" Type="5069" Upstream="false">`, `<Bus Size="17"/>`, `<Port Id="3" Type="Ethernet" Upstream="false">`, `<Port Id="4" Type="Ethernet" Upstream="false">`},
+			[]string{`<EthernetPort Port="1" Label="A1" PortEnabled="true"/>`, `<EthernetPort Port="2" Label="A2" PortEnabled="true"/>`}},
+		// No verified module: the L85E's, catalog number changed.
+		{"1769-L24ER-QB1B", `<Module Name="Local" CatalogNumber="1769-L24ER-QB1B" Vendor="1" ProductType="14" ProductCode="168" Major="38" Minor="11" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
+			[]string{`<Port Id="1" Address="0" Type="ICP" Upstream="false">`, `<Bus Size="17"/>`, `<Port Id="2" Type="Ethernet" Upstream="false">`},
+			[]string{`<EthernetPort Port="1" Label="1" PortEnabled="true"/>`}},
+	} {
+		doc, diags, err := Write(udtLadder, Options{Libs: []string{udtTypes}, ProcessorType: c.proc})
 		if err != nil || len(diags) > 0 {
 			t.Fatalf("write: %v %v", err, diags)
 		}
-		cat := proc
-		if cat == "" {
-			cat = "1756-L85E"
+		for _, want := range append(append([]string{c.module}, c.ports...), c.eth...) {
+			if !strings.Contains(string(doc), want+"\n") {
+				t.Errorf("%q: no %s", c.proc, want)
+			}
 		}
-		if !strings.Contains(string(doc), strings.Replace(l85, "%s", cat, 1)) || !strings.Contains(string(doc), `<Bus Size="17"/>`) {
-			t.Errorf("%s: Local module not the 1756-L85E's", cat)
+		if n := strings.Count(string(doc), `<EthernetPort `); n != len(c.eth) {
+			t.Errorf("%q: %d EthernetPorts, want %d", c.proc, n, len(c.eth))
 		}
 	}
-	for _, proc := range []string{"", "1756-L85E", " 1756-l85e "} {
+	for _, proc := range []string{"", "1756-L85E", " 1756-l85e ", "1769-L33ER", "5069-L320ER", "1756-L83E"} {
 		if w := LocalModuleWarning(proc); w != "" {
 			t.Errorf("%q: unexpected warning %s", proc, w)
 		}
 	}
-	for _, proc := range []string{"1769-L33ER", "5069-L320ER", "1756-L83E"} {
+	// A 5370 L1/L2 (embedded I/O), a safety controller, a 5480 (v38
+	// cannot create one), a 1756-L7x.
+	for _, proc := range []string{"1769-L24ER-QB1B", "1769-L16ER-BB1B", "1756-L81ES", "5069-L46ERMW", "1756-L75"} {
 		w := LocalModuleWarning(proc)
 		if !strings.Contains(w, proc) || !strings.Contains(w, "1756-L85E") || !strings.Contains(w, "#373") {
 			t.Errorf("%s: warning %q", proc, w)
+		}
+	}
+}
+
+// xnode is any XML element, kept whole: its attributes in order and its
+// children.
+type xnode struct {
+	XMLName xml.Name
+	Attrs   []xml.Attr `xml:",any,attr"`
+	Nodes   []xnode    `xml:",any"`
+}
+
+func (n xnode) child(name string) *xnode {
+	for i := range n.Nodes {
+		if n.Nodes[i].XMLName.Local == name {
+			return &n.Nodes[i]
+		}
+	}
+	return nil
+}
+
+func (n xnode) attr(name string) string {
+	for _, a := range n.Attrs {
+		if a.Name.Local == name {
+			return a.Value
+		}
+	}
+	return ""
+}
+
+// render writes an element and its descendants with their attributes
+// in order, without the ones in skip.
+func (n xnode) render(skip map[string]bool) string {
+	var b strings.Builder
+	b.WriteString("<" + n.XMLName.Local)
+	for _, a := range n.Attrs {
+		if !skip[a.Name.Local] {
+			fmt.Fprintf(&b, " %s=%q", a.Name.Local, a.Value)
+		}
+	}
+	b.WriteString(">")
+	for _, c := range n.Nodes {
+		b.WriteString(c.render(skip))
+	}
+	b.WriteString("</" + n.XMLName.Local + ">")
+	return b.String()
+}
+
+func parseNode(t *testing.T, doc []byte) xnode {
+	t.Helper()
+	var n xnode
+	if err := xml.Unmarshal(bytes.TrimPrefix(doc, []byte("\uFEFF")), &n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Every row of the verified table is what Logix Designer v38 itself
+// writes for that processor: testdata/local holds, verbatim, the export
+// of a project the SDK created for each one (#373). A project written for
+// the processor has the export's Local module element for element and
+// attribute for attribute, its <EthernetPorts>, its <RedundancyInfo>, and
+// its <Controller> attributes in the export's order (all but the name,
+// the dates and the DataExchangeId, which are the project's own). And
+// the table has a row for exactly the processors there are exports of.
+func TestLocalModulesMatchExports(t *testing.T) {
+	files, err := filepath.Glob("testdata/local/*.L5X")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no exports: %v", err)
+	}
+	seen := map[string]bool{}
+	ctrlSkip := map[string]bool{"Name": true, "ProjectCreationDate": true, "LastModifiedDate": true, "DataExchangeId": true}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := parseNode(t, raw).child("Controller")
+		cat := want.attr("ProcessorType")
+		if cat+".L5X" != filepath.Base(f) {
+			t.Errorf("%s: export is a %s", f, cat)
+		}
+		seen[cat] = true
+		if w := LocalModuleWarning(cat); w != "" {
+			t.Errorf("%s: an export but no row: %s", cat, w)
+			continue
+		}
+		doc, diags, err := Write(udtLadder, Options{Libs: []string{udtTypes}, ProcessorType: cat, MajorRev: want.attr("MajorRev"), MinorRev: want.attr("MinorRev")})
+		if err != nil || len(diags) > 0 {
+			t.Fatalf("%s: write: %v %v", cat, err, diags)
+		}
+		got := parseNode(t, doc).child("Controller")
+		for _, el := range []string{"Modules", "EthernetPorts", "RedundancyInfo"} {
+			if g, w := got.child(el).render(nil), want.child(el).render(nil); g != w {
+				t.Errorf("%s: %s\n got %s\nwant %s", cat, el, g, w)
+			}
+		}
+		if g, w := (xnode{XMLName: got.XMLName, Attrs: got.Attrs}).render(ctrlSkip), (xnode{XMLName: want.XMLName, Attrs: want.Attrs}).render(ctrlSkip); g != w {
+			t.Errorf("%s: Controller\n got %s\nwant %s", cat, g, w)
+		}
+	}
+	for cat := range localModules {
+		if !seen[cat] {
+			t.Errorf("%s: a row but no export in testdata/local", cat)
 		}
 	}
 }

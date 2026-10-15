@@ -174,22 +174,87 @@ func SoftwareRevisionFor(major string) string {
 	return major + ".00"
 }
 
+// family is what a controller family's project carries around its Local
+// module, as Logix Designer exports it: the backplane port's type, which
+// of the Local module's ports are Ethernet, the controller's
+// <EthernetPorts> labels, and the <Controller> attributes that differ by
+// family. Taken from projects the SDK created for each processor on
+// Logix Designer v38 and exported to L5X (testdata/local, #373).
+type family struct {
+	Name string
+	// Backplane is the Local module's port 1 type.
+	Backplane string
+	// EthernetPortIDs are the Local module's Ethernet port ids.
+	EthernetPortIDs []int
+	// EthernetLabels are the controller's <EthernetPort> labels, port 1
+	// first.
+	EthernetLabels []string
+	// TimeSlice: the controller carries TimeSlice="20"
+	// ShareUnusedTimeSlice="1" after MinorRev and the redundancy pad
+	// percentages, and has no AutoDiagsEnabled or WebServerEnabled
+	// (CompactLogix 5370).
+	TimeSlice bool
+	// EtherNetIPMode is the controller's EtherNetIPMode attribute, ""
+	// for none.
+	EtherNetIPMode string
+}
+
+var (
+	controlLogix5580 = &family{Name: "ControlLogix 5580", Backplane: "ICP",
+		EthernetPortIDs: []int{2}, EthernetLabels: []string{"1"}}
+	compactLogix5370 = &family{Name: "CompactLogix 5370", Backplane: "Compact",
+		EthernetPortIDs: []int{2}, EthernetLabels: []string{"1", "2"}, TimeSlice: true}
+	compactLogix5380 = &family{Name: "CompactLogix 5380", Backplane: "5069",
+		EthernetPortIDs: []int{3, 4}, EthernetLabels: []string{"A1", "A2"},
+		EtherNetIPMode: "A1/A2: Dual-IP"}
+)
+
 // localModule is the controller's own entry under <Modules>: the identity
 // Logix Designer checks the processor against, and its ports.
 type localModule struct {
 	ProductType, ProductCode string
-	// BusSize is the backplane (ICP) port's slot count.
+	// BusSize is the backplane port's slot count.
 	BusSize int
+	Family  *family
 }
 
-// localModules are the Local modules taken from real exports, by catalog
-// number. Only the 1756-L85E's is known (lang/l5x/testdata/demoline.L5X,
-// ECHO1): no export of any other controller in the repo carries a
-// <Modules> section — the batch-skid yardstick's 1769-L33ER export is
-// lean — so a CompactLogix's product code and ports are not known, and
-// are not guessed (#373).
+// localModules are the Local modules Logix Designer itself writes, by
+// catalog number: each row is a project the SDK created for that
+// processor on Logix Designer v38 (ws-test), exported to L5X and kept
+// verbatim in testdata/local, which TestLocalModulesMatchExports checks
+// the writer against. The 1756-L85E's is also DemoLine's
+// (lang/l5x/testdata/demoline.L5X, ECHO1). A processor not here is not
+// guessed (#373): a CompactLogix 5370 L1/L2 (1769-L1x/L2x) has embedded
+// I/O modules the writer does not emit, a safety controller has a safety
+// partner, and v38 cannot create a CompactLogix 5480.
 var localModules = map[string]localModule{
-	"1756-L85E": {ProductType: "14", ProductCode: "168", BusSize: 17},
+	"1756-L81E": {"14", "164", 17, controlLogix5580},
+	"1756-L82E": {"14", "165", 17, controlLogix5580},
+	"1756-L83E": {"14", "166", 17, controlLogix5580},
+	"1756-L84E": {"14", "167", 17, controlLogix5580},
+	"1756-L85E": {"14", "168", 17, controlLogix5580},
+
+	"1769-L30ER":     {"14", "106", 9, compactLogix5370},
+	"1769-L30ER-NSE": {"14", "109", 9, compactLogix5370},
+	"1769-L30ERM":    {"14", "156", 9, compactLogix5370},
+	"1769-L33ER":     {"14", "107", 17, compactLogix5370},
+	"1769-L33ERM":    {"14", "110", 17, compactLogix5370},
+	"1769-L36ERM":    {"14", "108", 31, compactLogix5370},
+
+	"5069-L306ER":     {"14", "196", 9, compactLogix5380},
+	"5069-L306ERM":    {"14", "189", 9, compactLogix5380},
+	"5069-L310ER":     {"14", "216", 9, compactLogix5380},
+	"5069-L310ER-NSE": {"14", "188", 9, compactLogix5380},
+	"5069-L310ERM":    {"14", "190", 9, compactLogix5380},
+	"5069-L320ER":     {"14", "217", 17, compactLogix5380},
+	"5069-L320ERM":    {"14", "192", 17, compactLogix5380},
+	"5069-L330ER":     {"14", "218", 32, compactLogix5380},
+	"5069-L330ERM":    {"14", "193", 32, compactLogix5380},
+	"5069-L340ER":     {"14", "219", 32, compactLogix5380},
+	"5069-L340ERM":    {"14", "194", 32, compactLogix5380},
+	"5069-L350ERM":    {"14", "195", 32, compactLogix5380},
+	"5069-L380ERM":    {"14", "228", 32, compactLogix5380},
+	"5069-L3100ERM":   {"14", "230", 32, compactLogix5380},
 }
 
 // fallbackLocal is what a project for a processor with no known Local
@@ -206,11 +271,11 @@ func localModuleFor(processor string) (localModule, bool) {
 }
 
 // LocalModuleWarning is "" when the writer knows the processor's own Local
-// module (its identity and backplane, from a real export), and otherwise
-// the warning `naut logix write` and `naut logix deploy` print: the
-// project is written with the 1756-L85E's Local module and only the
-// catalog number changed, which Logix Designer may refuse or misidentify.
-// An empty processor is the default, the 1756-L85E.
+// module (its identity and backplane, from Logix Designer's own export),
+// and otherwise the warning `naut logix write` and `naut logix deploy`
+// print: the project is written with the 1756-L85E's Local module and
+// only the catalog number changed, which Logix Designer may refuse or
+// misidentify. An empty processor is the default, the 1756-L85E.
 func LocalModuleWarning(processor string) string {
 	if strings.TrimSpace(processor) == "" {
 		return ""
@@ -218,7 +283,7 @@ func LocalModuleWarning(processor string) string {
 	if _, ok := localModuleFor(processor); ok {
 		return ""
 	}
-	return fmt.Sprintf("processor %s: nautilus has no verified Local module for it (only for the 1756-L85E), so the project's Local module is the 1756-L85E's — ProductType %s, ProductCode %s, a %d-slot backplane — with only the catalog number changed; Logix Designer may refuse the project or misidentify the controller, so check that it opens before a download (#373)",
+	return fmt.Sprintf("processor %s: nautilus has no verified Local module for it (it has them for the ControlLogix 5580 1756-L8xE, CompactLogix 5370 1769-L3x and CompactLogix 5380 5069-L3xx processors), so the project's Local module is the 1756-L85E's — ProductType %s, ProductCode %s, a %d-slot backplane — with only the catalog number changed; Logix Designer may refuse the project or misidentify the controller, so check that it opens before a download (#373)",
 		processor, fallbackLocal.ProductType, fallbackLocal.ProductCode, fallbackLocal.BusSize)
 }
 

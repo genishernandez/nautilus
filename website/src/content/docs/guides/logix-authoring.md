@@ -419,10 +419,14 @@ and the `resets`. The answer is a stream of JSON lines (`progress` events, then
 - **One controller family, one revision verified.** Every behaviour test
   ran on a 5580 at v38 on FactoryTalk Logix Echo. Other revisions and
   families are expected to work but are not yet in a test matrix. The
-  project's controller module (`Local`) is the 1756-L85E's whatever the
-  processor, with only the catalog number changed; for any other
-  processor `naut logix write` and `naut logix deploy` say so, and the
-  project may not open in Logix Designer until that is checked.
+  project's controller module (`Local`) is Logix Designer's own for the
+  ControlLogix 5580 (1756-L8xE), CompactLogix 5370 (1769-L30ER to
+  1769-L36ERM) and CompactLogix 5380 (5069-L306ER to 5069-L3100ERM)
+  processors, and a project written for a 5069-L320ER or a 1769-L33ER
+  imports and builds in Logix Designer v38. For any other processor it is
+  the 1756-L85E's with only the catalog number changed; `naut logix
+  write` and `naut logix deploy` say so, and Logix Designer will likely
+  refuse the project.
 - **One task, one program.** Multi-task projects are not in the subset.
 - **No hardware configuration.** The writer emits no I/O modules, so
   aliases to rack points need a controller project that already has them.
