@@ -5,6 +5,47 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Added
+
+- **A multi-leg OR in one step, and a branch you can select (ladder).**
+  Ctrl- or Shift-click several elements of one series (the rung, or one
+  leg of a branch), then press `O` or the toolbar's **OR**: they become
+  ONE parallel branch with a leg each (`a b c` → `[ a | b | c ]`), in a
+  single edit. A branch is now an element of its own: click its rails to
+  select it, then `O` adds a leg, `Del` deletes it, Ctrl+C/X copies or
+  cuts it. With one element selected, `O` is `B` (a 2-leg OR around it).
+  In the DOM a branch is `<g class="branch" data-kind="branch">` with an
+  aria label ("OR branch, 3 legs") wrapping a `<g class="leg">` per leg,
+  so it is addressable from tests. Needs a `naut` newer than 0.18.0 (the
+  `wrapOr` op). (#91)
+- **Insert an FBD block right where you want it.** Double-click empty
+  canvas: the **+ add** palette opens, and what you insert lands at that
+  point. With an element selected, **+ add** inserts one column to its
+  right. Either way it moves down to the first clear place if that spot
+  is taken: an insert never lands on another element. (#78)
+
+### Fixed
+
+- **An FBD insert no longer re-lays out a network you arranged.** Adding
+  a block that joins a network re-ran that network's auto-layout, so
+  blocks you had placed could swap rows (in a take, existing blocks
+  jumped). Now, once a network has any position you set by dragging, an
+  insert keeps every one of its blocks where it was (pinned in
+  `(* @layout *)` alongside the new block); a network you never arranged
+  stays fully auto-laid-out and re-flows around the new block as before.
+  An insert with no place asked for (nothing selected, the toolbar's
+  **+ add**) still goes where auto-layout puts it — into an arranged
+  network, clear of the blocks that held still. A structural edit also
+  no longer re-fits the whole view: the camera stays, and pans only to
+  bring a new element into view. (#78)
+- **The FBD editor opens at a readable zoom.** It used to fit the whole
+  program, so a big one opened with ~4 px pins and ~5 px text. It now
+  opens fitted only while that keeps text readable (zoom ≥ 0.9); a bigger
+  program opens at that zoom on its top-left (the first network), to pan
+  or zoom out from. Ctrl+0 and the fit button still fit everything. Pins
+  are also easier to hit: a pin takes a press or a dropped wire within
+  5 px of its dot. (#79)
+
 ## [0.19.0] - 2026-10-15
 
 The pre-release line after the stable release 0.18.0. Same contents as

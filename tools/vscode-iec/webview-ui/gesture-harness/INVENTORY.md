@@ -32,14 +32,14 @@ the smoke checks `01`..`11` in `content/assets/capture/ext-stable/smoke/`.
   the verb list, not by running them; a "partial" label is deliberately
   conservative.
 
-Totals: 183 rows. **0 rows have no coverage at all** (no webview test,
+Totals: 188 rows. **0 rows have no coverage at all** (no webview test,
 no rig verb, no smoke check); per section below.
 
 | section | rows | no coverage |
 |---|---|---|
 | Commands | 28 | 0 |
-| FBD `?` | 20 | 0 |
-| Ladder `?` | 28 | 0 |
+| FBD `?` | 22 | 0 |
+| Ladder `?` | 31 | 0 |
 | SFC `?` | 31 | 0 |
 | Mimic `?` | 18 | 0 |
 | Component `?` | 8 | 0 |
@@ -102,6 +102,8 @@ no rig verb, no smoke check); per section below.
 | F18 | FBD | Save the file from the diagram | "?" list FBD / File / `Ctrl + S` | — | g_save | 03 (preview panel) |
 | F19 | FBD | Click EN on a block to show its EN / ENO pins; wire EN, drag from ENO | "?" list FBD / Edit / `Click EN on a block` | fbd-parity.test.mjs: FBD EN/ENO: bound EN draws without asking; the EN toggle opens EN/ENO pins to wire (F19, #206) | (tia-shaped build 09-EN-ENO-on-LIMIT) | — |
 | F20 | FBD | Network header: click to make it the palette's target; ▲ ▼ move, + add after, ✕ remove the NETWORK line; double-click the title to rename | "?" list FBD / Edit / `Network header` | fbd-parity.test.mjs: FBD networks: the header picks the palette target; buttons move, add, remove; double-click renames (F20) | (tia-shaped build 07..11-network) | — |
+| F21 | FBD | Double-click empty canvas: "+ add" opens there and the insert lands at that point; with an element selected, "+ add" inserts one column right of it; an arranged network keeps its layout (#78) | "?" list FBD / Edit / `Double-click empty canvas`; CHANGELOG Unreleased | editor-gestures.test.mjs: FBD + add (#78) ×3 | fbd_add_block_at (selftest) | — |
+| F22 | FBD | The editor opens fitted while that is readable (zoom ≥ 0.9), else at 0.9 on the diagram's top-left; Ctrl+0 still fits all; an edit pans a new element into view without re-zooming (#79) | CHANGELOG Unreleased; website languages/function-block | editor-gestures.test.mjs: FBD open zoom (#79) ×2 | fbd_open_zoom, fbd_fit_all (selftest, big.fbd) | — |
 
 ## Ladder editor (`?` list)
 
@@ -135,6 +137,9 @@ no rig verb, no smoke check); per section below.
 | L26 | LD | The declare offer types a name from its use (a CTU's `CV =>` is INT) over a seed-typed REAL (#219) | CHANGELOG Unreleased | ld-parity.test.mjs: a CTU's CV => Starts is offered as VAR_EXTERNAL : INT | ld_declare_offer_type (selftest; logix-shaped starts) | — |
 | L27 | LD | Declare, rename and delete a FUNCTION_BLOCK's pins: the declare offer inside a block (VAR_INPUT / VAR_OUTPUT), the variables panel's block scope (in → out → in/out → local), double-click a name to rename (#214) | CHANGELOG Unreleased; ladder.mdx In the editor | ld-parity.test.mjs: inside a FUNCTION_BLOCK the offer makes pins; a block's scope declares, renames and deletes its pins | ld_vars_declare, ld_declare (logix-shaped motor.ld), ld_vars_rename, ld_vars_delete (selftest) | — |
 | L28 | LD | The variables panel lists rung-declared block instances (`m1 : MotorStarter`, rung m1); Escape closes it (#220) | CHANGELOG Unreleased | ld-parity.test.mjs: rung-declared block instances are listed; Escape closes the panel | ld_vars_lists_instance, ld_vars_escape_closes (selftest; logix-shaped m1) | — |
+| L29 | LD | Ctrl / Shift + click adds an element of the same series to the selection (or takes it out) | "?" list LD / Select / `Ctrl / Shift + click` | editor-gestures.test.mjs: Ladder OR (#91): Ctrl-click three contacts, O | ld_or_select (selftest) | — |
+| L30 | LD | O (or the toolbar's OR): several selected elements → ONE branch with a leg each; a selected branch → one more leg; one element → a 2-leg OR (#91) | "?" list LD / Edit / `O`; CHANGELOG Unreleased | editor-gestures.test.mjs: Ladder OR (#91) ×2 | ld_or_select, ld_branch_or_leg (selftest) | — |
+| L31 | LD | A branch is its own element (g.branch > g.leg > g.node, aria-labelled): click its rails to select it; Del deletes it (#91) | "?" list LD / Select / `Click a branch's rails` | editor-gestures.test.mjs: Ladder OR (#91): a branch is ONE element | ld_branch_or_leg (selftest) | — |
 
 ## SFC editor (`?` list)
 
