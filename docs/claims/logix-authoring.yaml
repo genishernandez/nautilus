@@ -660,24 +660,34 @@ claims:
 
   - id: LGA-046
     claim: >-
-      The written project's `Local` module is the 1756-L85E's for every
-      processor; for any other processor, `naut logix write` and
-      `naut logix deploy` warn that it is, and a download from the editor
-      reports the same warning in its progress.
+      The written project's `Local` module is Logix Designer's own for the
+      ControlLogix 5580 (1756-L8xE), CompactLogix 5370 (1769-L30ER to
+      1769-L36ERM) and CompactLogix 5380 (5069-L306ER to 5069-L3100ERM)
+      processors; for any other processor it is the 1756-L85E's, and
+      `naut logix write` and `naut logix deploy` warn that it is, and a
+      download from the editor reports the same warning in its progress.
     source: "#what-it-does-not-do-yet"
     tests:
+      - go ./logix/writer TestLocalModulesMatchExports
       - go ./logix/writer TestLocalModule
       - go ./cmd/naut TestLogixRoundTripYardstickCLI
     partial: true
     note: >-
-      TestLocalModule pins the module (ProductType 14, ProductCode 168, a
-      17-slot backplane) for the default, the 1756-L85E and a 1769-L33ER,
-      and the warning for three processors with no verified module;
-      TestLogixRoundTripYardstickCLI sees `naut logix write` warn for the
-      yardstick's 1769-L33ER. The deploy and serve call sites print the same
-      writer.LocalModuleWarning and have no test of their own. Whether Logix Designer opens a CompactLogix project
-      with this module is not known: no CompactLogix export with a
-      `<Modules>` section is in the repo and none has been tried.
+      TestLocalModulesMatchExports writes a project for each of the 25
+      processors with an export in logix/writer/testdata/local (empty
+      projects the SDK created on Logix Designer v38 and exported,
+      committed verbatim) and compares the `<Modules>`, `<EthernetPorts>`,
+      `<RedundancyInfo>` and `<Controller>` attributes with the export's;
+      the table has a row for exactly those. TestLocalModule pins three
+      families' modules and the warning for five processors with none;
+      TestLogixRoundTripYardstickCLI sees the yardstick's 1769-L33ER get its
+      own module and no warning. The deploy and serve call sites print the
+      same writer.LocalModuleWarning and have no test of their own. That
+      Logix Designer v38 imports (0 warnings, 0 errors) and builds a
+      written project was checked by hand on ws-test for 5069-L320ER,
+      5069-L340ERM, 1769-L33ER, 1769-L36ERM and 1756-L83E
+      (docs/design/logix-authoring.md, #373), not by a test here; no other
+      Logix Designer release has opened one.
 
   - id: LGA-041
     claim: >-

@@ -11,6 +11,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -141,10 +142,16 @@ func TestLogixRoundTripYardstickCLI(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("write with flags: exit %d\n%s", code, stderr)
 	}
-	// The 1769-L33ER has no verified Local module: the write says it
-	// used the 1756-L85E's (#373).
-	if !strings.Contains(stderr, "naut logix write: warning: processor 1769-L33ER: nautilus has no verified Local module") {
-		t.Errorf("write did not warn about the Local module:\n%s", stderr)
+	// The 1769-L33ER's own Local module, from Logix Designer's export of
+	// one, and so no warning (#373): it was the 1756-L85E's before.
+	if strings.Contains(stderr, "Local module") {
+		t.Errorf("write warned about the Local module:\n%s", stderr)
+	}
+	if raw, err := os.ReadFile(again); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(string(raw), `<Module Name="Local" CatalogNumber="1769-L33ER" Vendor="1" ProductType="14" ProductCode="107" Major="36" Minor="11"`) ||
+		!strings.Contains(string(raw), `<Port Id="1" Address="0" Type="Compact" Upstream="false">`) {
+		t.Errorf("the write-back's Local module is not the 1769-L33ER's")
 	}
 	f, err := l5x.ParseFile(again)
 	if err != nil {

@@ -1549,9 +1549,11 @@ Outside the logic comparison (the raw `diff` is 129 lines; `normalize
   then `AcceptTmr`, then `Line_BatchId`, which no routine names) rather
   than the export's; each value also as `<Data Format="L5K">`; the
   Decorated data on its own lines.
-- **Named — the `Local` module.** Its product code and backplane are the
-  1756-L85E's whatever the processor (#373, below): `naut logix write`
-  warns for the yardstick's 1769-L33ER.
+- **Equivalent — the `Local` module.** The yardstick is a lean export
+  with no `<Modules>`; the write-back's `Local` module is the
+  1769-L33ER's own, from Logix Designer's export of one (#373, below).
+  Until #373 (c) it was the 1756-L85E's with the catalog number changed,
+  which Logix Designer v38 refuses to import.
 
 **Follow-up (2026-10-14, #373): metadata.** Two of the three named
 metadata differences are gone; the third is now said out loud.
@@ -1562,18 +1564,74 @@ UDT's description and its members' with the export's.
 | --- | --- |
 | `SoftwareRevision="38.01"` for any target (the yardstick's export says `36.00`) | The default is the target's own Logix Designer release, `writer.SoftwareRevisionFor(major)`: `38.01` for v38 (what ECHO1's real exports, `lang/l5x/testdata/demoline.L5X` and its siblings, carry) and `<major>.00` for any other major — `36.00` for v36, which is what the yardstick, a stand-in export, says. The firmware minor (`.11`) is not the software minor, so the controller's `MinorRev` is not used. `naut logix write --software` still overrides it, and now defaults to empty (derived); deploy and serve get the derived value because they leave `SoftwareRevision` unset. A v38 project's output is unchanged, so no golden moved |
 | the UDT's description dropped | `naut logix import` writes a UDT's description, and each member's, as the declaration's trailing comment in `lib/logix_types.st` (`LineStatus : STRUCT (* Mode/alarm summary … *)`, `Mode : DINT; (* … *)`) — the IEC habit the LSP already reads for a VAR's description, and the type stays the one place it is said, rather than a manifest field beside it. The writer reads a STRUCT's and member's trailing comment (`//` or `(* … *)`, a multi-line one joined line by line, a `(* @… *)` pragma ignored, a comment on a line of its own not attached) and writes it as the `<DataType>`'s and `<Member>`'s `<Description>`, the member in the element form an export uses. A `*)` or `(*` inside a description is written `* )` / `( *`, so that round trip is lossy by one space |
-| the `Local` module is the 1756-L85E's for any processor | Not fixed, because the repo has no data to fix it with: the only `<Modules>` section in any example or fixture export is DemoLine's 1756-L85E (`ProductType="14" ProductCode="168"`, ICP `Bus Size="17"`); the yardstick and `upstream.L5X` (1769-L33ER) are lean exports without one, and no other CompactLogix export is in the repo. Product codes are not guessed. The writer keeps a table of verified Local modules (`localModules`, one row) and falls back to the L85E's; for any other processor `writer.LocalModuleWarning` says so and `naut logix write`, `naut logix deploy` (stderr) and a download from `naut logix serve` (a progress line) print it. Refusing (a `logix/*` rule) was the alternative and was not taken: it would refuse the yardstick's own write-back, whose logic is right and whose only open question is whether Logix Designer accepts the envelope. Adding a CompactLogix is a row in the table, from a real export of one |
+| the `Local` module is the 1756-L85E's for any processor | Fixed by data, below ("The `Local` module, from Logix Designer itself"). This row first shipped as a warning only (#382): the repo had no CompactLogix export with a `<Modules>` section, and product codes are not guessed |
 
 Needs a controller-side (Logix Designer) check: that v36 Logix Designer
 opens a write-back claiming `36.00` (and v38 one claiming `38.01`, as
 today); that a UDT and member `<Description>` written in this shape import
-and survive a build; and what a 1769-L33ER (or any 1769/5069
-CompactLogix) export's `Local` module carries — or whether Logix
-Designer accepts the 1756-L85E's with a 1769 catalog number at all. Echo
-emulates CompactLogix 5380 at v36–38 (`logix-target.md` §3), so a new
-5069 project exported from the SDK machine's Logix Designer would give
-the first CompactLogix row without hardware; a 1769-L33ER (5370) still
-needs a real export.
+and survive a build. (The `Local` module's check is done, below.)
+
+**The `Local` module, from Logix Designer itself (2026-10-14, #373 (c)).**
+No export had the data, so Logix Designer was asked for it: on ws-test
+(Logix Designer v38.01, the only release installed) logixd's
+`POST /v1/create` (`logixd.Client.CreateProject`, the SDK's
+`LogixProject.CreateAsync`) made an empty project for each processor at
+38.11 and `POST /v1/convert` exported it to a lean L5X. Each export is
+committed verbatim in `logix/writer/testdata/local/<catalog>.L5X`; they
+are vendor-generated metadata with no client data. The writer's table
+(`localModules`) has a row for exactly those processors, and
+`TestLocalModulesMatchExports` writes a project for each and compares
+it with the export: the `<Modules>` element attribute for attribute,
+`<EthernetPorts>`, `<RedundancyInfo>`, and the `<Controller>`
+attributes in the export's order (all but the name, the dates and the
+`DataExchangeId`).
+
+Three envelopes, by family; within a family only the product code and
+the backplane size change:
+
+| family | processors (ProductType 14, ProductCode, backplane `Bus Size`) | `Local` ports | `<EthernetPorts>` | `<Controller>` differs by |
+| --- | --- | --- | --- | --- |
+| ControlLogix 5580 | 1756-L81E 164, L82E 165, L83E 166, L84E 167, L85E 168 — all 17 | 1 `ICP`, 2 `Ethernet` | `1` | — (the shape the writer always had; DemoLine's L85E agrees) |
+| CompactLogix 5370 L3 | 1769-L30ER 106 (9), L30ER-NSE 109 (9), L30ERM 156 (9), L33ER 107 (17), L33ERM 110 (17), L36ERM 108 (31) | 1 `Compact`, 2 `Ethernet` | `1`, `2` | `TimeSlice="20" ShareUnusedTimeSlice="1"` after `MinorRev`; no `AutoDiagsEnabled`/`WebServerEnabled`; `RedundancyInfo` carries `IOMemoryPadPercentage="90" DataTablePadPercentage="50"` |
+| CompactLogix 5380 | 5069-L306ER 196 (9), L306ERM 189 (9), L310ER 216 (9), L310ER-NSE 188 (9), L310ERM 190 (9), L320ER 217 (17), L320ERM 192 (17), L330ER 218 (32), L330ERM 193 (32), L340ER 219 (32), L340ERM 194 (32), L350ERM 195 (32), L380ERM 228 (32), L3100ERM 230 (32) | 1 `5069`, 3 and 4 `Ethernet` | `A1`, `A2` | `EtherNetIPMode="A1/A2: Dual-IP"` before `AutoDiagsEnabled` |
+
+The writer still omits the trailing `<OpcUaInfo EnabledPorts=""/>`
+(5580, 5380) and `<EthernetNetwork …/>` (5370, DLR supervisor defaults)
+an export ends with, as it always has for the L85E; the import defaults
+them.
+
+Not in the table, so still the 1756-L85E's module and the warning:
+
+- **CompactLogix 5370 L1/L2** (1769-L16ER-BB1B 153, L18ER-BB1B 154,
+  L18ERM-BB1B 155, L19ER-BB1B 152 on a `PointIO` port; 1769-L24ER-QB1B
+  149, L24ER-QBFC1B 150, L27ERM-QBFC1B 151 on `Compact`). v38 creates
+  them, but each project carries embedded I/O modules beside `Local`
+  (one or three) that the writer does not emit; a `Local` row alone
+  would write a controller without its own I/O.
+- **CompactLogix 5480**: v38 cannot create one (5069-L46ERMW:
+  `RxPTV_E_UNSUPPORTED_PROCESSOR_REV`; 5069-L4100ERW, L4200ERW, L4200ERM:
+  "Not supported processor type").
+- Safety controllers (GuardLogix, Compact GuardLogix), ControlLogix 5570
+  and anything else not tried.
+
+Revision: every row came from a v38 project. The `Local` module's
+`Major`/`Minor` are the target's, as before; the product code and ports
+are the hardware's, so a v36 target (the yardstick) gets the same row,
+but no v36 Logix Designer has opened one (only v38 is installed).
+
+**Build-checked on v38** (ws-test, `naut logix build` of a written L5X:
+the SDK imports it, then `BuildAsync`): the batch-skid yardstick,
+imported with `naut logix import` and written back with its target
+retargeted in a scratch copy to 38.11 and each of 5069-L320ER,
+5069-L340ERM, 1769-L33ER, 1769-L36ERM and 1756-L83E, imports with
+`<Summary Warnings="0" Errors="0"/>` and builds ("Build succeeded") for
+every one. A conversion of the 5069-L320ER and 1769-L33ER write-backs
+back to L5X shows Logix Designer kept the written `Local` module and
+`<EthernetPorts>` unchanged. The writer before this change (the L85E's
+module with the catalog number changed) is refused for both
+CompactLogix processors: `XMLSrv_E_IMPORT_ABORTED_NO_CHANGES - The
+Import was cancelled due to errors`, so the warning #382 added was
+describing a project v38 would not open.
 
 Not yet checked on a controller: the v38 build of the corrected
 `Line.L5X` and of a write-back with a controller-scoped `TIMER`.
