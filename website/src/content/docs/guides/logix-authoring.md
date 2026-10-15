@@ -233,7 +233,8 @@ naut logix import --project ./line Line.L5X
 writes a nautilus project from a full L5X export: the manifest (with
 `target: logix` filled from the controller, and `dialect: logix` when the
 export uses its idioms), the tags with their descriptions, UDTs as IEC
-types, every ladder routine as a PROGRAM, and every Add-On Instruction as a
+types (a type's and each member's description as the declaration's
+trailing comment, `LineStatus : STRUCT (* … *)`), every ladder routine as a PROGRAM, and every Add-On Instruction as a
 FUNCTION_BLOCK in `lib/`. Alias tags, and rack points the logic names
 directly, become tags with `alias:`. A rung that names an alias tag comes
 in like any other: the tag takes its target's type, whether the target is
@@ -255,7 +256,9 @@ naut logix normalize --logic --check back.L5X Line.L5X
 The write takes the controller, processor, revision, program, routine and
 task (`continuous: true` for a continuous one) from the imported
 `target: logix`, and each tag's initial value and description from the
-tag file. `--logic` compares programs, routines, rung text and comments,
+tag file; the file claims the Logix Designer release of that revision, as
+an export does (`SoftwareRevision="36.00"` for a v36 controller), and each
+UDT carries its descriptions back. `--logic` compares programs, routines, rung text and comments,
 and each tag's name, scope and type, and lists every difference; the two
 files' envelopes always differ (the writer emits a whole project). The
 import keeps two things a nautilus project would otherwise change. A
@@ -374,7 +377,11 @@ The server answers these commands on `POST /api/logix/deploy`:
 
 - **One controller family, one revision verified.** Every behaviour test
   ran on a 5580 at v38 on FactoryTalk Logix Echo. Other revisions and
-  families are expected to work but are not yet in a test matrix.
+  families are expected to work but are not yet in a test matrix. The
+  project's controller module (`Local`) is the 1756-L85E's whatever the
+  processor, with only the catalog number changed; for any other
+  processor `naut logix write` and `naut logix deploy` say so, and the
+  project may not open in Logix Designer until that is checked.
 - **One task, one program.** Multi-task projects are not in the subset.
 - **No hardware configuration.** The writer emits no I/O modules, so
   aliases to rack points need a controller project that already has them.

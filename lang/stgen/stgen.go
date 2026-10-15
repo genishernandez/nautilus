@@ -81,10 +81,14 @@ func Ref(name string) Type { return namedRef(name) }
 
 // FieldDef is one member of a struct: a name, a type, and an optional
 // initial-value literal rendered verbatim (e.g. "5", "2.0", "TRUE").
+// Comment, when set, is rendered as the declaration's trailing
+// (* … *) comment — the IEC habit for documenting a member, and where a
+// Logix UDT member's description lands on import.
 type FieldDef struct {
-	Name string
-	Type Type
-	Init string
+	Name    string
+	Type    Type
+	Init    string
+	Comment string
 }
 
 // Field builds a struct member.
@@ -95,10 +99,12 @@ func FieldInit(name string, t Type, init string) FieldDef {
 	return FieldDef{Name: name, Type: t, Init: init}
 }
 
-// StructDef is a named UDT under construction.
+// StructDef is a named UDT under construction. Comment, when set, is
+// rendered as a trailing comment on the `Name : STRUCT` line.
 type StructDef struct {
-	Name   string
-	Fields []FieldDef
+	Name    string
+	Fields  []FieldDef
+	Comment string
 }
 
 // Struct builds a UDT from ordered fields.
@@ -116,16 +122,43 @@ func (s *StructDef) AddField(f FieldDef) *StructDef {
 // renderBody renders "  Name : STRUCT ... END_STRUCT;" at two-space indent.
 func (s *StructDef) renderBody() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "  %s : STRUCT\n", s.Name)
+	fmt.Fprintf(&b, "  %s : STRUCT%s\n", s.Name, trailingComment(s.Comment, "  "))
 	for _, f := range s.Fields {
-		if f.Init != "" {
-			fmt.Fprintf(&b, "    %s : %s := %s;\n", f.Name, f.Type.render(), f.Init)
-		} else {
-			fmt.Fprintf(&b, "    %s : %s;\n", f.Name, f.Type.render())
-		}
+		b.WriteString(f.render("    "))
 	}
 	b.WriteString("  END_STRUCT;\n")
 	return b.String()
+}
+
+// render is the field's declaration line at the given indent.
+func (f FieldDef) render(indent string) string {
+	init := ""
+	if f.Init != "" {
+		init = " := " + f.Init
+	}
+	return fmt.Sprintf("%s%s : %s%s;%s\n", indent, f.Name, f.Type.render(), init, trailingComment(f.Comment, indent))
+}
+
+// trailingComment renders free text as a trailing " (* … *)" comment, ""
+// for none. A comment delimiter inside the text is broken up ("* )"), so
+// the text can never end the comment early or open a nested one; a
+// multi-line text continues on the following lines, indented past the
+// declaration, each line trimmed.
+func trailingComment(text, indent string) string {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if text == "" {
+		return ""
+	}
+	text = strings.ReplaceAll(text, "*)", "* )")
+	text = strings.ReplaceAll(text, "(*", "( *")
+	lines := strings.Split(text, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(lines[i])
+		if i > 0 && lines[i] != "" {
+			lines[i] = indent + "   " + lines[i]
+		}
+	}
+	return " (* " + strings.Join(lines, "\n") + " *)"
 }
 
 // Render emits a TYPE … END_TYPE block for the given structs, ordered so a
@@ -161,11 +194,7 @@ func VarBlock(kind string, fields ...FieldDef) string {
 	var b strings.Builder
 	b.WriteString(kind + "\n")
 	for _, f := range fields {
-		if f.Init != "" {
-			fmt.Fprintf(&b, "  %s : %s := %s;\n", f.Name, f.Type.render(), f.Init)
-		} else {
-			fmt.Fprintf(&b, "  %s : %s;\n", f.Name, f.Type.render())
-		}
+		b.WriteString(f.render("  "))
 	}
 	b.WriteString("END_VAR\n")
 	return b.String()

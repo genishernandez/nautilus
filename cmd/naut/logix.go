@@ -601,7 +601,7 @@ func runLogixWrite(args []string) int {
 	period := fs.Int("period", 0, "periodic task rate in ms (0: continuous)")
 	processor := fs.String("processor", "1756-L85E", "controller catalog number")
 	revision := fs.String("revision", "38.11", "firmware revision, major.minor")
-	software := fs.String("software", "38.01", "Logix Designer version the export claims")
+	software := fs.String("software", "", "Logix Designer version the export claims (default: the revision's own, 36.00 for a v36 target, 38.01 for v38)")
 	date := fs.String("date", "", "ExportDate attribute (default: \"(pinned)\", so a regeneration of unchanged logic is byte-identical)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -658,6 +658,9 @@ func runLogixWrite(args []string) int {
 		}
 	}
 	opts.MajorRev, opts.MinorRev, _ = strings.Cut(*revision, ".")
+	if w := writer.LocalModuleWarning(opts.ProcessorType); w != "" {
+		fmt.Fprintln(os.Stderr, "naut logix write: warning:", w)
+	}
 	doc, diags, err := writer.WriteProgram(path, string(raw), opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)

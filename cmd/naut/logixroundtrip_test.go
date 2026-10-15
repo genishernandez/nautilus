@@ -74,6 +74,26 @@ func TestLogixRoundTripYardstickCLI(t *testing.T) {
 		t.Errorf("controller %s %s %s.%s, want %s %s %s.%s", gc.Name, gc.ProcessorType, gc.MajorRev, gc.MinorRev,
 			oc.Name, oc.ProcessorType, oc.MajorRev, oc.MinorRev)
 	}
+	// The export claims the target's own Logix Designer release (#373).
+	if got.SoftwareRevision != orig.SoftwareRevision {
+		t.Errorf("SoftwareRevision %s, want %s", got.SoftwareRevision, orig.SoftwareRevision)
+	}
+	// Each UDT comes back with its description and its members' (#373).
+	if len(gc.DataTypes) != len(oc.DataTypes) {
+		t.Errorf("%d data types, want %d", len(gc.DataTypes), len(oc.DataTypes))
+	}
+	for i := 0; i < len(gc.DataTypes) && i < len(oc.DataTypes); i++ {
+		g, o := gc.DataTypes[i], oc.DataTypes[i]
+		if g.Name != o.Name || g.Description != o.Description || len(g.Members) != len(o.Members) {
+			t.Errorf("data type %s %q (%d members), want %s %q (%d)", g.Name, g.Description, len(g.Members), o.Name, o.Description, len(o.Members))
+			continue
+		}
+		for j := range o.Members {
+			if g.Members[j].Name != o.Members[j].Name || g.Members[j].Description != o.Members[j].Description {
+				t.Errorf("%s member %s %q, want %s %q", o.Name, g.Members[j].Name, g.Members[j].Description, o.Members[j].Name, o.Members[j].Description)
+			}
+		}
+	}
 	if len(gc.Tasks) != 1 || !reflect.DeepEqual(*gc.Tasks[0], *oc.Tasks[0]) {
 		t.Errorf("tasks %+v, want %+v", gc.Tasks, oc.Tasks)
 	}
@@ -115,10 +135,16 @@ func TestLogixRoundTripYardstickCLI(t *testing.T) {
 
 	// A flag still overrides the manifest.
 	again := filepath.Join(dir, "again.L5X")
-	if _, code := capture(t, func() int {
+	stderr, code := captureStderr(t, func() int {
 		return runLogix([]string{"write", "-o", again, "--routine", "Main", "--period", "50", filepath.Join(proj, "MainProgram.ld")})
-	}); code != 0 {
-		t.Fatalf("write with flags: exit %d", code)
+	})
+	if code != 0 {
+		t.Fatalf("write with flags: exit %d\n%s", code, stderr)
+	}
+	// The 1769-L33ER has no verified Local module: the write says it
+	// used the 1756-L85E's (#373).
+	if !strings.Contains(stderr, "naut logix write: warning: processor 1769-L33ER: nautilus has no verified Local module") {
+		t.Errorf("write did not warn about the Local module:\n%s", stderr)
 	}
 	f, err := l5x.ParseFile(again)
 	if err != nil {

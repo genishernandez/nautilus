@@ -436,6 +436,32 @@ claims:
       (a DINT, an array, a tag with no value) and the report for a MESSAGE, a
       multi-dimensional array, an unnamed TIMER and a LINT.
 
+  - id: LGA-045
+    claim: >-
+      An import carries each UDT's description and its members' into the
+      project, as the declarations' trailing comments, and a write puts them
+      back on the `<DataType>` and its `<Member>`s; the written file claims
+      the Logix Designer release of the target's own revision (36.00 for a
+      v36 controller, 38.01 for v38).
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./cmd/naut TestLogixRoundTripYardstickCLI
+      - go ./logix/importer TestRoundTripPublicYardstick
+      - go ./logix/writer TestUDTDescriptions
+      - go ./logix/writer TestUDTDescriptionsRoundTrip
+      - go ./logix/writer TestSoftwareRevisionFollowsTheTarget
+      - go ./lang/l5x TestTypesCarryDescriptions
+      - go ./lang/stgen TestRenderComments
+    partial: true
+    note: >-
+      On the public yardstick the written SoftwareRevision is the export's
+      (36.00) and LineStatus comes back with its description; member
+      descriptions are covered by the writer's own tests, since the
+      yardstick has none. Offline only: 38.01 is what ECHO1's real v38
+      exports carry; any other major's release is its ".00", which matches
+      the yardstick (a stand-in export) for v36 but no real export has
+      shown, and no v36 Logix Designer has opened a write-back.
+
   - id: LGA-026
     claim: >-
       On a corpus of 52 real production exports, 97.9% of rungs import, 81%
@@ -595,6 +621,27 @@ claims:
       may be stopped (NAUTILUS_LOGIX_DOWNLOAD_COMM_PATH, NAUTILUS_LOGIX_HOST)
       and logixd; skipped in CI and not yet run (the SDK machine is
       unavailable).
+
+  - id: LGA-046
+    claim: >-
+      The written project's `Local` module is the 1756-L85E's for every
+      processor; for any other processor, `naut logix write` and
+      `naut logix deploy` warn that it is, and a download from the editor
+      reports the same warning in its progress.
+    source: "#what-it-does-not-do-yet"
+    tests:
+      - go ./logix/writer TestLocalModule
+      - go ./cmd/naut TestLogixRoundTripYardstickCLI
+    partial: true
+    note: >-
+      TestLocalModule pins the module (ProductType 14, ProductCode 168, a
+      17-slot backplane) for the default, the 1756-L85E and a 1769-L33ER,
+      and the warning for three processors with no verified module;
+      TestLogixRoundTripYardstickCLI sees `naut logix write` warn for the
+      yardstick's 1769-L33ER. The deploy and serve call sites print the same
+      writer.LocalModuleWarning and have no test of their own. Whether Logix Designer opens a CompactLogix project
+      with this module is not known: no CompactLogix export with a
+      `<Modules>` section is in the repo and none has been tried.
 
   - id: LGA-041
     claim: >-
