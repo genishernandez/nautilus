@@ -61,6 +61,7 @@ export const FBD_SHORTCUTS: ShortcutGroup[] = [
 		title: 'Edit',
 		rows: [
 			{ keys: 'Double-click', does: 'Edit a constant, rename a wire or instance, edit a note', hint: 'double-click: edit & rename' },
+			{ keys: 'Double-click empty canvas', does: 'Open “+ add” there: the insert lands at that point (with an element selected, “+ add” inserts beside it)' },
 			{ keys: 'Enter', does: 'Commit an in-place edit (Ctrl + Enter in a multi-line note)' },
 			{ keys: 'Esc', does: 'Cancel an in-place edit' },
 			{ keys: 'Drag pin → pin', does: 'Wire an output to an input; drop on + to add an input', hint: 'drag pin→pin: wire (+ adds an input)' },
@@ -89,7 +90,9 @@ export const LD_SHORTCUTS: ShortcutGroup[] = [
 		title: 'Select',
 		rows: [
 			{ keys: 'Click', does: 'Select an element', hint: 'click: select' },
-			{ keys: "Click a rung's name", does: 'Select the whole rung', hint: "click a rung's name: select the rung" }
+			{ keys: "Click a rung's name", does: 'Select the whole rung', hint: "click a rung's name: select the rung" },
+			{ keys: 'Ctrl / Shift + click', does: 'Add an element of the same series (the rung, or one leg of a branch) to the selection, or take it out', hint: 'Ctrl-click: multi-select' },
+			{ keys: "Click a branch's rails", does: 'Select the whole branch (Del deletes it, O adds a leg)' }
 		]
 	},
 	{
@@ -105,6 +108,7 @@ export const LD_SHORTCUTS: ShortcutGroup[] = [
 			{ keys: 'P', does: 'Cycle a contact: NO → P (rising edge) → N (falling edge) → NC', hint: 'P: edge contact' },
 			{ keys: 'M', does: 'Cycle a coil: normal → set → reset', hint: 'M: coil mode' },
 			{ keys: 'B', does: 'Wrap the selection in a parallel branch — the new leg arrives with a _ placeholder to retag', hint: 'B: branch around' },
+			{ keys: 'O', does: 'OR (also the toolbar\'s OR): several selected elements become ONE branch with a leg each; a selected branch gets one more leg; one element gets a 2-leg OR around it', hint: 'O: OR' },
 			{ keys: 'Ctrl + C / X / V', does: 'Copy, cut, paste an element or a whole rung (its name selected) — pastes after the selection, into another ladder too; a pasted rung gets the next name (m1 → m2) and renamed blocks', hint: 'Ctrl+C/X/V: copy cut paste' },
 			{ keys: 'Esc', does: 'Cancel a drag', hint: 'Esc: cancel drag' }
 		]

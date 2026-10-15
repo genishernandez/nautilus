@@ -26,7 +26,8 @@
 		taken = new Set<string>(),
 		net = undefined,
 		tags = [],
-		ghostSpot = () => ({ x: 40, y: 40 })
+		ghostSpot = () => ({ x: 40, y: 40 }),
+		post = postOp
 	}: {
 		open?: boolean;
 		vars?: VarDecl[];
@@ -47,6 +48,8 @@
 		net?: string;
 		/** Where a new ghost chip goes: visible, clear of other ghosts. */
 		ghostSpot?: () => { x: number; y: number };
+		/** Where every op goes (the editor arms an insert's placement). */
+		post?: (op: FbdEditOp) => void;
 	} = $props();
 
 	// What a field completes against: declared tags (optionally comma-lists),
@@ -220,7 +223,7 @@
 		// An emptied args field still gets the open pins — a call needs an
 		// argument list to be a block at all.
 		const args = v.args || (known ? openArgs(known) : '');
-		postOp(into({ type: 'insertStatement', text: `${v.inst} : ${v.type}(${args})` }));
+		post(into({ type: 'insertStatement', text: `${v.inst} : ${v.type}(${args})` }));
 		open = false;
 		active = null;
 	}
@@ -238,7 +241,7 @@
 
 	function commit() {
 		if (!active || active.picker) return;
-		postOp(into(active.op ? active.op(values) : { type: 'insertStatement', text: active.build!(values) }));
+		post(into(active.op ? active.op(values) : { type: 'insertStatement', text: active.build!(values) }));
 		open = false;
 		active = null;
 	}

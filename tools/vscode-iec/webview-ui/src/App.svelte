@@ -27,9 +27,10 @@
 	import SfcView from './SfcView.svelte';
 	import { diffSfc, normalizeSfc, type SfcModel } from './sfc';
 	import { layout, normalizeFbd, type FbdModel, type FbdNode as ModelNode, type VarDecl } from './layout';
+	import { besideSpot, planPlacement, snapshot, type Snapshot } from './placement';
 	import type { FbCatalogType, FbInst } from './suggest';
 	import { mergeDiff } from './diff';
-	import { vscode, postOp, pouFromFile, setSeedPou, withSeed } from './vscodeApi';
+	import { vscode, postOp, pouFromFile, setSeedPou, withSeed, type FbdEditOp } from './vscodeApi';
 	import { setRects, updateRect } from './diagState.svelte';
 	import { live, setLive, setVarBounds } from './liveState.svelte';
 	import type { FlatTypes } from '../../src/tagTypes';
@@ -110,6 +111,18 @@
 		}
 		return { x, y };
 	}
+	// Screen → canvas (FitController binds it): a double-click's point.
+	let toFlow = $state<((p: { x: number; y: number }) => { x: number; y: number }) | undefined>();
+	// Where the next palette insert lands (#78): the double-clicked canvas
+	// point, or beside the selection when "+ add" opened the palette;
+	// undefined → auto-layout places it.
+	let placeAt: { x: number; y: number } | undefined;
+	// An insert in flight: the layout as it was when it was posted, and
+	// where it should land — planPlacement turns the model that comes back
+	// into ONE setLayout (placement.ts). Stale after a few seconds (an
+	// insert the CLI refused never brings a model back).
+	let pendingPlace: { before: Snapshot; spot?: { x: number; y: number }; at: number } | undefined;
+	let lastSnapshot: Snapshot | undefined;
 	// Node positions as last rendered — arrow-key moves persist only the
 	// nodes that actually moved.
 	let placedAt = new Map<string, { x: number; y: number }>();
@@ -251,10 +264,42 @@
 		if (lastModel && !diffing) render(lastModel, false);
 	}
 
+	// The model an insert brought back: pin the new elements where they
+	// were asked to land and arranged networks where they were — ONE
+	// setLayout, and the render uses those positions at once, so nothing
+	// visibly jumps before the op round-trips.
+	function placeInsert(model: FbdModel): FbdModel {
+		const p = pendingPlace;
+		pendingPlace = undefined;
+		if (!p || Date.now() - p.at > 8000) return model;
+		const auto = layout(withOpenEno(model));
+		const pinnedIds = new Set(model.nodes.filter((n) => n.x !== undefined && n.y !== undefined).map((n) => n.id));
+		const entries = planPlacement(
+			p.before,
+			auto.placed.map((n) => ({ ...n, pinned: pinnedIds.has(n.id) })),
+			auto.edges,
+			p.spot
+		);
+		if (!entries.length) return model;
+		postOp({ type: 'setLayout', entries });
+		const at = new Map(entries.map((e) => [e.node, e]));
+		return {
+			...model,
+			nodes: model.nodes.map((n) => (at.has(n.id) ? { ...n, x: at.get(n.id)!.x, y: at.get(n.id)!.y } : n))
+		};
+	}
+
 	function render(model: FbdModel, isDiff: boolean) {
 		if (!isDiff) lastModel = model;
 		if (!isDiff && activeNet && !model.networks?.some((nw) => 'n:' + nw.number === activeNet)) activeNet = undefined;
 		const { placed, edges: modelEdges, laneIdx, frames } = layout(isDiff ? model : withOpenEno(model));
+		if (!isDiff) {
+			const pinnedIds = new Set(model.nodes.filter((n) => n.x !== undefined && n.y !== undefined).map((n) => n.id));
+			lastSnapshot = snapshot(
+				placed.map((n) => ({ ...n, pinned: pinnedIds.has(n.id) })),
+				modelEdges
+			);
+		}
 		const editable = !isDiff;
 		// Join the compiler's squiggles onto nodes by source line — the same
 		// message the text editor shows, as a badge + tooltip on the block.
@@ -429,7 +474,7 @@
 			error = '';
 			ldModel = null;
 			sfcModel = null;
-			render(normalizeFbd(msg.model), false);
+			render(placeInsert(normalizeFbd(msg.model)), false);
 		} else if (msg.type === 'diff') {
 			mode = 'fbd';
 			title = (msg.head.name ? msg.head.name + ' — ' : '') + (msg.title ?? '');
@@ -586,6 +631,48 @@
 	if (injectedSfc) show({ type: 'sfcModel', model: injectedSfc, title: 'harness' });
 	const injectedLd = (window as unknown as { __LD_MODEL__?: LdModel }).__LD_MODEL__;
 	if (injectedLd) show({ type: 'ldModel', model: injectedLd, title: 'harness' });
+
+	// ── the palette: where an insert lands (#78) ───────────────────────────
+	// "+ add" with something selected: beside it. A double-click on empty
+	// canvas: right there. Otherwise auto-layout's choice.
+	function openPalette(at?: { x: number; y: number }) {
+		if (at) placeAt = at;
+		else {
+			const sel = nodes.filter((n) => n.selected && knownIds.has(n.id));
+			const rects = sel.map((n) => {
+				const pn = (n.data as { n?: { w: number } })?.n;
+				return { x: n.position.x, y: n.position.y, w: pn?.w ?? 0 };
+			});
+			placeAt = besideSpot(rects);
+		}
+		paletteOpen = true;
+		varsOpen = false;
+	}
+	function ondblclickcanvas(ev: MouseEvent) {
+		if (diffing || mode !== 'fbd' || !toFlow) return;
+		// Empty canvas only: a node's or a band header's double-click is
+		// its own (edit, rename).
+		const t = ev.target as Element | null;
+		if (!t?.closest('.svelte-flow__pane') || t.closest('.svelte-flow__node, .svelte-flow__edge')) return;
+		ev.stopPropagation();
+		openPalette(toFlow({ x: ev.clientX, y: ev.clientY }));
+	}
+	// Every palette op goes out here: an insert arms the placement its
+	// model will get; a ghost chip (a setLayout of a g: id) lands at the
+	// same spot when there is one.
+	function postPalette(op: FbdEditOp) {
+		if (op.type === 'insertStatement' && lastSnapshot) {
+			pendingPlace = { before: lastSnapshot, spot: placeAt, at: Date.now() };
+		} else if (op.type === 'setLayout' && placeAt && op.entries?.length === 1 && op.entries[0].node.startsWith('g:')) {
+			op = { ...op, entries: [{ node: op.entries[0].node, ...placeAt }] };
+		}
+		placeAt = undefined;
+		postOp(op);
+	}
+	$effect(() => {
+		// Closed without inserting: the asked-for spot goes with it.
+		if (!paletteOpen) placeAt = undefined;
+	});
 
 	// ── gestures → ops ──────────────────────────────────────────────────────
 	function onconnect(c: Connection) {
@@ -828,7 +915,7 @@
 			<ShortcutHelp groups={shortcutGroups} />
 			<button title="All header declarations, including ones the logic doesn't reference yet" onclick={(e) => { e.stopPropagation(); varsOpen = !varsOpen; paletteOpen = false; }}>vars</button>
 			{#if mode === 'fbd'}
-				<button title="Insert an instruction" onclick={(e) => { e.stopPropagation(); paletteOpen = !paletteOpen; varsOpen = false; }}>+ add</button>
+				<button title="Insert an instruction — it lands beside the selected element; double-click empty canvas to insert right there" onclick={(e) => { e.stopPropagation(); if (paletteOpen) paletteOpen = false; else openPalette(); }}>+ add</button>
 			{/if}
 		{/if}
 	</div>
@@ -872,7 +959,8 @@
 		     says why; no FBD canvas (or its "+ add") in its place -->
 		<div class="flow"></div>
 	{:else}
-	<div class="flow" class:stale={!!error}>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="flow" class:stale={!!error} ondblclick={ondblclickcanvas}>
 		<SvelteFlow
 			bind:nodes
 			bind:edges
@@ -884,7 +972,6 @@
 			{onnodedragstop}
 			{onselectionchange}
 			zoomOnDoubleClick={false}
-			fitView
 			minZoom={0.15}
 			colorMode={themeColorMode.mode}
 			deleteKey={['Delete', 'Backspace']}
@@ -893,11 +980,11 @@
 			<Background />
 			<MiniMap pannable zoomable />
 			<Controls />
-			<FitController {structureKey} bind:centre={viewCentre} />
+			<FitController {structureKey} frameKey={(diffing ? 'diff:' : '') + title} bind:centre={viewCentre} bind:toFlow />
 		</SvelteFlow>
 	</div>
 	{/if}
-	<Palette bind:open={paletteOpen} vars={varList} tags={projectTags} {fbTypes} funcs={userFuncs} insts={fbInsts} taken={takenNames} {ghostSpot} net={mode === 'fbd' ? activeNet : undefined} />
+	<Palette bind:open={paletteOpen} vars={varList} tags={projectTags} {fbTypes} funcs={userFuncs} insts={fbInsts} taken={takenNames} {ghostSpot} net={mode === 'fbd' ? activeNet : undefined} post={postPalette} />
 	<VarsPanel
 		bind:open={varsOpen}
 		vars={varList}

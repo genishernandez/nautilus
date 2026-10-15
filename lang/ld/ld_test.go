@@ -1240,3 +1240,55 @@ END_PROGRAM
 		t.Fatalf("emitted FBD does not graph: %v", err)
 	}
 }
+
+func TestLadderWrapOr(t *testing.T) {
+	src := `PROGRAM p
+VAR_EXTERNAL A : BOOL; B : BOOL; C : BOOL; D : BOOL; Out : BOOL; END_VAR
+LD
+  RUNG r
+    A B C D ( Out )
+END_LD
+END_PROGRAM`
+	// Three selected elements → ONE branch of three legs, in series order,
+	// in place of the first; the paths' order doesn't matter.
+	edits, err := ApplyEdit(src, EditOp{Type: "wrapOr", Rung: "r", Paths: [][]int{{3}, {1}, {2}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := applyTextEdits(src, edits)
+	if !strings.Contains(out, "A [ B | C | D ] ( Out )") {
+		t.Fatalf("wrapOr:\n%s", out)
+	}
+	// A gap closes up: the unselected element stays in series after it.
+	edits, err = ApplyEdit(src, EditOp{Type: "wrapOr", Rung: "r", Paths: [][]int{{0}, {2}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applyTextEdits(src, edits); !strings.Contains(got, "[ A | C ] B D ( Out )") {
+		t.Fatalf("wrapOr with a gap:\n%s", got)
+	}
+	// Elements of two different legs are not one series.
+	edits, err = ApplyEdit(out, EditOp{Type: "wrapOr", Rung: "r", Paths: [][]int{{1, 0, 0}, {1, 1, 0}}})
+	if err == nil {
+		t.Fatalf("elements of DIFFERENT legs must be refused, got %v", edits)
+	}
+	for _, bad := range []EditOp{
+		{Type: "wrapOr", Rung: "r", Paths: [][]int{{1}}},
+		{Type: "wrapOr", Rung: "r", Paths: [][]int{{1}, {1}}},
+		{Type: "wrapOr", Rung: "r", Paths: [][]int{{1}, {9}}},
+		{Type: "wrapOr", Rung: "r", Paths: [][]int{{1}, {2}}, Coil: coilIdx(0)},
+	} {
+		if _, err := ApplyEdit(src, bad); err == nil {
+			t.Fatalf("%+v must be refused", bad)
+		}
+	}
+	// Nested: two contacts in one leg of an existing branch.
+	nested := strings.Replace(src, "A B C D ( Out )", "[ A B | C ] D ( Out )", 1)
+	edits, err = ApplyEdit(nested, EditOp{Type: "wrapOr", Rung: "r", Paths: [][]int{{0, 0, 0}, {0, 0, 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applyTextEdits(nested, edits); !strings.Contains(got, "[ [ A | B ] | C ] D ( Out )") {
+		t.Fatalf("wrapOr in a leg:\n%s", got)
+	}
+}

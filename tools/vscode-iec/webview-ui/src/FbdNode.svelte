@@ -383,6 +383,16 @@
 		border: none;
 		opacity: 0.65;
 	}
+	/* A hit area larger than the 7 px dot (#79): a pin can be grabbed —
+	   and a wire dropped on it — within 5 canvas px of the dot, at any
+	   zoom. 17 px stays under the 18 px pin pitch, so neighbours never
+	   overlap. */
+	:global(.svelte-flow__handle)::before {
+		content: '';
+		position: absolute;
+		inset: -5px;
+		border-radius: 50%;
+	}
 	:global(.svelte-flow__handle.plus-handle) {
 		background: transparent;
 		border: 1.2px dashed var(--nx-blue);

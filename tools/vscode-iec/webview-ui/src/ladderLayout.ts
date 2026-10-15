@@ -59,8 +59,23 @@ export type LSpot = {
 	index?: number;
 	branch?: number[];
 };
+/** A parallel branch (an OR): its box spans both rails and every leg, so
+ * the view can draw it as ONE element — a wrapper around its legs that
+ * selects, deletes and grows (addLeg) like any other element. */
+export type LBranch = {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	ann: Ann;
+	/** The branch element's address in the rung tree (like LNode.path). */
+	path: number[];
+	/** Each leg's centerline (the first rides the parent series' wire). */
+	legYs: number[];
+};
 export type RungLayout = {
 	nodes: LNode[];
+	branches: LBranch[];
 	wires: LWire[];
 	vlines: LVLine[];
 	spots: LSpot[];
@@ -71,6 +86,7 @@ export type RungLayout = {
 
 type Res = {
 	nodes: LNode[];
+	branches: LBranch[];
 	wires: LWire[];
 	vlines: LVLine[];
 	spots: LSpot[];
@@ -175,6 +191,7 @@ function reserveWasLabel(a: Ann, cy: number, nodeY: number, nodeH: number, desce
  * path addresses this series in the rung tree ([] = the root). */
 export function layoutSeries(anns: Ann[], x: number, cy: number, path: number[] = []): Res {
 	const nodes: LNode[] = [];
+	const branches: LBranch[] = [];
 	const wires: LWire[] = [];
 	const vlines: LVLine[] = [];
 	const spots: LSpot[] = [];
@@ -186,7 +203,7 @@ export function layoutSeries(anns: Ann[], x: number, cy: number, path: number[] 
 		// An empty leg is a straight, always-true wire with reserved width.
 		wires.push({ x1: cursor, y1: cy, x2: cursor + L.EMPTY_LEG_W, y2: cy, on: undefined });
 		spots.push({ x: cursor + L.EMPTY_LEG_W / 2, y: cy, op: 'insert', series: path, index: 0 });
-		return { nodes, wires, vlines, spots, width: L.EMPTY_LEG_W, ascent, descent };
+		return { nodes, branches, wires, vlines, spots, width: L.EMPTY_LEG_W, ascent, descent };
 	}
 
 	anns.forEach((a, i) => {
@@ -261,6 +278,7 @@ export function layoutSeries(anns: Ann[], x: number, cy: number, path: number[] 
 					legYs.push(pen);
 					const r = layoutSeries(leg, cursor, pen, [...elPath, li]);
 					nodes.push(...r.nodes);
+					branches.push(...r.branches);
 					wires.push(...r.wires);
 					vlines.push(...r.vlines);
 					spots.push(...r.spots);
@@ -282,6 +300,20 @@ export function layoutSeries(anns: Ann[], x: number, cy: number, path: number[] 
 				const lastProbe = legs[legs.length - 1];
 				const legSpotY = bottom + lastProbe.descent + 2;
 				spots.push({ x: cursor + maxW / 2, y: legSpotY, op: 'leg', branch: elPath });
+				// The branch's own box: just outside rail to rail (a strip a
+				// leg's elements never cover, so the rails are always a place
+				// to click the branch itself), first leg's labels to the last
+				// leg's (the add-leg spot sits just under it).
+				const boxTop = top - legs[0].ascent;
+				branches.push({
+					x: cursor - 8,
+					y: boxTop,
+					w: maxW + 16,
+					h: bottom + lastProbe.descent - boxTop,
+					ann: a,
+					path: elPath,
+					legYs
+				});
 				// Extents: legs below the centerline deepen the descent.
 				const depth = bottom - cy + lastProbe.descent + 14; // room for the leg spot
 				if (depth > descent) descent = depth;
@@ -294,7 +326,7 @@ export function layoutSeries(anns: Ann[], x: number, cy: number, path: number[] 
 	// End-of-series insert point (start inserts use index 0 via the first gap
 	// or, for the root, the rail feed spot emitted by layoutRung).
 	spots.push({ x: cursor + 6, y: cy, op: 'insert', series: path, index: anns.length });
-	return { nodes, wires, vlines, spots, width: cursor - x, ascent, descent };
+	return { nodes, branches, wires, vlines, spots, width: cursor - x, ascent, descent };
 }
 
 /** Measure a rung's natural width (logic + coil zone) for the canvas pass. */
@@ -348,5 +380,5 @@ export function layoutRung(elems: Ann[], coils: Ann[], width: number): RungLayou
 	wires.push({ x1: cx, y1: wireY, x2: width - L.RAIL_X, y2: wireY, on: outPower });
 	spots.push({ x: (cx + width - L.RAIL_X) / 2, y: wireY, op: 'coil', index: coils.length });
 
-	return { nodes, wires, vlines, spots, width, height: wireY + descent + L.RUNG_PAD_Y / 2, wireY };
+	return { nodes, branches: r.branches, wires, vlines, spots, width, height: wireY + descent + L.RUNG_PAD_Y / 2, wireY };
 }

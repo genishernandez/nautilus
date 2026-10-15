@@ -138,8 +138,16 @@ vt() {
 # ── the project: the Demo template + a blank chart and a blank mimic ────────
 ext_scaffold my-plant
 : >"$PROJ/station.sfc"
+# A program too big to fit readably (#79): 40 networks of AND → coil.
+{
+  echo "PROGRAM Big"; echo "VAR"
+  for i in $(seq 0 39); do echo "  i$i : BOOL; j$i : BOOL; o$i : BOOL;"; done
+  echo "END_VAR"; echo "FBD"
+  for i in $(seq 0 39); do echo "  o$i := AND(i$i, j$i)"; done
+  echo "END_FBD"; echo "END_PROGRAM"
+} >"$PROJ/big.fbd"
 printf '{\n\t"name": "Lift station",\n\t"canvas": { "width": 940, "height": 420 },\n\t"equipment": [],\n\t"pipes": []\n}\n' >"$PROJ/lift.mimic.json"
-git -C "$PROJ" add -A; git -C "$PROJ" commit -qm "blank chart and mimic"
+git -C "$PROJ" add -A; git -C "$PROJ" commit -qm "blank chart, mimic and a big FBD"
 
 ext_open
 hide_sidebar
@@ -193,6 +201,15 @@ vt ld_rename_block PASS ld_rename_block pump_run t2 t_run
 vt ld_add_contact-undeclared PASS ld_add_contact pump_run SpareFlag
 vt ld_declare PASS ld_declare SpareFlag VAR
 vt ld_add_branch PASS ld_add_branch pump_run HornAck TempLowAlm
+# A 3-leg OR in one step (#91): three contacts in series, Ctrl-click them
+# all, O; then the branch's own rails, O, for a fourth leg.
+vt ld_add_rung-ors PASS ld_add_rung ors
+vt ld_add_contact-or1 PASS ld_add_contact ors HornAck
+vt ld_add_contact-or2 PASS ld_add_contact ors TempLowAlm
+vt ld_add_contact-or3 PASS ld_add_contact ors HiTempAlm
+vt ld_or_select PASS ld_or_select ors HornAck TempLowAlm HiTempAlm
+vt ld_branch_or_leg PASS ld_branch_or_leg ors
+vt ld_delete_rung-ors PASS ld_delete_rung ors
 # A rung that calls a block needs no coil: its "( _ )" deletes outright
 vt ld_add_rung-starter PASS ld_add_rung starter
 vt ld_add_block-starter PASS ld_add_block starter TON t3 "PT := T#2S"
@@ -228,7 +245,13 @@ vt ld_vars_rename PASS ld_vars_rename Spare Spare2
 vt ld_vars_delete PASS ld_vars_delete Spare2
 
 # ── FBD: the Demo's program.fbd ─────────────────────────────────────────────
+# The opening frame (#79): a big program opens at the readable floor, and
+# Ctrl+0 still fits it all.
+vt ed_open_diagram-big PASS ed_open_diagram big.fbd
+vt fbd_open_zoom-big PASS fbd_open_zoom 0.9
+vt fbd_fit_all PASS fbd_fit_all 0.9
 vt ed_open_diagram-fbd PASS ed_open_diagram program.fbd
+vt fbd_open_zoom PASS fbd_open_zoom 0.9
 vt fbd_add_block PASS fbd_add_block AND both
 vt fbd_zoom_to PASS fbd_zoom_to both 2
 vt fbd_wire PASS fbd_wire low.OUT both.IN1
@@ -238,6 +261,9 @@ vt fbd_add_comment PASS fbd_add_comment "Both conditions, for the lift station"
 # picker: every PID input lands open (`lic : PID(AUTO := _, PV := _, …)`)
 # and the file still parses.
 vt fbd_add_block-PID PASS fbd_add_block PID lic
+# Insert at a point (#78): double-click empty canvas, "+ add" → block →
+# wire there; it lands at the click, pinned.
+vt fbd_add_block_at PASS fbd_add_block_at OR either auto
 # A drag pins the node (F11): its `(* @layout *)` entry, in flow units.
 # Down and right, into the canvas: `both` sits near the top of the fitted
 # view, and a drop near the pane's edge auto-pans (the verb allows for it,
