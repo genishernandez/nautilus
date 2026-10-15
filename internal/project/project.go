@@ -133,6 +133,10 @@ type LogixTarget struct {
 	Program string `yaml:"program"`
 	Routine string `yaml:"routine"`
 	Task    string `yaml:"task"`
+	// Continuous schedules the program in a CONTINUOUS Logix task, as
+	// the controller it was imported from did; the task's scan: is then
+	// only nautilus's own rate. Default false: a PERIODIC task at scan:.
+	Continuous bool `yaml:"continuous"`
 	// Side is the side code nautilus adds beside the program, in a Logix
 	// program of its own: testing, verification and metrics logic that
 	// never touches the user's routine.

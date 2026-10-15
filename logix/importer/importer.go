@@ -89,7 +89,8 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	}
 	c := f.Controller
 	p := &Project{Files: map[string][]byte{}}
-	im := &importer{file: f, opts: opts, proj: p, aois: map[string]*l5x.AddOnInstruction{}, ctrl: map[string]*l5x.Tag{}}
+	im := &importer{file: f, opts: opts, proj: p, aois: map[string]*l5x.AddOnInstruction{}, ctrl: map[string]*l5x.Tag{},
+		moved: map[string]bool{}, external: map[string]bool{}}
 	for _, a := range c.AOIs {
 		im.aois[strings.ToLower(a.Name)] = a
 	}
@@ -135,8 +136,8 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 		if task == nil {
 			p.note(prog.Name, -1, "unscheduled", "the program is in no task; imported with the default scan")
 		}
-		for _, file := range im.importProgram(prog) {
-			tasks = append(tasks, manifestTask{File: file, Task: task})
+		for _, pf := range im.importProgram(prog) {
+			tasks = append(tasks, manifestTask{progFile: pf, Task: task})
 		}
 	}
 
@@ -146,11 +147,18 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range tags {
-		if im.written[strings.ToLower(tags[i].Name)] {
-			tags[i].Role = "output"
+	kept := tags[:0]
+	for _, t := range tags {
+		k := strings.ToLower(t.Name)
+		if im.moved[k] && !im.external[k] {
+			continue // a block instance now, declared by its program
 		}
+		if im.written[k] {
+			t.Role = "output"
+		}
+		kept = append(kept, t)
 	}
+	tags = kept
 	// Rack points the logic named directly (Local:1:I.Data.3) become alias
 	// tags: the program names the tag, the manifest carries the binding.
 	names := make([]string, 0, len(im.ioAliases))
@@ -229,6 +237,11 @@ type importer struct {
 	// written collects controller tags the imported logic drives, for
 	// the tag file's roles.
 	written map[string]bool
+	// moved are controller tags declared as block instances in a program
+	// (program-scoped in nautilus); external are controller tags some
+	// program declares VAR_EXTERNAL. A moved tag nothing names as a tag
+	// stays out of the tag file.
+	moved, external map[string]bool
 	// ioAliases are the alias tags the import made for rack points the
 	// logic named directly: tag name → Logix operand.
 	ioAliases map[string]string
@@ -255,7 +268,7 @@ func declaredTypes(src string) map[string]bool {
 }
 
 type manifestTask struct {
-	File string
+	progFile
 	Task *l5x.Task
 }
 
@@ -311,10 +324,20 @@ func (im *importer) manifest(tasks []manifestTask) []byte {
 		fmt.Fprintf(&b, "    host: %s\n", im.opts.Host)
 	}
 	if len(tasks) == 1 {
-		// One program: tell the writer its Logix names, so a deploy puts
-		// it back where it was.
-		if t := tasks[0]; t.Task != nil {
+		// One program: tell the writer its Logix names, so a deploy (or
+		// `naut logix write`) puts it back where it was.
+		t := tasks[0]
+		if t.Program != "" && t.Program != l5x.Ident(t.Program) {
+			fmt.Fprintf(&b, "    program: %s\n", t.Program)
+		}
+		if t.Routine != "" && t.Routine != "MainRoutine" {
+			fmt.Fprintf(&b, "    routine: %s\n", t.Routine)
+		}
+		if t.Task != nil {
 			fmt.Fprintf(&b, "    task: %s\n", t.Task.Name)
+			if t.Task.Type == "CONTINUOUS" {
+				b.WriteString("    continuous: true\n")
+			}
 		}
 	}
 	return []byte(b.String())

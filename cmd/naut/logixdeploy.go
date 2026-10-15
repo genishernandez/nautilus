@@ -105,12 +105,16 @@ func loadLogixProject(dir string) (*logixProject, error) {
 	if tgt.Side != nil {
 		side.Heartbeat = tgt.Side.Heartbeat
 	}
+	period := int(time.Duration(task.Scan) / time.Millisecond)
+	if tgt.Continuous {
+		period = 0
+	}
 	return &logixProject{
 		dir: dir, program: progPath, source: string(src),
 		target: deploy.Target{
 			Controller: tgt.Controller, Processor: tgt.Processor, Revision: tgt.Revision,
 			Program: tgt.Program, Routine: tgt.Routine, Task: tgt.Task,
-			PeriodMs: int(time.Duration(task.Scan) / time.Millisecond),
+			PeriodMs: period,
 			CommPath: tgt.CommPath, Libs: libs, Inits: inits, Descs: descs, Aliases: aliases, Tags: tags, Side: side,
 			Language: writer.Language(progPath),
 		},

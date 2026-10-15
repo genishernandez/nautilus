@@ -218,8 +218,11 @@ func rungComment(text string) (header string, lines []string) {
 
 var blockInstr = map[string]bool{"TON": true, "TOF": true, "RTO": true, "CTU": true, "CTD": true}
 
-// importProgram emits one POU per routine and returns their file names.
-func (im *importer) importProgram(prog *l5x.Program) []string {
+// progFile is one imported routine: the file it became and where it was.
+type progFile struct{ File, Program, Routine string }
+
+// importProgram emits one POU per routine and returns their files.
+func (im *importer) importProgram(prog *l5x.Program) []progFile {
 	local := map[string]*l5x.Tag{}
 	for _, t := range prog.Tags {
 		local[strings.ToLower(t.Name)] = t
@@ -253,7 +256,7 @@ func (im *importer) importProgram(prog *l5x.Program) []string {
 			})
 		}
 	}
-	var files []string
+	var files []progFile
 	for _, r := range logic {
 		sc := &scope{owner: prog.Name + "/" + r.Name, local: local, ctrl: im.ctrl, blockOwner: owners, im: im}
 		name := l5x.Ident(prog.Name)
@@ -272,7 +275,7 @@ func (im *importer) importProgram(prog *l5x.Program) []string {
 			file = im.fileName(name, ".ld")
 			im.proj.Files[file] = p.source()
 		}
-		files = append(files, file)
+		files = append(files, progFile{File: file, Program: prog.Name, Routine: r.Name})
 	}
 	if multi {
 		im.proj.note(prog.Name, -1, "promoted", fmt.Sprintf("%d routines: the program's tags become controller tags named %s_<Tag>, one PROGRAM per routine", len(logic), l5x.Ident(prog.Name)))
@@ -509,6 +512,7 @@ func (im *importer) declareFound(sc *scope, p *pou, f *found, blockType string) 
 		d := decl{Name: l5x.Ident(f.tag.Name), Type: typ, Section: "VAR", Comment: firstLine(f.tag.Description)}
 		if f.ext && sc.ctrl != nil {
 			d.Comment = strings.TrimSpace("controller-scoped in the export; a block instance is program-scoped in nautilus. " + d.Comment)
+			im.movedInstance(f)
 		}
 		p.declare(d)
 		return true
@@ -525,11 +529,15 @@ func (im *importer) declareFound(sc *scope, p *pou, f *found, blockType string) 
 		}
 		if f.ext && sc.ctrl != nil {
 			d.Comment = strings.TrimSpace("controller-scoped in the export; a block instance is program-scoped in nautilus. " + d.Comment)
+			im.movedInstance(f)
 		}
 		p.declare(d)
 		return true
 	}
 	if f.ext {
+		if f.tag != nil {
+			im.external[strings.ToLower(f.tag.Name)] = true
+		}
 		d.Section = "VAR_EXTERNAL"
 		d.Comment = ""
 	} else if f.tag != nil {
@@ -537,6 +545,16 @@ func (im *importer) declareFound(sc *scope, p *pou, f *found, blockType string) 
 	}
 	p.declare(d)
 	return true
+}
+
+// movedInstance records a controller tag the import declared as a block
+// instance inside a program: it is program-scoped now, so the tag file
+// must not also carry it, or every program declaring it shadows a
+// project tag of the same name.
+func (im *importer) movedInstance(f *found) {
+	if f.tag != nil && im.ctrl[strings.ToLower(f.tag.Name)] == f.tag {
+		im.moved[strings.ToLower(f.tag.Name)] = true
+	}
 }
 
 func descOf(f *found) string {

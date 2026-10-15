@@ -240,6 +240,25 @@ definition, is refused by name. A rung with no nautilus form is kept
 as a comment and reported, never guessed at. `--comm-path` and `--host`
 fill in how to reach the controller.
 
+To check what came in, write it back and compare the logic with the
+export:
+
+```bash
+naut logix write -o back.L5X line/MainProgram.ld
+naut logix normalize --logic --check back.L5X Line.L5X
+```
+
+The write takes the controller, processor, revision, program, routine and
+task (`continuous: true` for a continuous one) from the imported
+`target: logix`, and each tag's initial value and description from the
+tag file. `--logic` compares programs, routines, rung text and comments,
+and each tag's name, scope and type, and lists every difference; the two
+files' envelopes always differ (the writer emits a whole project). Two
+differences are expected on any import: a timer or counter that was
+controller-scoped comes back program-scoped (a block instance is
+program-scoped in nautilus), and a controller tag no imported routine
+names is not written back.
+
 On a corpus of 52 real production exports, 97.9% of rungs import, 81% of
 ladder routines import whole, and most complete routines write back
 identically or equivalently. The largest remaining gap is messaging:
@@ -276,8 +295,9 @@ its logic with what was sent (`naut logix drift --logic`). `--keep DIR`
 keeps the generated L5X, the built ACD and the before/after uploads.
 
 `naut logix mode [--yes run|program] <project-dir>` reads or changes the
-controller's mode. `naut logix write program.ld` writes an L5X without a
-project, for inspection.
+controller's mode. `naut logix write program.ld` writes the L5X without
+logixd, for inspection: for a project's task program it is what deploy
+would send, and its flags override the manifest.
 
 **`naut test --target logix`** runs the project's
 [acceptance tests](https://github.com/joyautomation/nautilus/blob/main/docs/testing.md#against-a-logix-controller) against the controller over

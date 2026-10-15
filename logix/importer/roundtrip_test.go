@@ -28,6 +28,11 @@ import (
 // in logix/writer pins). Both are the less-than instruction. Nothing
 // differs beyond that; the comparison below is not loosened for it, the
 // LES spelling is the single named exception.
+//
+// The user's flow at the CLI — import --project, write, normalize --logic
+// --check — and the whole-project differences it leaves (tags, values,
+// descriptions, the envelope) are pinned by cmd/naut's
+// TestLogixRoundTripYardstickCLI (#276).
 func TestRoundTripPublicYardstick(t *testing.T) {
 	orig, err := l5x.ParseFile(filepath.Join("..", "..", "examples", "batch-skid", "line", "Line.L5X"))
 	if err != nil {
@@ -41,6 +46,17 @@ func TestRoundTripPublicYardstick(t *testing.T) {
 		t.Errorf("import notes: %+v", p.Notes)
 	}
 	libs := libsOf(p)
+	// The manifest says where the program goes back to (the routine, a
+	// CONTINUOUS task), and the timer the program now owns is not also a
+	// project tag.
+	for _, want := range []string{"    routine: Receive\n", "    task: MainTask\n", "    continuous: true\n"} {
+		if !strings.Contains(string(p.Files["nautilus.yaml"]), want) {
+			t.Errorf("nautilus.yaml lacks %q:\n%s", want, p.Files["nautilus.yaml"])
+		}
+	}
+	if strings.Contains(string(p.Files["tags/logix.yaml"]), "AcceptTmr") {
+		t.Errorf("tags/logix.yaml carries the program's timer:\n%s", p.Files["tags/logix.yaml"])
+	}
 
 	var identical, equivalent, differ []string
 	var total int
