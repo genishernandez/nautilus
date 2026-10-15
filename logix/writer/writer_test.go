@@ -555,8 +555,8 @@ func TestUserDefinedTypeRejections(t *testing.T) {
 }
 
 // The §7a yardstick: batch-skid's line/Line.L5X, written as nautilus,
-// comes out as the export's own rung text — with its LES caption spelled
-// the way Logix actually spells it.
+// comes out as the export's own rung text, byte for byte (#372 corrected
+// the example's rung 0 from the editor caption LES to the neutral LT).
 func TestYardstickMatchesLineL5X(t *testing.T) {
 	dir := filepath.Join("testdata", "conformance", "yardstick")
 	src, err := os.ReadFile(filepath.Join(dir, "Receive.ld"))
@@ -575,9 +575,8 @@ func TestYardstickMatchesLineL5X(t *testing.T) {
 		t.Fatalf("%d rungs, want %d", len(got), len(ref))
 	}
 	for i := range ref {
-		w := strings.Replace(ref[i].Text, "LES(", "LT(", 1)
-		if got[i].Text != w {
-			t.Errorf("rung %d\n got %s\nwant %s", i, got[i].Text, w)
+		if got[i].Text != ref[i].Text {
+			t.Errorf("rung %d\n got %s\nwant %s", i, got[i].Text, ref[i].Text)
 		}
 	}
 	if len(f.Controller.DataTypes) != 1 || f.Controller.DataTypes[0].Name != "LineStatus" {

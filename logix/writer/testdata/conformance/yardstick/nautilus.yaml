@@ -1,6 +1,6 @@
 # The §7a yardstick: batch-skid's line/Line.L5X — the "existing" line
 # controller the skid talks to — written as a nautilus project. Its five
-# rungs come out of the writer as the export's own text, LES spelled LT.
+# rungs come out of the writer as the export's own text, byte for byte.
 name: yardstick-line
 tasks:
   - program: Receive.ld

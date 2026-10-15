@@ -22,12 +22,9 @@ import (
 //
 // Current, documented state: Line.L5X has one program routine,
 // MainProgram/Receive (5 rungs), imported complete (no notes) and written
-// back EQUIVALENT, not identical: 4 rungs are byte-identical and rung 0
-// differs only in the comparison's caption, the export's LES(a,b) coming
-// back as LT(a,b) (the same spelling difference TestYardstickMatchesLineL5X
-// in logix/writer pins). Both are the less-than instruction. Nothing
-// differs beyond that; the comparison below is not loosened for it, the
-// LES spelling is the single named exception.
+// back IDENTICAL: every rung byte-identical. (Until #372 the example's
+// rung 0 spelled the editor caption LES, which came back as the neutral
+// LT the v38 SDK builds; the example now carries LT, as an export does.)
 //
 // The user's flow at the CLI — import --project, write, normalize --logic
 // --check — and the whole-project differences it leaves (tags, values,
@@ -58,7 +55,7 @@ func TestRoundTripPublicYardstick(t *testing.T) {
 		t.Errorf("tags/logix.yaml carries the program's timer:\n%s", p.Files["tags/logix.yaml"])
 	}
 
-	var identical, equivalent, differ []string
+	var identical, differ []string
 	var total int
 	for _, prog := range orig.Controller.Programs {
 		for _, r := range prog.Routines {
@@ -93,25 +90,16 @@ func TestRoundTripPublicYardstick(t *testing.T) {
 				identical = append(identical, name)
 				continue
 			}
-			// The one named equivalence: LES spelled LT by the writer.
-			if len(a) == len(b) {
-				same := true
-				for i := range a {
-					if strings.Replace(a[i], "LES(", "LT(", 1) != b[i] {
-						same = false
-						t.Errorf("%s rung %d differs:\n orig %s\n back %s", name, i, a[i], b[i])
-					}
-				}
-				if same {
-					equivalent = append(equivalent, name)
-					continue
+			for i := range a {
+				if i < len(b) && a[i] != b[i] {
+					t.Errorf("%s rung %d differs:\n orig %s\n back %s", name, i, a[i], b[i])
 				}
 			}
 			differ = append(differ, name)
 		}
 	}
-	if total != 1 || len(identical) != 0 || len(equivalent) != 1 || equivalent[0] != "MainProgram/Receive" || len(differ) != 0 {
-		t.Errorf("routines %d; identical %v; equivalent %v; differ %v; want 1 routine, MainProgram/Receive equivalent (LES->LT)", total, identical, equivalent, differ)
+	if total != 1 || len(identical) != 1 || identical[0] != "MainProgram/Receive" || len(differ) != 0 {
+		t.Errorf("routines %d; identical %v; differ %v; want 1 routine, MainProgram/Receive identical", total, identical, differ)
 	}
 }
 

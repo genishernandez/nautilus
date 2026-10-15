@@ -53,13 +53,10 @@ func TestLogixRoundTripYardstickCLI(t *testing.T) {
 	// (docs/design/logix-authoring.md, "Round trip on the yardstick"); a
 	// new one fails here.
 	out, code = capture(t, func() int { return runLogix([]string{"normalize", "--logic", "--check", back, src}) })
-	want := fmt.Sprintf(`4 logic difference(s) between %s (first) and %s (second):
+	want := fmt.Sprintf(`3 logic difference(s) between %s (first) and %s (second):
   tag AcceptTmr (TIMER): only on the first side
   tag Line_BatchId (DINT): only on the first side
   tag MainProgram.AcceptTmr (TIMER): only on the second side
-  routine MainProgram/Receive rung 0:
-    LES(Line_TankLevel,80.0)OTE(Line_Ready);
-    LT(Line_TankLevel,80.0)OTE(Line_Ready);
 `, src, back)
 	if code != 1 || out != want {
 		t.Errorf("logic check: exit %d\n%s\nwant\n%s", code, out, want)

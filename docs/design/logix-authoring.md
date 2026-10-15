@@ -356,7 +356,7 @@ corpus. Estimate was about a week; it took one session. Timebox not hit.
   mnemonics) are in the emit set.** The seventh, `LES`, is the editor
   caption, not neutral text (§21 of `logix-target.md`: it is `LT`), so
   that fixture would fail an SDK build exactly as DemoProgram's `GEQ` did —
-  worth a one-token fix in `examples/`. The real gap is the data model:
+  worth a one-token fix in `examples/` (made 2026-10-14, #372). The real gap is the data model:
   `Line.L5X` has one UDT (`Line_Status`) and a coil on its member, and v1
   has no UDTs. **Instruction set: covered. Types: not yet.**
 - *An instruction not equivalent and not rejectable* — none in v1. The two
@@ -628,7 +628,8 @@ loop; generated rungs online-edit; licence as recorded.
   One rule changed from a conformance finding (CTU ends its rung).
 - *The equivalent subset is too small to be useful* — the yardstick is
   batch-skid `line/Line.L5X`. Its instruction set is covered (all of
-  `XIC XIO OTE OTU TON GE`, plus `LT` once its `LES` caption is fixed),
+  `XIC XIO OTE OTU TON GE`, plus `LT` once its `LES` caption is fixed —
+  fixed 2026-10-14, #372),
   and every instruction family now has behavioural equivalence measured on
   Echo. What it cannot express is the UDT (`Line_Status` with a coil on a
   member). **Instructions: not a toy. Types: still v1.** Widening to UDTs
@@ -677,8 +678,9 @@ over EtherNet/IP that the controller's logic then acts on.
 
 **The yardstick, written:** `logix/writer/testdata/conformance/yardstick`
 is batch-skid's `line/Line.L5X` Receive routine as a nautilus project. The
-writer emits the export's rung text, with `LES` spelled `LT`
-(`TestYardstickMatchesLineL5X`). **Downloaded to Echo and run there: 3 of
+writer emits the export's rung text byte for byte
+(`TestYardstickMatchesLineL5X`; until #372 corrected the example's `LES`
+caption, with `LES` spelled `LT`). **Downloaded to Echo and run there: 3 of
 3 scenarios pass on both runtimes** (ready below 80 %, the 2 s settle
 before accept with a fault dropping it and raising the structure's alarm
 member, the high-level cutoff unlatching an accept the same scan the OTE
