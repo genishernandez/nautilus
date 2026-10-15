@@ -87,7 +87,7 @@ func TestAliasTagsInRungsImportAndRoundTrip(t *testing.T) {
 
 	// Written back with the tag file's bindings, as `naut logix deploy`
 	// passes them.
-	out, diags, err := writer.Write(src, writer.Options{Controller: "AliasLine", Program: "Main", Libs: libsOf(p), Aliases: aliases})
+	out, diags, err := writer.Write(src, writer.Options{Controller: "AliasLine", Program: "Main", Libs: libsOf(p), Aliases: aliases, Hardware: iolineHardware(t)})
 	if err != nil || len(diags) > 0 {
 		t.Fatalf("writer: %v %v\n%s", err, diags, src)
 	}

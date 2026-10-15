@@ -32,6 +32,8 @@ const (
 	ruleST            = "logix/st"             // an ST statement or function with no Logix form
 	ruleDataOp        = "logix/data-op"        // an assignment with no Logix data instruction or expression
 	ruleConversion    = "logix/conversion"     // an X_TO_Y Logix would compute differently, or not at all
+	ruleIOModule      = "logix/io-module"      // an alias of a rack point whose module the hardware lacks
+	ruleHardware      = "logix/hardware"       // a hardware configuration for another controller
 )
 
 // Rules lists every rule with a one-line description, for documentation
@@ -56,5 +58,7 @@ var Rules = []struct{ ID, Description string }{
 	{ruleMember, "member access is only into timer, counter and user-block instances and declared STRUCT types"},
 	{ruleST, "ST: RETURN, CONTINUE, STRING, MIN/MAX/LIMIT/SEL/MUX, ATAN2 and user calls have no Logix form"},
 	{ruleDataOp, "an assignment is MOVE/ADD/SUB/MUL/DIV/ABS or a CPT expression; no comparisons, booleans, or functions Logix cannot spell"},
+	{ruleIOModule, "an alias of a rack point (Local:1:I.Data.3, Remote1:1:I.Data.0, Drive1:I.Speed) needs that module in the hardware configuration (target.logix.hardware)"},
+	{ruleHardware, "the hardware configuration's Local module is the target's processor, at the target's revision"},
 	{ruleConversion, "ST conversions are written so Logix computes nautilus's result: REAL → integer only as the whole right-hand side of an assignment to a tag of that integer type (the store rounds), TRUNC_<int> only as the whole right-hand side of an integer assignment, no integer / whose quotient meets a REAL, in ST or on a rung (DIV, CPT, CMP), since Logix divides it in REAL, no unsigned, bit-string, LINT, LTIME or STRING conversions, BOOL → number and int → LREAL only as a whole right-hand side, int → REAL of a tag or literal"},
 }

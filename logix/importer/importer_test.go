@@ -861,7 +861,7 @@ func TestDialectAndAliasImport(t *testing.T) {
 	for _, l := range libs {
 		libSrc = append(libSrc, l.ST)
 	}
-	out, diags, err := writer.Write(src, writer.Options{Controller: "Mini", Libs: libSrc, Aliases: map[string]string{"Local_1_I_Data_3": "Local:1:I.Data.3", "Local_2_O_Data_0": "Local:2:O.Data.0"}})
+	out, diags, err := writer.Write(src, writer.Options{Controller: "Mini", Libs: libSrc, Aliases: map[string]string{"Local_1_I_Data_3": "Local:1:I.Data.3", "Local_2_O_Data_0": "Local:2:O.Data.0"}, Hardware: iolineHardware(t)})
 	if err != nil || len(diags) > 0 {
 		t.Fatalf("writer: %v %v\n%s", err, diags, src)
 	}

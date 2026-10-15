@@ -186,7 +186,7 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 		Controller: s.t.Controller, Program: s.t.Program, Routine: s.t.Routine, Task: s.t.Task,
 		PeriodMs: s.t.PeriodMs, ProcessorType: s.t.Processor, MajorRev: major, MinorRev: minor, Libs: s.t.Libs,
 		Inits: s.t.Inits, Descs: s.t.Descs, Aliases: s.t.Aliases, Tags: s.t.Tags, Side: s.t.Side,
-		AllTags: s.t.AllTags, ControllerScoped: s.t.ControllerScoped,
+		AllTags: s.t.AllTags, ControllerScoped: s.t.ControllerScoped, Hardware: s.t.Hardware,
 	}
 	full, diags, err := s.t.write(src, wopts)
 	if err != nil {

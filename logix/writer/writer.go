@@ -75,8 +75,8 @@ type Options struct {
 	// ProcessorType, MajorRev, MinorRev and SoftwareRevision identify the
 	// target. Defaults: 1756-L85E, 38, 11 — what ECHO1 runs — and the
 	// software revision of the target's major revision
-	// (SoftwareRevisionFor). A hardware.L5X merge replaces these in a
-	// later phase (logix-authoring.md §6, decision 1).
+	// (SoftwareRevisionFor). A Hardware configuration's Local module must
+	// agree with ProcessorType, MajorRev and MinorRev (logix/hardware).
 	ProcessorType    string
 	MajorRev         string
 	MinorRev         string
@@ -120,6 +120,12 @@ type Options struct {
 	// (AcceptTmr.ACC) still finds it (#371). Each must be a VAR of the
 	// program; its description comes from Descs.
 	ControllerScoped []string
+	// Hardware is the project's I/O configuration (target.logix.hardware):
+	// its <Modules> section replaces the Local module the writer would
+	// generate, verbatim, and every alias of a rack point must name a
+	// module in it (hardware.go). nil: the Local module only, from the
+	// processor (localModules).
+	Hardware *Hardware
 	// Side is the side code: logic nautilus adds beside the user's
 	// program, in its own Logix program scheduled after it, for testing,
 	// verification and metrics. Nothing of it touches the user's routine.
@@ -468,6 +474,7 @@ func lowerSrc(m *ld.Model, src string, opts Options) *lowered {
 	}
 	lw.declareUnnamed()
 	lw.checkControllerScoped()
+	lw.checkHardware()
 	notes := lw.notesByLine()
 	lw.planClocks(m.Rungs)
 	for _, r := range m.Rungs {

@@ -6,6 +6,8 @@ package main
 // L5X they hand it is the evidence.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -297,6 +299,10 @@ func TestAliasedTagsRunInSimulationAndDeployAsAliases(t *testing.T) {
 	t.Setenv("NAUTILUS_LOGIXD_URL", "")
 	f, url, stop := newFakeLogixd(t)
 	defer stop()
+	hw, err := os.ReadFile(filepath.Join("..", "..", "lang", "l5x", "testdata", "ioline.L5X"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := writeFiles(t, map[string]string{
 		"nautilus.yaml": `name: seal
 tasks:
@@ -310,7 +316,9 @@ target:
   logix:
     controller: Line
     agent: ` + url + `
+    hardware: io/rack.L5X
 `,
+		"io/rack.L5X": string(hw),
 		"Seal.ld": `PROGRAM Seal
 LD
   RUNG seal [ StartPB | RunCmd ] /StopPB ( RunCmd )
@@ -351,5 +359,14 @@ END_PROGRAM
 	rungs := doc.Controller.Programs[0].Routines[0].Rungs
 	if len(rungs) != 1 || rungs[0].Text != "[XIC(StartPB) ,XIC(RunCmd) ]XIO(StopPB)OTE(RunCmd);" {
 		t.Errorf("the rung does not name the alias tags: %+v", rungs)
+	}
+	// LGA-052: and the modules they alias go with them, from
+	// target.logix.hardware.
+	var names []string
+	for _, m := range doc.Controller.Modules {
+		names = append(names, m.Name)
+	}
+	if strings.Join(names, " ") != "Local DI_Slot1 DO_Slot2 Remote1 Remote1_DI" {
+		t.Errorf("deployed modules = %v", names)
 	}
 }

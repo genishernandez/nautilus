@@ -142,6 +142,7 @@ func lowerST(src string, opts Options) (*lowered, error) {
 	}
 	lw.declareUnnamed()
 	lw.checkControllerScoped()
+	lw.checkHardware()
 	w := &stWriter{lw: lw}
 	w.block(prog.Statements, 0)
 	lw.stLines = w.lines

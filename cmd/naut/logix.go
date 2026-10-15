@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -34,7 +35,8 @@ Usage:
                                        nautilus project — manifest, tags,
                                        types, every ladder routine as a
                                        PROGRAM, every Add-On Instruction as
-                                       a FUNCTION_BLOCK in lib/. Rungs with
+                                       a FUNCTION_BLOCK in lib/, and the I/O
+                                       modules as hardware.L5X. Rungs with
                                        no nautilus form are kept as comments
                                        and reported, never guessed at.
                                        Experimental, with the Logix target.
@@ -587,10 +589,10 @@ func runLogixInfo(args []string) int {
 
 // runLogixWrite is the nautilus → Logix writer: one ladder program in,
 // one L5X controller project out. The flags are the project envelope the
-// program lands in; a hardware.L5X merge replaces them in a later phase.
-// For the task program of a project with target: logix the envelope and
-// the tags' seeds come from nautilus.yaml, as for a deploy, and a flag
-// given overrides one of them.
+// program lands in. For the task program of a project with target: logix
+// the envelope, the tags' seeds and the hardware configuration
+// (target.logix.hardware) come from nautilus.yaml, as for a deploy, and a
+// flag given overrides one of them.
 func runLogixWrite(args []string) int {
 	fs := flag.NewFlagSet("logix write", flag.ContinueOnError)
 	out := fs.String("o", "", "write the L5X here (default: stdout)")
@@ -654,11 +656,16 @@ func runLogixWrite(args []string) int {
 				opts.PeriodMs = t.PeriodMs
 			}
 			opts.Inits, opts.Descs, opts.Aliases, opts.Side = t.Inits, t.Descs, t.Aliases, t.Side
-			opts.AllTags, opts.ControllerScoped = t.AllTags, t.ControllerScoped
+			opts.AllTags, opts.ControllerScoped, opts.Hardware = t.AllTags, t.ControllerScoped, t.Hardware
+		} else if he := (*hardwareError)(nil); errors.As(err, &he) {
+			// A hardware configuration that cannot be read: say so rather
+			// than write the project without it.
+			fmt.Fprintln(os.Stderr, "naut logix write:", err)
+			return 2
 		}
 	}
 	opts.MajorRev, opts.MinorRev, _ = strings.Cut(*revision, ".")
-	if w := writer.LocalModuleWarning(opts.ProcessorType); w != "" {
+	if w := writer.LocalModuleWarning(opts.ProcessorType); w != "" && opts.Hardware == nil {
 		fmt.Fprintln(os.Stderr, "naut logix write: warning:", w)
 	}
 	doc, diags, err := writer.WriteProgram(path, string(raw), opts)

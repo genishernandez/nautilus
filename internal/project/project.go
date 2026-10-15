@@ -152,6 +152,14 @@ type LogixTarget struct {
 	// records it here so the write-back keeps its tag path
 	// (AcceptTmr.ACC, not Program:MainProgram.AcceptTmr.ACC).
 	ControllerScoped []LogixScoped `yaml:"controller-scoped"`
+	// Hardware is an L5X, relative to the project, whose <Modules> section
+	// is the controller's I/O configuration: the chassis, its modules, and
+	// the adapters and modules beyond it that alias: tags name. The writer
+	// carries it into the project verbatim. `naut logix import --project`
+	// writes one (hardware.L5X) from an export with I/O modules; a Logix
+	// Designer export of the whole project works as it is. Default: none,
+	// and the project has the controller's own Local module only.
+	Hardware string `yaml:"hardware"`
 	// Side is the side code nautilus adds beside the program, in a Logix
 	// program of its own: testing, verification and metrics logic that
 	// never touches the user's routine.

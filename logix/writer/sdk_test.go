@@ -53,16 +53,20 @@ func TestSDKConvertAndBuild(t *testing.T) {
 		"demoline":    demoOpts(),
 		"subset":      {},
 		"implicit-st": {}, // conformance/implicit-st with its manifest (#248)
+		"ioline":      {}, // alias tags on I/O modules from a hardware configuration (#275)
 	}
 	for name, opts := range cases {
 		t.Run(name, func(t *testing.T) {
 			var doc []byte
 			var diags []Diag
 			var err error
-			if name == "implicit-st" {
+			switch name {
+			case "implicit-st":
 				src, o := implicitSTOpts(t)
 				doc, diags, err = WriteST(src, o)
-			} else {
+			case "ioline":
+				doc, diags, err = Write(iolineSrc, iolineOpts(t))
+			default:
 				doc, diags, err = Write(fixture(t, name+".ld"), opts)
 			}
 			if err != nil || len(diags) > 0 {

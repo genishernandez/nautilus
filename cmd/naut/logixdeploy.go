@@ -70,6 +70,12 @@ type logixProject struct {
 	agent        string
 }
 
+// hardwareError is a target.logix.hardware file that cannot be read.
+type hardwareError struct{ err error }
+
+func (e *hardwareError) Error() string { return "target.logix.hardware: " + e.err.Error() }
+func (e *hardwareError) Unwrap() error { return e.err }
+
 // loadLogixProject reads nautilus.yaml and the one task program the v1
 // target takes.
 func loadLogixProject(dir string) (*logixProject, error) {
@@ -121,6 +127,17 @@ func loadLogixProject(dir string) (*logixProject, error) {
 	if tgt.Side != nil {
 		side.Heartbeat = tgt.Side.Heartbeat
 	}
+	var hw *writer.Hardware
+	if tgt.Hardware != "" {
+		path := filepath.Join(dir, filepath.FromSlash(tgt.Hardware))
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, &hardwareError{err}
+		}
+		if hw, err = writer.ParseHardware(tgt.Hardware, raw); err != nil {
+			return nil, &hardwareError{err}
+		}
+	}
 	period := int(time.Duration(task.Scan) / time.Millisecond)
 	if tgt.Continuous {
 		period = 0
@@ -132,7 +149,7 @@ func loadLogixProject(dir string) (*logixProject, error) {
 			Program: tgt.Program, Routine: tgt.Routine, Task: tgt.Task,
 			PeriodMs: period,
 			CommPath: tgt.CommPath, Libs: libs, Inits: inits, Descs: descs, Aliases: aliases, Tags: tags, Side: side,
-			AllTags: tgt.AllTags, ControllerScoped: scoped,
+			AllTags: tgt.AllTags, ControllerScoped: scoped, Hardware: hw,
 			Language: writer.Language(progPath),
 		},
 		host: tgt.Host, slot: tgt.Slot, port: tgt.Port, agent: tgt.Agent,
@@ -189,7 +206,7 @@ func runLogixDeploy(args []string) int {
 				"  for a rung change that keeps the controller running.\n", p.target.CommPath)
 		return 2
 	}
-	if w := writer.LocalModuleWarning(p.target.Processor); w != "" {
+	if w := writer.LocalModuleWarning(p.target.Processor); w != "" && p.target.Hardware == nil {
 		fmt.Fprintln(os.Stderr, "naut logix deploy: warning:", w)
 	}
 	mode := deploy.BuildOnly

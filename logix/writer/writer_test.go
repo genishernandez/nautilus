@@ -1179,7 +1179,7 @@ LD
 END_LD
 END_PROGRAM
 `
-	doc, diags, err := Write(src, Options{Aliases: map[string]string{"StartPB": "Local:1:I.Data.3", "Level": "Local:2:I.Ch0Data"}, Descs: map[string]string{"StartPB": "start pushbutton"}})
+	doc, diags, err := Write(src, Options{Aliases: map[string]string{"StartPB": "Local:1:I.Data.3", "Level": "Local:2:I.Ch0Data"}, Descs: map[string]string{"StartPB": "start pushbutton"}, Hardware: iolineHardware(t)})
 	if err != nil || len(diags) > 0 {
 		t.Fatalf("%v %v", err, diags)
 	}

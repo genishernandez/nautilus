@@ -77,22 +77,27 @@ func emit(lw *lowered, o Options) []byte {
 	} else {
 		w(`<DataTypes/>`)
 	}
-	w(`<Modules>`)
-	w(`<Module Name="Local" CatalogNumber="%s" Vendor="1" ProductType="%s" ProductCode="%s" Major="%s" Minor="%s" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
-		attr(o.ProcessorType), lm.ProductType, lm.ProductCode, attr(o.MajorRev), attr(o.MinorRev))
-	w(`<EKey State="Disabled"/>`)
-	w(`<Ports>`)
-	w(`<Port Id="1" Address="0" Type="%s" Upstream="false">`, fam.Backplane)
-	w(`<Bus Size="%d"/>`, lm.BusSize)
-	w(`</Port>`)
-	for _, id := range fam.EthernetPortIDs {
-		w(`<Port Id="%d" Type="Ethernet" Upstream="false">`, id)
-		w(`<Bus/>`)
+	if h := o.Hardware; h != nil {
+		// The project's own I/O configuration, as its L5X has it.
+		w(`%s`, h.modulesXML())
+	} else {
+		w(`<Modules>`)
+		w(`<Module Name="Local" CatalogNumber="%s" Vendor="1" ProductType="%s" ProductCode="%s" Major="%s" Minor="%s" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
+			attr(o.ProcessorType), lm.ProductType, lm.ProductCode, attr(o.MajorRev), attr(o.MinorRev))
+		w(`<EKey State="Disabled"/>`)
+		w(`<Ports>`)
+		w(`<Port Id="1" Address="0" Type="%s" Upstream="false">`, fam.Backplane)
+		w(`<Bus Size="%d"/>`, lm.BusSize)
 		w(`</Port>`)
+		for _, id := range fam.EthernetPortIDs {
+			w(`<Port Id="%d" Type="Ethernet" Upstream="false">`, id)
+			w(`<Bus/>`)
+			w(`</Port>`)
+		}
+		w(`</Ports>`)
+		w(`</Module>`)
+		w(`</Modules>`)
 	}
-	w(`</Ports>`)
-	w(`</Module>`)
-	w(`</Modules>`)
 	emitAOIs(&b, lw, o)
 	emitTags(&b, lw.ctrlTags)
 	w(`<Programs>`)

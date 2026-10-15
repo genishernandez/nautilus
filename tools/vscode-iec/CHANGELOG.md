@@ -28,6 +28,16 @@ tag's type, and a ladder rung with no coil must end at its last block.
 
 ### Added
 
+- **`target.logix.hardware` in `nautilus.yaml`.** Completion and
+  validation for the option that names the project's hardware
+  configuration: an L5X (`hardware.L5X`, written by `naut logix import
+  --project` from an export with I/O modules) whose `<Modules>` section
+  the Logix writer carries into the project unchanged, so tags with an
+  `alias:` of a rack point (`Local:1:I.Data.0`, `Remote1:1:I.Data.0`)
+  have their modules and the project builds and downloads. An alias of a
+  module the configuration lacks is refused at write time, naming the
+  module. Needs a `naut` newer than 0.18.0.
+
 - **`sparkplug.store-forward-file` in `nautilus.yaml`.** Completion and
   validation for the new option that journals the store-and-forward
   buffer to a file, so a restart during a broker or primary-host outage
