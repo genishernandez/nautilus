@@ -552,7 +552,7 @@ claims:
       and logixd; skipped in CI and not yet run (the SDK machine is
       unavailable).
 
-  - id: LGA-040
+  - id: LGA-041
     claim: >-
       With `naut logix serve --project`, an online edit from the editor is
       the same online edit `naut logix deploy --online` makes, and its
@@ -571,7 +571,7 @@ claims:
       itself (logix/deploy.Session) has its own fake-agent tests; neither
       has run against a controller through the editor yet.
 
-  - id: LGA-041
+  - id: LGA-042
     claim: >-
       A download from the editor is refused unless the request says yes;
       it sends the project with the Program-mode choice made, re-reads
@@ -590,7 +590,7 @@ claims:
       nautilus.yaml after the server started is in the project sent. Not yet
       run against a controller.
 
-  - id: LGA-042
+  - id: LGA-043
     claim: >-
       Only one deploy runs at a time, and a deploy whose base is not what
       the controller runs is refused before anything is sent.
