@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/joyautomation/nautilus/logix/deploy"
 	"github.com/joyautomation/nautilus/logix/facade"
@@ -81,26 +82,114 @@ func TestLogixServePlaneDownloadRewarmsTheSession(t *testing.T) {
 		if err != nil || rep.Applied != deploy.Download || !rep.Verified {
 			t.Fatalf("download: %v %+v", err, rep)
 		}
-		dl, reopen := indexOf(f.seen, "/download"), lastIndexOf(f.seen, "/upload-to-new")
-		if dl < 0 || reopen < dl {
+		// The download reports as soon as it has verified: the session
+		// for the next edit is Warm's, once the report is out (#379).
+		if indexOf(f.seen, "/download") < 0 || indexOf(f.seen, "/files/session-") >= 0 {
+			t.Errorf("the download reopened the session before reporting: %v", f.seen)
+		}
+		if hasLine(lines, "opening the online session for the next edit") {
+			t.Errorf("download progress = %q", lines)
+		}
+		lines = nil
+		plane.Warm(ctx, progress)
+		if indexOf(f.seen, "/files/session-") < 0 || indexOf(f.seen, "/online") < 0 {
 			t.Errorf("no session reopened after the download: %v", f.seen)
 		}
 		if !hasLine(lines, "opening the online session for the next edit") || !hasLine(lines, "session open and online") {
-			t.Errorf("download progress = %q", lines)
+			t.Errorf("warm progress = %q", lines)
 		}
 
 		// The next edit is warm: no upload, just the rung import.
 		f.seen = nil
 		edited := strings.Replace(fillLadder, "RUNG step Start", "RUNG step /Start", 1)
+		lines = nil
 		_, _ = plane.Deploy(ctx, edited, progress)
 		if indexOf(f.seen, "/upload-to-new") >= 0 || indexOf(f.seen, "/import-rungs") < 0 {
 			t.Errorf("the edit after a download was not warm: %v", f.seen)
+		}
+		// A warm edit says what it does as it does it, not only at the end.
+		if !hasLine(lines, "replacing Fill/") || !hasLine(lines, "verifying from the controller") {
+			t.Errorf("warm edit progress = %q", lines)
 		}
 		return 0
 	})
 	if !strings.Contains(stderr, "deploy: ") {
 		t.Errorf("deploy lines did not reach stderr: %q", stderr)
 	}
+}
+
+// An edit that arrives while a download's warm-up opens the session waits
+// for it, says so on its own stream, and then edits warm; each stream gets
+// its own lines.
+func TestLogixServePlaneEditWaitsForTheWarmUp(t *testing.T) {
+	t.Setenv("NAUTILUS_LOGIXD_URL", "")
+	f, url, stop := newFakeLogixd(t)
+	defer stop()
+	f.controllerL5X = emptyLine
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "nautilus.yaml"), []byte(fillManifest(url, "    comm-path: AB_ETH-1\\10.0.0.5\\Backplane\\0\n")), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "Fill.ld"), []byte(fillLadder), 0o644)
+	p, err := loadLogixProject(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureStderr(t, func() int {
+		plane, release := logixProgramPlane(dir, p, logixd.New(url, ""))
+		defer release()
+		ctx := context.Background()
+		// A controller that runs what the project generates, as after a
+		// download.
+		_, _ = plane.Download(ctx, fillLadder, facade.DownloadOptions{ProgramMode: true}, func(string) {})
+		for name, raw := range f.files {
+			if strings.HasSuffix(name, "/Line.L5X") {
+				f.controllerL5X = string(raw)
+			}
+		}
+
+		f.uploadEntered, f.uploadHold = make(chan struct{}, 4), make(chan struct{})
+		var warmLines []string
+		warmed := make(chan struct{})
+		go func() {
+			plane.Warm(ctx, func(s string) { warmLines = append(warmLines, s) })
+			close(warmed)
+		}()
+		select {
+		case <-f.uploadEntered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the warm-up never uploaded")
+		}
+		editLines := make(chan string, 64)
+		edited := make(chan error, 1)
+		go func() {
+			_, err := plane.Deploy(ctx, strings.Replace(fillLadder, "RUNG step Start", "RUNG step /Start", 1), func(s string) { editLines <- s })
+			edited <- err
+		}()
+		select {
+		case l := <-editLines:
+			if !strings.Contains(l, "waiting for the online session the download is opening") {
+				t.Errorf("the waiting edit's first line = %q", l)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the waiting edit said nothing")
+		}
+		close(f.uploadHold)
+		<-warmed
+		// (The fake agent has no partial export, so the edit's own
+		// verification fails; what matters is that it ran warm.)
+		<-edited
+		close(editLines)
+		var got []string
+		for l := range editLines {
+			got = append(got, l)
+		}
+		if hasLine(got, "opening the online session") || !hasLine(got, "replacing Fill/MainRoutine online") {
+			t.Errorf("edit lines = %q", got)
+		}
+		if !hasLine(warmLines, "session open and online") || hasLine(warmLines, "online edit live") {
+			t.Errorf("warm-up lines = %q", warmLines)
+		}
+		return 0
+	})
 }
 
 // A session held open by an online edit is closed before a download, and
@@ -196,15 +285,6 @@ func hasLine(lines []string, sub string) bool {
 func indexOf(seen []string, sub string) int {
 	for i, s := range seen {
 		if strings.Contains(s, sub) {
-			return i
-		}
-	}
-	return -1
-}
-
-func lastIndexOf(seen []string, sub string) int {
-	for i := len(seen) - 1; i >= 0; i-- {
-		if strings.Contains(seen[i], sub) {
 			return i
 		}
 	}

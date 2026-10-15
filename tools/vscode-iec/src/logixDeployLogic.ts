@@ -25,13 +25,24 @@ export type DeployEvent =
       verified?: boolean;
       modeBefore?: string;
       mode?: string;
+      /** The whole wait, from the request to this report. */
       elapsedMs?: number;
+      /** The deploy's own part of it (no session opening, no queueing). */
+      deployMs?: number;
       /** A download: how many tags kept the controller's value (-1: none were kept). */
       valuesKept?: number;
       /** A download: the tags reset to the project's value, each with its reason. */
       resets?: string[];
     }
-  | { event: "error"; status?: number; error: string };
+  | {
+      event: "error";
+      status?: number;
+      error: string;
+      /** A download refused for the controller's mode: a Program-mode download would go. */
+      needsProgramMode?: boolean;
+      /** The SDK's own error behind a reworded one, status lines and all. */
+      detail?: string;
+    };
 
 export type DeployMode = "online" | "download";
 
@@ -88,6 +99,9 @@ export function downloadConfirmMessage(info: LogixInfo, programFile: string, res
 export const DOWNLOAD = "Download";
 export const DOWNLOAD_PROGRAM_MODE = "Switch to Program Mode and Download";
 export const PUSH = "Push Online Edit";
+export const PUSH_ANYWAY = "Push Anyway";
+export const DOWNLOAD_PROJECT = "Download Project…";
+export const SHOW_OUTPUT = "Show Output";
 
 /** Splits a byte stream into NDJSON events; a line that is not JSON is
  * passed on as progress so nothing the server says is lost. */
@@ -124,6 +138,50 @@ function parseEvent(line: string): DeployEvent {
   return { event: "progress", message: line };
 }
 
+/** Reads POST /api/logix/deploy's answer: each progress line as it comes,
+ * and the result (done or error) the moment it arrives. A download's
+ * stream goes on after its result — the server opens the online session
+ * for the next edit — so `result` does not wait for the end: what follows
+ * goes to onProgress with `after` set, and `rest` settles when the stream
+ * ends. `read` gives the next chunk, undefined at the end. */
+export async function readDeployStream(
+  read: () => Promise<string | undefined>,
+  onProgress: (message: string, after: boolean) => void
+): Promise<{ result?: DeployEvent; rest: Promise<void> }> {
+  const split = new NdjsonSplitter();
+  let result: DeployEvent | undefined;
+  const take = (evs: DeployEvent[]) => {
+    for (const ev of evs) {
+      if (ev.event === "progress") onProgress(ev.message, result !== undefined);
+      else if (!result) result = ev;
+    }
+  };
+  let ended = false;
+  while (!result) {
+    const chunk = await read();
+    if (chunk === undefined) {
+      ended = true;
+      break;
+    }
+    take(split.feed(chunk));
+  }
+  if (ended) {
+    take(split.flush());
+    return { result, rest: Promise.resolve() };
+  }
+  const rest = (async () => {
+    for (;;) {
+      const chunk = await read();
+      if (chunk === undefined) break;
+      take(split.feed(chunk));
+    }
+    take(split.flush());
+  })().catch(() => {
+    /* the stream broke after the result: nothing is lost that matters */
+  });
+  return { result, rest };
+}
+
 function seconds(ms?: number): string {
   if (ms === undefined) return "";
   return ms < 10_000 ? ` in ${(ms / 1000).toFixed(1)} s` : ` in ${Math.round(ms / 1000)} s`;
@@ -155,9 +213,33 @@ function valuesNote(ev: Extract<DeployEvent, { event: "done" }>): string {
   return s;
 }
 
+/** Is a download's refusal one a Program-mode download answers — the
+ * controller is in Run? An older server sends the SDK's text bare. */
+export function needsProgramMode(ev: Extract<DeployEvent, { event: "error" }>): boolean {
+  return ev.needsProgramMode === true || /RxE_INVALID_START_STATE/.test(ev.error);
+}
+
 /** Does a refusal say the change needs a download (new tags, no routine)? */
 export function needsDownload(ev: Extract<DeployEvent, { event: "error" }>): boolean {
   return ev.status === 422 && /download/i.test(ev.error) && !/outside the Logix v1 subset/.test(ev.error);
+}
+
+/** The buttons on a refused or failed deploy, the way out first:
+ * a stale base offers Push Anyway, a change an online edit cannot carry
+ * offers Download Project…, and a plain download refused because the
+ * controller is in Run offers the Program-mode download (programMode: the
+ * refused request already asked for it, so offering it again is no way
+ * out). Show Output always. */
+export function refusalButtons(
+  mode: DeployMode,
+  err: Extract<DeployEvent, { event: "error" }>,
+  programMode = false
+): string[] {
+  const buttons = [SHOW_OUTPUT];
+  if (mode === "download" && !programMode && needsProgramMode(err)) buttons.unshift(DOWNLOAD_PROGRAM_MODE);
+  if (mode === "online" && err.status === 409 && /changed since your base/.test(err.error)) buttons.unshift(PUSH_ANYWAY);
+  if (mode === "online" && needsDownload(err)) buttons.unshift(DOWNLOAD_PROJECT);
+  return buttons;
 }
 
 /** `naut logix serve` for a project, listening where nautilus.runtimeUrl

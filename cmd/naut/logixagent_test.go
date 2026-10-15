@@ -41,6 +41,11 @@ type fakeLogixd struct {
 	mode string
 	// linxXML is the FT Linx configuration /v1/linx-config returns.
 	linxXML string
+	// uploadEntered, when set, is told of each upload-to-new as it
+	// starts, and uploadHold holds it until closed: a session opening that
+	// takes as long as a test needs.
+	uploadEntered chan struct{}
+	uploadHold    chan struct{}
 }
 
 func newFakeLogixd(t *testing.T) (*fakeLogixd, string, func()) {
@@ -77,6 +82,12 @@ func newFakeLogixd(t *testing.T) (*fakeLogixd, string, func()) {
 		case r.URL.Path == "/v1/health":
 			ok(map[string]any{"service": "logixd", "version": "test", "sdkClient": "2.2.1109.0"})
 		case r.URL.Path == "/v1/upload-to-new":
+			if f.uploadEntered != nil {
+				f.uploadEntered <- struct{}{}
+			}
+			if f.uploadHold != nil {
+				<-f.uploadHold
+			}
 			_ = json.NewDecoder(r.Body).Decode(&f.uploadToNew)
 			if dest, _ := f.uploadToNew["projectFilePath"].(string); dest != "" {
 				f.files[dest] = []byte("UPLOADED-FROM-CONTROLLER")

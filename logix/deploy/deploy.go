@@ -171,6 +171,35 @@ func (e *VerifyError) Error() string {
 	return fmt.Sprintf("verification failed: the controller does not run what was sent (%d difference(s))", len(e.Diffs))
 }
 
+// StartStateError says the controller refused a download because of the
+// mode it is in: the SDK's RxE_INVALID_START_STATE ("Invalid start
+// state. Internal error."), which is what a download to a controller in
+// Run answers when it was not asked to switch to Program mode first. Raw
+// is the SDK's own error with its status lines, for the record.
+type StartStateError struct {
+	// Mode is the controller's mode before the download, when it was read.
+	Mode string
+	Raw  error
+}
+
+func (e *StartStateError) Error() string {
+	mode := "is not in Program mode"
+	if e.Mode != "" {
+		mode = "is in " + e.Mode + " mode"
+	}
+	return "the controller " + mode + ", and a download needs it in Program mode: download again with " +
+		"\"Switch to Program Mode and Download\" (naut logix deploy --download --program-mode), " +
+		"or put the controller in Program mode first"
+}
+
+func (e *StartStateError) Unwrap() error { return e.Raw }
+
+// invalidStartState recognizes the SDK's refusal to download to a
+// controller in the wrong mode.
+func invalidStartState(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "RxE_INVALID_START_STATE")
+}
+
 // Run deploys one ladder program. The Report is returned with whatever
 // was measured even when err is set.
 func Run(ctx context.Context, src string, o Options) (*Report, error) {
@@ -464,7 +493,14 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 		}
 		evs, err := s.Download(ctx, o.ProgramMode)
 		if err != nil {
-			return done(withEvents("download", err, evs))
+			err = withEvents("download", err, evs)
+			// Asked for Program mode and still refused (a keyswitch in
+			// RUN, a fault): the hint would be wrong, so the SDK's
+			// answer goes as it is.
+			if !o.ProgramMode && invalidStartState(err) {
+				err = &StartStateError{Mode: rep.ModeBefore, Raw: err}
+			}
+			return done(err)
 		}
 		mode, _ := s.Mode(ctx)
 		_, _ = s.GoOffline(context.Background())

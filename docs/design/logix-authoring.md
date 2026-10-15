@@ -1634,10 +1634,21 @@ opens DemoLine's `MainProgram.ld` in the text and the diagram editor and
 finds **Push Online Edit** in the title bar and **Download Project** in
 the `…` menu, and finds neither on a `naut new` project.
 
-Two things are left as they are: a download's summary arrives only after
-the next edit's session has reopened (about 50 s after "verified", with
-"opening the online session for the next edit" on screen meanwhile), and
-an edit's summary time counts the edit, not the session open before it.
+Two things were left as they were, and #379 then changed them: a
+download's summary arrived only after the next edit's session had
+reopened (about 50 s after "verified", with "opening the online session
+for the next edit" on screen meanwhile), and an edit's summary time
+counted the edit, not the session open before it. Now the download's
+report goes out when it has verified and the session reopens after it,
+on the same stream (`ProgramPlane.Warm`), while the plane already takes
+the next deploy, which waits for the session and says so; `elapsedMs` is
+the whole wait from the request (`deployMs` the deploy's own part); the
+stream's headers and a first line go out at once, and a warm edit says
+"replacing …" and "verifying …" as it gets there. A plain download
+refused with `RxE_INVALID_START_STATE` is a `deploy.StartStateError`: a
+409 saying the controller is in Run and to use *Switch to Program Mode
+and Download*, `needsProgramMode` for the editor's button, and the SDK's
+text as `detail`. Not yet re-measured on a controller.
 
 **An ST routine's warm online edit in Run (#272, measured 2026-10-14 with
 #273):** the same endpoint, an ST version of DemoLine

@@ -385,12 +385,18 @@ palette:
   tag at the project's value, as `--reset-values` does, and the modal says
   so. The summary says how many values were kept and which tags were
   reset. The server re-reads `nautilus.yaml` for the
-  download, so new tags go with it, and it opens the online session again
-  afterwards, so the next online edit is warm.
+  download, so new tags go with it. The summary comes as soon as the
+  download is verified; the server then opens the online session again
+  (about a minute, in the output channel), so the next online edit is
+  warm. An edit pushed meanwhile waits for that session and says so.
+  A plain **Download** with the controller in Run is refused: the
+  message says so, the SDK's own text is in the output channel, and the
+  notification offers **Switch to Program Mode and Download**.
 
 Both show the deploy's progress in a notification and in the **nautilus
-Logix** output channel, and end with what happened: verified or not, rungs
-replaced, the controller's mode. A refusal is shown as the server words it.
+Logix** output channel as it happens, and end with what happened: verified
+or not, rungs replaced, the controller's mode, and the whole time you
+waited (an online session opening included). A refusal is shown as the server words it.
 A change an online edit cannot carry (new tags, a routine the controller
 does not have) offers **Download Project…**.
 

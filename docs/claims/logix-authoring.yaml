@@ -709,6 +709,7 @@ claims:
       - go ./logix/facade TestDeployStreamDownload
       - go ./cmd/naut TestLogixServePlaneDownloadRewarmsTheSession
       - go ./cmd/naut TestLogixServePlaneReleasesTheSessionBeforeADownload
+      - go ./logix/facade TestDeployStreamReportsADownloadBeforeItsWarmUp
     partial: true
     note: >-
       Against the fake agent: no "yes" is a 400 and nothing runs; the held
@@ -735,6 +736,57 @@ claims:
       reported the two tags whose type changed (TIMER → FBD_TIMER, COUNTER →
       FBD_COUNTER). The modal wording and the setting are the extension's
       (logixDeployLogic.test.ts).
+
+  - id: LGA-049
+    claim: >-
+      A download from the editor reports as soon as it has verified: the
+      online session for the next edit opens after the report, its
+      progress following on the same stream, and an edit pushed meanwhile
+      waits for that session and says so. Every result's time is the
+      whole wait from the request, and a warm edit's progress reaches the
+      editor as it happens.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamReportsADownloadBeforeItsWarmUp
+      - go ./logix/facade TestDeployStreamWarmsOnlyAfterADownload
+      - go ./logix/facade TestDeployStreamFlushesAtOnce
+      - go ./logix/facade TestDeployStreamElapsedIsTheWholeWait
+      - go ./cmd/naut TestLogixServePlaneDownloadRewarmsTheSession
+      - go ./cmd/naut TestLogixServePlaneEditWaitsForTheWarmUp
+    partial: true
+    note: >-
+      Against stand-in deploy functions and the fake agent: the done event
+      is read while Warm is still blocked, GET /api/program shows no deploy
+      in progress and an online edit goes through meanwhile, and the
+      warm-up's line follows the report; elapsedMs counts a 150 ms wait
+      the report's own 20 ms (deployMs) does not; the first line arrives
+      while the deploy is still blocked; an edit queued behind the warm-up
+      gets "waiting for the online session…" and then edits without an
+      upload, each stream with its own lines; a warm edit logs
+      "replacing …" and "verifying …" before its result. The extension
+      shows the summary on the done event (logixDeployLogic.test.ts). Not
+      yet re-measured on a controller (the #375 numbers predate it).
+
+  - id: LGA-050
+    claim: >-
+      A plain download refused because the controller is in Run is
+      answered with what to do — "Switch to Program Mode and Download" —
+      instead of the SDK's raw RxE_INVALID_START_STATE, which stays
+      available underneath; the editor offers the Program-mode download.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/deploy TestDownloadInRunSaysToSwitchToProgramMode
+      - go ./logix/facade TestDeployStreamStartStateRefusal
+    partial: true
+    note: >-
+      Against the fake agent, which refuses a download in Run as the SDK
+      does: the error is a StartStateError naming the mode and the way out,
+      without the SDK code, and its Raw keeps the SDK's message and status
+      lines; asked for Program mode and refused all the same, the SDK's
+      answer goes as it is. The stream answers 409 with needsProgramMode
+      and the raw text as detail. The button is the extension's
+      (logixDeployLogic.test.ts). The SDK's wording is from the #375 run on
+      an Echo controller; the new message has not been seen on one.
 
   - id: LGA-043
     claim: >-

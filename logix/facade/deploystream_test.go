@@ -67,7 +67,7 @@ func TestDeployStreamOnlineEdit(t *testing.T) {
 		t.Fatalf("%d %v", code, lines)
 	}
 	prog := events(lines, "progress")
-	if len(prog) != 2 || prog[0]["message"] != "session open and online" {
+	if len(prog) != 3 || !strings.Contains(prog[0]["message"].(string), "online edit on AB_ETH-1") || prog[1]["message"] != "session open and online" {
 		t.Errorf("progress = %v", prog)
 	}
 	done := events(lines, "done")
@@ -209,5 +209,203 @@ func TestDeployStreamUpfrontRefusals(t *testing.T) {
 	bare := startPlaneWith(t, nil)
 	if code, lines := postDeploy(t, bare, map[string]any{"mode": "online", "source": ladderB}); code != 404 || !strings.Contains(lines[0]["error"].(string), "--project") {
 		t.Errorf("no project: %d %v", code, lines)
+	}
+}
+
+// streamReader reads POST /api/logix/deploy's answer one line at a time,
+// so a test can see what has arrived while the deploy is still running.
+type streamReader struct {
+	t    *testing.T
+	res  *http.Response
+	sc   *bufio.Scanner
+	done chan struct{}
+}
+
+func openDeploy(t *testing.T, url string, body map[string]any) *streamReader {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	res, err := http.Post(url+"/api/logix/deploy", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { res.Body.Close() })
+	return &streamReader{t: t, res: res, sc: bufio.NewScanner(res.Body)}
+}
+
+// next is the next line, or nil at the end of the stream.
+func (s *streamReader) next() map[string]any {
+	s.t.Helper()
+	got := make(chan map[string]any, 1)
+	go func() {
+		if !s.sc.Scan() {
+			got <- nil
+			return
+		}
+		var m map[string]any
+		if err := json.Unmarshal(s.sc.Bytes(), &m); err != nil {
+			m = map[string]any{"event": "not JSON", "raw": s.sc.Text()}
+		}
+		got <- m
+	}()
+	select {
+	case m := <-got:
+		return m
+	case <-time.After(5 * time.Second):
+		s.t.Fatal("no line within 5 s")
+		return nil
+	}
+}
+
+// A download's report goes out the moment it has verified; reopening the
+// online session for the next edit follows on the same stream, and the
+// plane takes the next deploy meanwhile (#379: the report arrived ~50 s
+// late, after the session had reopened).
+func TestDeployStreamReportsADownloadBeforeItsWarmUp(t *testing.T) {
+	warmStarted, warmRelease := make(chan struct{}), make(chan struct{})
+	url := startPlaneWith(t, &ProgramPlane{
+		Source: ladderA, CommPath: `AB_ETH-1\10.0.0.5\Backplane\0`,
+		Deploy: func(_ context.Context, _ string, progress func(string)) (*deploy.Report, error) {
+			progress("edit while the session warms")
+			return &deploy.Report{Applied: deploy.Online, Verified: true}, nil
+		},
+		Download: func(_ context.Context, _ string, _ DownloadOptions, progress func(string)) (*deploy.Report, error) {
+			progress("verified")
+			return &deploy.Report{Applied: deploy.Download, Verified: true, ModeAfter: "Program"}, nil
+		},
+		Warm: func(_ context.Context, progress func(string)) {
+			close(warmStarted)
+			<-warmRelease
+			progress("session open and online")
+		},
+	})
+	s := openDeploy(t, url, map[string]any{"mode": "download", "source": ladderB, "yes": true, "programMode": true})
+	var done map[string]any
+	for done == nil {
+		l := s.next()
+		if l == nil {
+			t.Fatal("the stream ended without a report")
+		}
+		if l["event"] == "done" {
+			done = l
+		}
+	}
+	// The report is here and the warm-up has not finished.
+	select {
+	case <-warmStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the warm-up never started")
+	}
+	if done["applied"] != "download" || done["verified"] != true {
+		t.Fatalf("done = %v", done)
+	}
+	if info := getProgram(t, url); info["error"] != nil || info["source"] != ladderB {
+		t.Errorf("during the warm-up GET /api/program = %v", info)
+	}
+	if code, lines := postDeploy(t, url, map[string]any{"mode": "online", "source": ladderA}); code != 200 || len(events(lines, "done")) != 1 {
+		t.Errorf("an edit during the warm-up: %d %v", code, lines)
+	}
+	close(warmRelease)
+	if l := s.next(); l == nil || l["event"] != "progress" || l["message"] != "session open and online" {
+		t.Errorf("after the report: %v", l)
+	}
+	if l := s.next(); l != nil {
+		t.Errorf("more after the warm-up: %v", l)
+	}
+}
+
+// An online edit and a plain PUT have no warm-up; a download without Warm
+// ends with its report.
+func TestDeployStreamWarmsOnlyAfterADownload(t *testing.T) {
+	warms := 0
+	plane := &ProgramPlane{
+		Source: ladderA,
+		Deploy: func(context.Context, string, func(string)) (*deploy.Report, error) {
+			return &deploy.Report{Applied: deploy.Online, Verified: true}, nil
+		},
+		Download: func(context.Context, string, DownloadOptions, func(string)) (*deploy.Report, error) {
+			return &deploy.Report{}, &deploy.VerifyError{Diffs: []string{"rung 0"}}
+		},
+		Warm: func(context.Context, func(string)) { warms++ },
+	}
+	url := startPlaneWith(t, plane)
+	postDeploy(t, url, map[string]any{"mode": "online", "source": ladderB})
+	postDeploy(t, url, map[string]any{"mode": "download", "source": ladderB, "yes": true}) // failed
+	if warms != 0 {
+		t.Errorf("warmed %d time(s) without a download that went through", warms)
+	}
+}
+
+// The headers and a first line go out at once, before the deploy says
+// anything: a warm edit's first word is otherwise its report (#379).
+func TestDeployStreamFlushesAtOnce(t *testing.T) {
+	release := make(chan struct{})
+	url := startPlaneWith(t, &ProgramPlane{Source: ladderA, Controller: "DemoLine",
+		Deploy: func(context.Context, string, func(string)) (*deploy.Report, error) {
+			<-release
+			return &deploy.Report{Applied: deploy.Online, Verified: true}, nil
+		}})
+	defer close(release)
+	opened := make(chan *streamReader, 1)
+	go func() { opened <- openDeploy(t, url, map[string]any{"mode": "online", "source": ladderB}) }()
+	var s *streamReader
+	select {
+	case s = <-opened:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no headers while the deploy runs")
+	}
+	if l := s.next(); l["event"] != "progress" || l["message"] != "starting an online edit on DemoLine" {
+		t.Errorf("first line = %v", l)
+	}
+}
+
+// elapsedMs is the whole wait, from the request to the report — the
+// session a first edit opens, the warm-up an edit waits behind — and
+// deployMs the deploy's own part (#379: a 50 s first edit said 3.0 s).
+func TestDeployStreamElapsedIsTheWholeWait(t *testing.T) {
+	url := startPlaneWith(t, &ProgramPlane{Source: ladderA,
+		Deploy: func(context.Context, string, func(string)) (*deploy.Report, error) {
+			time.Sleep(150 * time.Millisecond) // the session opening
+			return &deploy.Report{Applied: deploy.Online, Verified: true, Elapsed: 20 * time.Millisecond}, nil
+		}})
+	_, lines := postDeploy(t, url, map[string]any{"mode": "online", "source": ladderB})
+	done := events(lines, "done")
+	if len(done) != 1 {
+		t.Fatalf("lines = %v", lines)
+	}
+	if ms := done[0]["elapsedMs"].(float64); ms < 150 {
+		t.Errorf("elapsedMs = %v, want the whole 150+ ms", ms)
+	}
+	if done[0]["deployMs"] != float64(20) {
+		t.Errorf("deployMs = %v", done[0]["deployMs"])
+	}
+}
+
+// A plain download refused because the controller is in Run: a 409 with
+// the way out, needsProgramMode for the editor's button, and the SDK's
+// raw text as detail (#379).
+func TestDeployStreamStartStateRefusal(t *testing.T) {
+	raw := fmt.Errorf("download: %w\n  status [Download]: Preparing the download", fmt.Errorf("logixd: operation_failed (OperationFailedException): RxE_INVALID_START_STATE - Invalid start state.  Internal error."))
+	url := startPlaneWith(t, &ProgramPlane{Source: ladderA,
+		Deploy: func(context.Context, string, func(string)) (*deploy.Report, error) { return &deploy.Report{}, nil },
+		Download: func(context.Context, string, DownloadOptions, func(string)) (*deploy.Report, error) {
+			return &deploy.Report{}, &deploy.StartStateError{Mode: "Run", Raw: raw}
+		}})
+	_, lines := postDeploy(t, url, map[string]any{"mode": "download", "source": ladderB, "yes": true})
+	errs := events(lines, "error")
+	if len(errs) != 1 {
+		t.Fatalf("lines = %v", lines)
+	}
+	e := errs[0]
+	if e["status"] != float64(409) || e["needsProgramMode"] != true {
+		t.Errorf("error = %v", e)
+	}
+	if msg := e["error"].(string); !strings.Contains(msg, "in Run mode") || !strings.Contains(msg, "Switch to Program Mode and Download") || strings.Contains(msg, "RxE_") {
+		t.Errorf("message = %q", msg)
+	}
+	if d, _ := e["detail"].(string); !strings.Contains(d, "RxE_INVALID_START_STATE") || !strings.Contains(d, "Preparing the download") {
+		t.Errorf("detail = %q", d)
+	}
+	if code, msg := deployError(&deploy.NeedsDownloadError{}); code != 422 || strings.Contains(msg, "Program Mode") {
+		t.Errorf("other refusals changed: %d %q", code, msg)
 	}
 }

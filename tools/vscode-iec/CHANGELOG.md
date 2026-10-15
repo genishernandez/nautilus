@@ -46,6 +46,19 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Changed
 
+- **Logix deploys from the editor report sooner and say more.** A
+  download's summary now shows as soon as the download is verified,
+  instead of after the server has reopened the online session for the
+  next edit (about 50 s later); that reopening goes on in the **nautilus
+  Logix** output channel, and an edit pushed meanwhile waits for it and
+  says so. Every summary's time is the whole wait — the first edit's
+  includes the minute its online session took to open. A warm online
+  edit shows its progress as it happens. A plain **Download** the
+  controller refuses because it is in Run says so in plain words, with
+  the SDK's own text in the output channel, and offers **Switch to
+  Program Mode and Download** as a button. Needs a `naut` newer than
+  0.17.0.
+
 - **Download Project to Logix Controller keeps the controller's tag
   values.** Each tag whose name, scope, type and dimensions are unchanged
   starts with the value it had on the controller; new and changed tags
