@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,6 +200,7 @@ func TestLogixServePlaneReleasesTheSessionBeforeADownload(t *testing.T) {
 	f, url, stop := newFakeLogixd(t)
 	defer stop()
 	f.controllerL5X = emptyLine
+	f.mode = "Program" // a plain download to a controller in Run is refused up front (#391)
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "nautilus.yaml"), []byte(fillManifest(url, "    comm-path: AB_ETH-1\\10.0.0.5\\Backplane\\0\n")), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "Fill.ld"), []byte(fillLadder), 0o644)
@@ -289,4 +291,43 @@ func indexOf(seen []string, sub string) int {
 		}
 	}
 	return -1
+}
+
+// A plain download with the controller in Run is refused before the
+// import and build, with the StartStateError the editor's button flow
+// keys on (#391); asking for Program mode goes ahead.
+func TestLogixServePlaneRefusesADownloadInRunUpFront(t *testing.T) {
+	t.Setenv("NAUTILUS_LOGIXD_URL", "")
+	f, url, stop := newFakeLogixd(t)
+	defer stop()
+	f.controllerL5X = emptyLine
+	f.mode = "Run"
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "nautilus.yaml"), []byte(fillManifest(url, "    comm-path: AB_ETH-1\\10.0.0.5\\Backplane\\0\n")), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "Fill.ld"), []byte(fillLadder), 0o644)
+	p, err := loadLogixProject(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureStderr(t, func() int {
+		plane, release := logixProgramPlane(dir, p, logixd.New(url, ""))
+		defer release()
+		f.seen = nil
+		_, err := plane.Download(context.Background(), fillLadder, facade.DownloadOptions{}, func(string) {})
+		var se *deploy.StartStateError
+		if !errors.As(err, &se) || se.Mode != "Run" {
+			t.Fatalf("err = %v (%T)", err, err)
+		}
+		if indexOf(f.seen, "/build") >= 0 || indexOf(f.seen, "/download") >= 0 {
+			t.Errorf("work after the refusal: %v", f.seen)
+		}
+		f.seen = nil
+		if _, err := plane.Download(context.Background(), fillLadder, facade.DownloadOptions{ProgramMode: true}, func(string) {}); errors.As(err, &se) {
+			t.Errorf("program mode was refused: %v", err)
+		}
+		if indexOf(f.seen, "/download") < 0 {
+			t.Errorf("program mode did not download: %v", f.seen)
+		}
+		return 0
+	})
 }

@@ -78,6 +78,8 @@ test("NdjsonSplitter turns a plain error body into an error event and keeps stra
 test("doneSummary says what happened, verified or not", () => {
   const online = doneSummary("online", INFO, { event: "done", applied: "online edit", verified: true, replaced: 2, mode: "Run", elapsedMs: 2100 });
   assert.equal(online, "nautilus: online edit live on DemoLine and verified, 2 rungs replaced, controller still in Run in 2.1 s — commit the file to keep it");
+  // An online edit's done has no valuesKept/resets; an older naut sent -1 and [].
+  assert.equal(doneSummary("online", INFO, { event: "done", applied: "online edit", verified: true, replaced: 2, mode: "Run", elapsedMs: 2100, valuesKept: -1, resets: [] }), online);
   const dl = doneSummary("download", INFO, { event: "done", applied: "download", verified: true, mode: "Program", elapsedMs: 97_000 });
   assert.match(dl, /downloaded to DemoLine and verified in 97 s/);
   assert.match(dl, /in Program mode; put it in Run/);

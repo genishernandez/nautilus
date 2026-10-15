@@ -208,12 +208,18 @@ func (p *programPlane) applied(src string, rep *deploy.Report, started time.Time
 	p.lastAt = time.Now()
 	hash := sourceHash(p.source)
 	p.mu.Unlock()
-	return map[string]any{
+	body := map[string]any{
 		"hash": hash, "task": "main", "applied": rep.Applied.String(), "same": rep.Same,
 		"replaced": rep.Replaced, "verified": rep.Verified, "modeBefore": rep.ModeBefore, "mode": rep.ModeAfter,
-		"elapsedMs": time.Since(started).Milliseconds(), "deployMs": rep.Elapsed.Milliseconds(), "resets": resets(rep),
-		"valuesKept": valuesKept(rep),
+		"elapsedMs": time.Since(started).Milliseconds(), "deployMs": rep.Elapsed.Milliseconds(),
 	}
+	// valuesKept and resets are a download's: an online edit carries every
+	// value, so it has nothing to say about them (#391).
+	if rep.Applied == deploy.Download {
+		body["resets"] = resets(rep)
+		body["valuesKept"] = valuesKept(rep)
+	}
+	return body
 }
 
 // resets are the tags whose values a download put back to the project's,

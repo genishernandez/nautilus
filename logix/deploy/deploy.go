@@ -194,6 +194,31 @@ func (e *StartStateError) Error() string {
 
 func (e *StartStateError) Unwrap() error { return e.Raw }
 
+// controllerMode reads the controller's mode through a session on its
+// uploaded project, "" when it cannot be read: a failed read must not
+// block a download.
+func controllerMode(ctx context.Context, c *logixd.Client, acdRel, commPath string) string {
+	s, err := c.Open(ctx, acdRel)
+	if err != nil {
+		return ""
+	}
+	defer s.Close(context.Background())
+	if _, err := s.SetCommPath(ctx, commPath); err != nil {
+		return ""
+	}
+	mode, err := s.Mode(ctx)
+	if err != nil {
+		return ""
+	}
+	return string(mode)
+}
+
+// inRun says a controller mode is Run or Remote Run.
+func inRun(mode string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	return m == "run" || m == "remote run"
+}
+
 // invalidStartState recognizes the SDK's refusal to download to a
 // controller in the wrong mode.
 func invalidStartState(err error) bool {
@@ -306,11 +331,21 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	// the program changes between the upload and the download, about
 	// the import + build's time, is not carried.)
 	var plan *ValuePlan
-	if o.Mode == Download && t.CommPath != "" && !o.ResetValues {
+	if o.Mode == Download && t.CommPath != "" && (!o.ResetValues || !o.ProgramMode) {
 		if err := uploadBefore(); err != nil {
 			return done(err)
 		}
-		if beforeRaw != nil {
+		// A plain download to a controller in Run is refused by the SDK
+		// only after the whole import and build (~76 s on a real
+		// controller): read the mode now and refuse in seconds (#391).
+		if !o.ProgramMode && beforeRaw != nil {
+			if mode := controllerMode(ctx, c, rel("before.ACD"), t.CommPath); inRun(mode) {
+				rep.ModeBefore = mode
+				logf("the controller at %s is in %s mode; a download needs Program mode", t.CommPath, mode)
+				return done(&StartStateError{Mode: mode})
+			}
+		}
+		if beforeRaw != nil && !o.ResetValues {
 			if plan, err = PlanValues(gen, beforeRaw); err != nil {
 				return done(err)
 			}

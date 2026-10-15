@@ -46,6 +46,14 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Changed
 
+- **A plain Logix download to a controller in Run is refused at once.**
+  The server reads the controller's mode first and, in Run or Remote Run
+  without Program mode requested, answers with the "Switch to Program Mode
+  and Download" offer in seconds, instead of after the whole upload,
+  import and build (~76 s). A failed mode read does not block the
+  download. An online edit's result no longer carries the download-only
+  `valuesKept` and `resets`. Needs a `naut` newer than 0.17.0.
+
 - **Logix deploys from the editor report sooner and say more.** A
   download's summary now shows as soon as the download is verified,
   instead of after the server has reopened the online session for the

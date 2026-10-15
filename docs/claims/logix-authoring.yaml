@@ -798,6 +798,30 @@ claims:
       (logixDeployLogic.test.ts). The SDK's wording is from the #375 run on
       an Echo controller; the new message has not been seen on one.
 
+  - id: LGA-051
+    claim: >-
+      A plain download to a controller in Run (or Remote Run) is refused as
+      soon as the controller's mode is read, before the project is imported
+      or built, with the same answer as the SDK's late refusal; asking for
+      Program mode skips the check, and a mode read that fails does not
+      block the download. An online edit's done event carries no
+      download-only fields (valuesKept, resets).
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/deploy TestDownloadInRunRefusedBeforeBuild
+      - go ./logix/deploy TestDownloadProgramModeSkipsTheModeCheck
+      - go ./logix/deploy TestDownloadModeReadFailureFallsThrough
+      - go ./cmd/naut TestLogixServePlaneRefusesADownloadInRunUpFront
+      - go ./logix/facade TestDeployStreamOnlineEdit
+    partial: true
+    note: >-
+      Against the fake agent, which reports a mode: in Run and Remote Run no
+      build, save or download call is made after the refusal (with and
+      without reset-values); Program mode on the request or on the
+      controller goes ahead; a failing mode read reaches the build and the
+      SDK's own refusal. Not yet seen on a controller: the time saved
+      (the SDK's refusal came after ~76 s on Echo).
+
   - id: LGA-043
     claim: >-
       Only one deploy runs at a time, and a deploy whose base is not what
