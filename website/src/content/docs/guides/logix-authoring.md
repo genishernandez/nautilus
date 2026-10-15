@@ -304,12 +304,42 @@ and build it, and then:
   finalizes them, leaving the controller in its mode. It is refused when
   the tag set changed, because an online edit cannot create tags;
 - with `--download --yes`, downloads the project. **That stops the
-  controller and resets its tags to the project's values.** The controller
-  must be in Program mode already, or pass `--program-mode`.
+  controller.** The controller must be in Program mode already, or pass
+  `--program-mode`. Tag values are kept (below); `--reset-values` starts
+  every tag at the project's value instead.
 
 Every path ends by uploading the controller's program again and comparing
 its logic with what was sent (`naut logix drift --logic`). `--keep DIR`
 keeps the generated L5X, the built ACD and the before/after uploads.
+
+### What a download does with tag values
+
+A download replaces the controller's whole project, its tag data with it.
+So before the build, `naut logix deploy --download` uploads the running
+controller and writes its current values into the project, and the
+download carries them: setpoints, counts and recipe data the plant has
+changed survive. Tag by tag:
+
+| the tag | after the download |
+|---|---|
+| on both sides, same name and scope (controller, or the same program), same type and dimensions | **the controller's value** |
+| a structure (UDT) or Add-On Instruction instance whose type is defined the same on both sides | **the controller's value**, every member |
+| a `TIMER` or `COUNTER` | the controller's accumulator and status bits; **the preset is the project's**, because a literal `PT := T#30S` is code and a changed one must take effect |
+| type, dimensions or the type's definition changed | the project's initial value, reported (`SpareSP: DINT → REAL`) |
+| a constant in the project | the project's value |
+| only in the project | the project's initial value, reported as new |
+| only on the controller | gone (the download removes it), reported |
+
+The deploy prints the outcome before the build (`tag values: 11 kept from
+the controller, 1 reset to the project's value (SpareSP: DINT → REAL), 1
+new (NewSP)`), and a build without `--download` prints what a download
+would do. The values are the controller's at the upload, about half a
+minute (the import and build) before the controller stops: a value the
+program changes in that window is not carried. A changed `init:` in
+`nautilus.yaml` does not override a kept value, since the controller's
+value wins; use `--reset-values` (or change the tag's value live) when the
+project's value must win. A ladder timer becoming an ST one changes its
+type (`TIMER` → `FBD_TIMER`), so it starts fresh.
 
 `naut logix mode [--yes run|program] <project-dir>` reads or changes the
 controller's mode. `naut logix write program.ld` writes the L5X without
@@ -347,10 +377,14 @@ palette:
   Controller** does the same thing on a Logix server.
 - **nautilus: Download Project to Logix Controller** (in the title bar's
   `…` menu). The same as `naut logix deploy --download --yes`. A modal
-  says first that the download **stops the controller**, resets its tags
-  to the project's values and leaves it in Program mode; choose
-  **Download** if it is in Program mode already, or **Switch to Program
-  Mode and Download**. The server re-reads `nautilus.yaml` for the
+  says first that the download **stops the controller**, that tag values
+  are kept (the rule above) and that it leaves the controller in Program
+  mode; choose **Download** if it is in Program mode already, or **Switch
+  to Program Mode and Download**. The setting
+  `nautilus.logix.resetValuesOnDownload` makes the download start every
+  tag at the project's value, as `--reset-values` does, and the modal says
+  so. The summary says how many values were kept and which tags were
+  reset. The server re-reads `nautilus.yaml` for the
   download, so new tags go with it, and it opens the online session again
   afterwards, so the next online edit is warm.
 
@@ -368,7 +402,8 @@ EtherNet/IP, separately from the deploy. If nothing answers at
 
 The server answers these commands on `POST /api/logix/deploy`:
 `{"mode": "online" | "download", "source", "baseHash", "programMode",
-"yes"}`. The answer is a stream of JSON lines (`progress` events, then
+"resetValues", "yes"}`; a download's `done` event carries `valuesKept`
+and the `resets`. The answer is a stream of JSON lines (`progress` events, then
 `done` or `error`). A download is refused unless the body says
 `"yes": true`, and only one deploy runs at a time. The server needs
 `--project`; without it, it serves live values only.
@@ -385,9 +420,11 @@ The server answers these commands on `POST /api/logix/deploy`:
 - **One task, one program.** Multi-task projects are not in the subset.
 - **No hardware configuration.** The writer emits no I/O modules, so
   aliases to rack points need a controller project that already has them.
-- **A download resets tag values.** Values the controller holds are not
-  carried across a download, and there is no warm download. An online edit
-  keeps them, but cannot add tags.
+- **A download keeps values only for tags it can match.** A renamed or
+  retyped tag starts at the project's value, and the values are the ones
+  uploaded about half a minute before the controller stops. There is no
+  warm download: it still stops the controller. An online edit keeps every
+  value and does not stop anything, but cannot add tags.
 - **No runtime parity promise.** The subset is the set of constructs whose
   behaviour on both runtimes has been checked by running the same
   scenarios on each. Anything outside it is refused, not approximated.

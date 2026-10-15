@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/joyautomation/nautilus/logix/deploy"
+	"github.com/joyautomation/nautilus/logix/facade"
 	"github.com/joyautomation/nautilus/logix/logixd"
 )
 
@@ -63,7 +64,7 @@ func TestLogixServePlaneDownloadRewarmsTheSession(t *testing.T) {
 		// The download's verification compares the controller's upload with
 		// what was sent: let the fake controller hold what the deploy
 		// generates, as a real one does after the download.
-		_, _ = plane.Download(ctx, fillLadder, true, func(string) {})
+		_, _ = plane.Download(ctx, fillLadder, facade.DownloadOptions{ProgramMode: true}, func(string) {})
 		gen := ""
 		for name, raw := range f.files {
 			if strings.HasSuffix(name, "/Line.L5X") {
@@ -76,7 +77,7 @@ func TestLogixServePlaneDownloadRewarmsTheSession(t *testing.T) {
 		f.controllerL5X = gen
 
 		f.seen, lines = nil, nil
-		rep, err := plane.Download(ctx, fillLadder, true, progress)
+		rep, err := plane.Download(ctx, fillLadder, facade.DownloadOptions{ProgramMode: true}, progress)
 		if err != nil || rep.Applied != deploy.Download || !rep.Verified {
 			t.Fatalf("download: %v %+v", err, rep)
 		}
@@ -129,7 +130,7 @@ func TestLogixServePlaneReleasesTheSessionBeforeADownload(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.seen = nil
-		_, _ = plane.Download(context.Background(), fillLadder, false, func(string) {})
+		_, _ = plane.Download(context.Background(), fillLadder, facade.DownloadOptions{}, func(string) {})
 		closed := indexOf(f.seen, "DELETE /v1/sessions/")
 		if closed < 0 || closed > indexOf(f.seen, "/download") {
 			t.Errorf("the held session was not closed before the download: %v", f.seen)

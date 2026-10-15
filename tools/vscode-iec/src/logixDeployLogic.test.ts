@@ -39,12 +39,17 @@ test("the online edit modal names the file, the controller, its path and what it
   assert.match(msg, /a1b2c3d4e5f6/);
 });
 
-test("the download modal says the controller stops, resets its tags and stays in Program", () => {
+test("the download modal says the controller stops, what happens to the values, and that it stays in Program", () => {
   const msg = downloadConfirmMessage(INFO, "MainProgram.ld");
   assert.match(msg, /^Download MainProgram\.ld to DemoLine at AB_ETH-1/);
   assert.match(msg, /STOPS THE CONTROLLER/);
-  assert.match(msg, /tags are reset/);
+  assert.match(msg, /tag values are kept/);
+  assert.match(msg, /presets come from the project/);
+  assert.doesNotMatch(msg, /tags are reset/);
   assert.match(msg, /never switches it back to Run/);
+  const reset = downloadConfirmMessage(INFO, "MainProgram.ld", true);
+  assert.match(reset, /tags are reset to the project's values \(nautilus\.logix\.resetValuesOnDownload is on\)/);
+  assert.doesNotMatch(reset, /kept/);
   assert.match(downloadConfirmMessage({ hash: "x" }, "p.ld"), /to the Logix controller\?/);
 });
 
@@ -73,6 +78,16 @@ test("doneSummary says what happened, verified or not", () => {
   const dl = doneSummary("download", INFO, { event: "done", applied: "download", verified: true, mode: "Program", elapsedMs: 97_000 });
   assert.match(dl, /downloaded to DemoLine and verified in 97 s/);
   assert.match(dl, /in Program mode; put it in Run/);
+  assert.doesNotMatch(dl, /kept/); // an older naut says nothing about values
+  const kept = doneSummary("download", INFO, {
+    event: "done", applied: "download", verified: true, mode: "Program", elapsedMs: 120_000,
+    valuesKept: 11, resets: ["SpareSP: DINT → REAL"],
+  });
+  assert.equal(
+    kept,
+    "nautilus: downloaded to DemoLine and verified in 120 s, 11 tag values kept, reset to the project's: SpareSP: DINT → REAL — the controller is in Program mode; put it in Run when the process is ready"
+  );
+  assert.match(doneSummary("download", INFO, { event: "done", verified: true, valuesKept: -1 }), /, tags at the project's values — /);
   assert.match(doneSummary("online", INFO, { event: "done", verified: false, replaced: 1 }), /\(NOT verified\), 1 rung replaced/);
   assert.match(doneSummary("online", INFO, { event: "done", same: true }), /already runs this logic/);
 });

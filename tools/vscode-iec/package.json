@@ -640,6 +640,11 @@
           "type": "boolean",
           "default": true,
           "description": "Ask for confirmation before Download Program to Controller or Rollback Controller Program change what a running controller is executing. Turn this off only when iterating against a local simulator you're sure of — a tunneled nautilus.runtimeUrl can still point at a real plant, so leave it on for anything that might be live."
+        },
+        "nautilus.logix.resetValuesOnDownload": {
+          "type": "boolean",
+          "default": false,
+          "description": "Download Project to Logix Controller normally keeps the controller's tag values: every tag whose name, scope, type and dimensions are unchanged starts with the value it had on the controller (a timer's or counter's preset comes from the project). Turn this on to start every tag at the project's value instead, as `naut logix deploy --download --reset-values` does."
         }
       }
     },

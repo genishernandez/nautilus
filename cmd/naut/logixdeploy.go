@@ -32,15 +32,24 @@ through logixd, and then — on request — puts it on the controller:
                program and finalize them, keeping the controller in its
                mode. Refused when the tag set changed, because an online
                edit cannot create tags.
-  --download   DOWNLOAD: stops the controller and resets its tags to
-               project values. Needs --yes. The controller must already be
-               in Program mode, or pass --program-mode.
+  --download   DOWNLOAD: stops the controller and replaces its project.
+               Needs --yes. The controller must already be in Program
+               mode, or pass --program-mode. Tag values are KEPT: the
+               running controller is uploaded first and its values go into
+               the project before the build, for every tag whose name,
+               scope, type and dimensions are unchanged (a structure's or
+               Add-On Instruction's definition too) and that is not a
+               constant. A TIMER's or COUNTER's preset comes from the
+               project; its accumulator is kept. New tags and changed ones
+               start at the project's values, and each changed one is
+               reported. --reset-values starts every tag at the project's
+               value instead.
 
 Every path ends with a verification: the controller's program is uploaded
 again and its logic compared with what was sent (naut logix drift --logic).
 
 Flags:
-  --online, --download, --yes, --program-mode   as above
+  --online, --download, --yes, --program-mode, --reset-values   as above
   --comm-path   FactoryTalk Linx path to the controller (default: the
                 manifest's target.logix.comm-path)
   --agent       logixd URL (default: $NAUTILUS_LOGIXD_URL, then the
@@ -138,6 +147,7 @@ func runLogixDeploy(args []string) int {
 	download := fs.Bool("download", false, "download: stops the controller")
 	yes := fs.Bool("yes", false, "confirm a download")
 	programMode := fs.Bool("program-mode", false, "put the controller in Program mode before a download")
+	resetValues := fs.Bool("reset-values", false, "a download starts every tag at the project's value instead of keeping the controller's")
 	commPath := fs.String("comm-path", "", "FactoryTalk Linx path to the controller")
 	keep := fs.String("keep", "", "directory to keep artifacts in")
 	if err := fs.Parse(args); err != nil {
@@ -173,8 +183,9 @@ func runLogixDeploy(args []string) int {
 	if *download && !*yes {
 		fmt.Fprintf(os.Stderr,
 			"naut logix deploy: refusing a download without --yes.\n\n"+
-				"  A download STOPS the controller at %s and RESETS its tags to\n"+
-				"  project values. Re-run with --yes when you mean it; use --online\n"+
+				"  A download STOPS the controller at %s and replaces its project\n"+
+				"  (tag values are kept where the tag is unchanged; --reset-values\n"+
+				"  resets them all). Re-run with --yes when you mean it; use --online\n"+
 				"  for a rung change that keeps the controller running.\n", p.target.CommPath)
 		return 2
 	}
@@ -189,7 +200,7 @@ func runLogixDeploy(args []string) int {
 		mode = deploy.Download
 	}
 	opts := deploy.Options{
-		Client: logixd.New(*agent, *token), Target: p.target, Mode: mode, ProgramMode: *programMode,
+		Client: logixd.New(*agent, *token), Target: p.target, Mode: mode, ProgramMode: *programMode, ResetValues: *resetValues,
 		Log: func(format string, a ...any) { fmt.Printf(format+"\n", a...) },
 	}
 	if *keep != "" {

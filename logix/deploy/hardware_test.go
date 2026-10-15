@@ -2,8 +2,8 @@ package deploy
 
 // Against a real controller: what a download and an online edit do to the
 // values the controller holds. This DOWNLOADS, which stops the controller
-// and resets its tags, so it runs only when pointed at a controller that
-// may be stopped — an emulator, a bench rack:
+// and replaces its project, so it runs only when pointed at a controller
+// that may be stopped — an emulator, a bench rack:
 //
 //	NAUTILUS_LOGIXD_URL=http://sdk-box:8188 NAUTILUS_LOGIXD_TOKEN=... \
 //	NAUTILUS_LOGIX_DOWNLOAD_COMM_PATH='AB_ETH-1\10.0.0.5\Backplane\0' \
@@ -32,9 +32,10 @@ func envOr(k, def string) string {
 	return def
 }
 
-// LGA-037: a download resets tag values to the project's; an online edit
-// keeps the values the controller holds.
-func TestHardwareDownloadResetsValuesAndAnOnlineEditKeepsThem(t *testing.T) {
+// LGA-037, LGA-047: an online edit keeps the values the controller holds;
+// a download keeps them too (#273), and puts the project's back only when
+// asked to reset them.
+func TestHardwareDownloadKeepsValuesUnlessReset(t *testing.T) {
 	url := os.Getenv("NAUTILUS_LOGIXD_URL")
 	commPath := os.Getenv("NAUTILUS_LOGIX_DOWNLOAD_COMM_PATH")
 	host := os.Getenv("NAUTILUS_LOGIX_HOST")
@@ -53,13 +54,20 @@ func TestHardwareDownloadResetsValuesAndAnOnlineEditKeepsThem(t *testing.T) {
 	src := demoSource(t) // HiLevelSP : REAL := 85.0
 	const sp = "Program:MainProgram.HiLevelSP"
 
-	ctrl, err := logix.Dial(ctx, host)
-	if err != nil {
-		t.Fatalf("EtherNet/IP to %s: %v", host, err)
+	// A fresh connection per access: a download restarts the controller's
+	// project and resets every EtherNet/IP connection open before it.
+	dial := func() *logix.Controller {
+		t.Helper()
+		ctrl, err := logix.Dial(ctx, host)
+		if err != nil {
+			t.Fatalf("EtherNet/IP to %s: %v", host, err)
+		}
+		return ctrl
 	}
-	defer ctrl.Close()
 	read := func() float32 {
 		t.Helper()
+		ctrl := dial()
+		defer ctrl.Close()
 		raw, err := ctrl.ReadTag(ctx, sp, 1)
 		if err != nil || len(raw.Data) < 4 {
 			t.Fatalf("read %s: %v (%d bytes)", sp, err, len(raw.Data))
@@ -72,22 +80,25 @@ func TestHardwareDownloadResetsValuesAndAnOnlineEditKeepsThem(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		ctrl := dial()
+		defer ctrl.Close()
 		if err := ctrl.WriteTag(ctx, sp, 0xCA, 1, data); err != nil {
 			t.Fatalf("write %s: %v", sp, err)
 		}
 	}
-	download := func() {
+	download := func(src string, reset bool) *Report {
 		t.Helper()
-		rep, err := Run(ctx, src, Options{Client: c, Target: tgt, Mode: Download, ProgramMode: true})
+		rep, err := Run(ctx, src, Options{Client: c, Target: tgt, Mode: Download, ProgramMode: true, ResetValues: reset})
 		if err != nil {
 			t.Fatalf("download: %v", err)
 		}
 		if rep.Applied != Download || !rep.Verified {
 			t.Fatalf("download report = %+v", rep)
 		}
+		return rep
 	}
 
-	download()
+	download(src, true)
 	if got := read(); got != 85 {
 		t.Fatalf("after a download HiLevelSP = %v, want the project's 85", got)
 	}
@@ -112,9 +123,18 @@ func TestHardwareDownloadResetsValuesAndAnOnlineEditKeepsThem(t *testing.T) {
 		t.Errorf("after an online edit HiLevelSP = %v, want the 70 the controller held", got)
 	}
 
-	// A download puts the project's value back.
-	download()
+	// A download keeps it: the project's logic, the controller's value.
+	rep = download(src, false)
+	if rep.Values == nil || len(rep.Values.Kept) == 0 {
+		t.Errorf("download values = %+v", rep.Values)
+	}
+	if got := read(); got != 70 {
+		t.Errorf("after a download HiLevelSP = %v, want the 70 the controller held", got)
+	}
+
+	// Asked to reset, a download puts the project's value back.
+	download(src, true)
 	if got := read(); got != 85 {
-		t.Errorf("after a download HiLevelSP = %v, want the project's 85, not the 70 the controller held", got)
+		t.Errorf("after a download with ResetValues HiLevelSP = %v, want the project's 85, not the 70 the controller held", got)
 	}
 }

@@ -13,8 +13,11 @@
 //     retyped needs a download, because an online edit cannot create tags.
 //  3. Do the one asked for. An online edit replaces the routine's rungs in
 //     the running program with FinalizeEdits and leaves the controller's
-//     mode alone. A download stops the controller and resets its tags; the
-//     caller confirms it, never this package.
+//     mode alone. A download stops the controller and replaces its
+//     project; the caller confirms it, never this package. Unless asked to
+//     reset them, a download keeps the controller's tag values (values.go):
+//     the upload of step 2 comes first, and its values go into the project
+//     before the build.
 //  4. Upload again and compare with what was sent. A deploy that cannot
 //     prove it landed is reported as failed.
 package deploy
@@ -99,6 +102,10 @@ type Options struct {
 	// ProgramMode asks the SDK to put the controller in Program mode
 	// before a download; the SDK will not do it on its own.
 	ProgramMode bool
+	// ResetValues makes a download start every tag at the project's
+	// value. By default a download keeps the controller's values of the
+	// tags that survive it unchanged (PlanValues has the rule).
+	ResetValues bool
 	// Keep, when set, receives every artifact: the generated L5X files,
 	// the built ACD, the controller's before/after exports.
 	Keep func(name string, raw []byte)
@@ -125,6 +132,10 @@ type Report struct {
 	Replaced              uint32
 	Verified              bool
 	Elapsed               time.Duration
+	// Values is what a download did with the controller's tag values (for
+	// a build, what one would do); nil when they were not looked at — an
+	// online edit, a reset, or a controller with nothing to upload.
+	Values *ValuePlan
 }
 
 // DiagError carries the writer's rule diagnostics: the program is outside
@@ -208,7 +219,6 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	rep.Routine = gen.Controller.Programs[0].Routines[0].Name
 	routine := gen.Controller.Programs[0].Routines[0]
 	rep.Rungs = len(routine.Rungs)
-	keep(rep.Controller+".L5X", full)
 	if t.Language == "st" {
 		rungs, _, _ = writer.WriteRoutine("program.st", src, wopts)
 		keep(rep.Controller+".routine.L5X", rungs)
@@ -227,6 +237,63 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	}
 	fullRel, rungsRel, acdRel := rel(rep.Controller+".L5X"), rel(partialName), rel(rep.Controller+".ACD")
 
+	upload := func(name string) (*l5x.File, []byte, error) {
+		acd, lx := rel(name+".ACD"), rel(name+".L5X")
+		if evs, err := c.UploadToNew(ctx, t.CommPath, acd); err != nil {
+			return nil, nil, withEvents("upload "+name, err, evs)
+		}
+		if _, evs, err := c.Convert(ctx, acd, lx, false); err != nil {
+			return nil, nil, withEvents("convert "+name, err, evs)
+		}
+		raw, err := c.GetFile(ctx, lx)
+		if err != nil {
+			return nil, nil, err
+		}
+		keep(name+".L5X", raw)
+		f, err := l5x.Parse(raw)
+		return f, raw, err
+	}
+	var before *l5x.File
+	var beforeRaw []byte
+	uploadBefore := func() error {
+		var err error
+		before, beforeRaw, err = upload("before")
+		if err != nil {
+			if !controllerEmpty(err) {
+				return err
+			}
+			// A controller with no project in it cannot be uploaded from
+			// (RxE_NOT_FOUND). That is not a failure: it is the first
+			// download, and the comparison below is against nothing.
+			logf("the controller at %s has no project in it", t.CommPath)
+			before, beforeRaw = &l5x.File{Controller: &l5x.Controller{}}, nil
+		}
+		return nil
+	}
+
+	// 0. A download keeps the controller's values: upload what runs
+	// first and write its values into the project before the build, so
+	// the download carries them. (The values are the upload's: a value
+	// the program changes between the upload and the download, about
+	// the import + build's time, is not carried.)
+	var plan *ValuePlan
+	if o.Mode == Download && t.CommPath != "" && !o.ResetValues {
+		if err := uploadBefore(); err != nil {
+			return done(err)
+		}
+		if beforeRaw != nil {
+			if plan, err = PlanValues(gen, beforeRaw); err != nil {
+				return done(err)
+			}
+			if full, err = plan.Apply(full); err != nil {
+				return done(fmt.Errorf("keeping tag values: %w", err))
+			}
+			rep.Values = plan
+			logf("%s", plan.Summary())
+		}
+	}
+	keep(rep.Controller+".L5X", full)
+
 	// 1. Import + build.
 	if err := c.PutFile(ctx, fullRel, full); err != nil {
 		return done(err)
@@ -242,6 +309,14 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 		// project with the program emptied, then the program over it.
 		skeleton, _, _ := writer.WriteSkeleton("program."+langOf(t), src, wopts)
 		program, _, _ := writer.WriteProgramPartial("program."+langOf(t), src, wopts)
+		if plan != nil {
+			if skeleton, err = plan.Apply(skeleton); err != nil {
+				return done(fmt.Errorf("keeping tag values: %w", err))
+			}
+			if program, err = plan.Apply(program); err != nil {
+				return done(fmt.Errorf("keeping tag values: %w", err))
+			}
+		}
 		skelRel, progRel := rel(rep.Controller+".skeleton.L5X"), rel(rep.Controller+".program.L5X")
 		keep(rep.Controller+".skeleton.L5X", skeleton)
 		keep(rep.Controller+".program.L5X", program)
@@ -296,31 +371,17 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	}
 
 	// 2. What is running.
-	upload := func(name string) (*l5x.File, error) {
-		acd, lx := rel(name+".ACD"), rel(name+".L5X")
-		if evs, err := c.UploadToNew(ctx, t.CommPath, acd); err != nil {
-			return nil, withEvents("upload "+name, err, evs)
-		}
-		if _, evs, err := c.Convert(ctx, acd, lx, false); err != nil {
-			return nil, withEvents("convert "+name, err, evs)
-		}
-		raw, err := c.GetFile(ctx, lx)
-		if err != nil {
-			return nil, err
-		}
-		keep(name+".L5X", raw)
-		return l5x.Parse(raw)
-	}
-	before, err := upload("before")
-	if err != nil {
-		if !controllerEmpty(err) {
+	if before == nil {
+		if err := uploadBefore(); err != nil {
 			return done(err)
 		}
-		// A controller with no project in it cannot be uploaded from
-		// (RxE_NOT_FOUND). That is not a failure: it is the first
-		// download, and the comparison below is against nothing.
-		logf("the controller at %s has no project in it", t.CommPath)
-		before = &l5x.File{Controller: &l5x.Controller{}}
+		if o.Mode == BuildOnly && beforeRaw != nil {
+			// What a download would do with the values, for the report.
+			if p, err := PlanValues(gen, beforeRaw); err == nil {
+				rep.Values = p
+				logf("on a download, %s", p.Summary())
+			}
+		}
 	}
 	want := l5x.LogicOf(gen)
 	have := l5x.LogicOf(before)
@@ -412,7 +473,7 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	}
 
 	// 4. Verify.
-	after, err := upload("after")
+	after, _, err := upload("after")
 	if err != nil {
 		return done(fmt.Errorf("verify: %w", err))
 	}

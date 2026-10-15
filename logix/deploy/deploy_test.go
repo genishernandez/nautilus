@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/joyautomation/nautilus/lang/l5x"
 	"github.com/joyautomation/nautilus/logix/logixd"
 	"github.com/joyautomation/nautilus/logix/writer"
 )
@@ -479,5 +481,82 @@ func TestSessionEditsTheProgramNotTheSideProgram(t *testing.T) {
 			t.Fatalf("connect %d, again: err=%v report=%+v", i, err, rep)
 		}
 		_ = s.Close(context.Background())
+	}
+}
+
+func keepTarget(t *testing.T) Target {
+	o := keepOptions(t)
+	tgt := target()
+	tgt.PeriodMs, tgt.Libs, tgt.Inits, tgt.Tags, tgt.Descs, tgt.Side = o.PeriodMs, o.Libs, o.Inits, o.Tags, o.Descs, o.Side
+	return tgt
+}
+
+// A download keeps the controller's values (#273): the upload comes before
+// the import, and what is downloaded carries the controller's data.
+func TestDownloadKeepsTheControllersValues(t *testing.T) {
+	f, c := newFakeAgent(t, running(t))
+	// A new rung, so there is something to download.
+	src := strings.Replace(keepSource(t), "END_LD", "  RUNG extra\n    StopPB ( HiLevelAlm )\nEND_LD", 1)
+	var lines []string
+	rep, err := Run(context.Background(), src, Options{Client: c, Target: keepTarget(t), Mode: Download, ProgramMode: true,
+		Log: func(format string, a ...any) { lines = append(lines, fmt.Sprintf(format, a...)) }})
+	if err != nil || !rep.Verified {
+		t.Fatalf("err = %v, report = %+v", err, rep)
+	}
+	if rep.Values == nil || len(rep.Values.Kept) != 12 {
+		t.Fatalf("values = %+v", rep.Values)
+	}
+	upload, convert := -1, -1
+	for i, call := range f.calls {
+		if upload < 0 && strings.HasSuffix(call, "/upload-to-new") {
+			upload = i
+		}
+		if convert < 0 && strings.HasSuffix(call, "/convert") {
+			convert = i
+		}
+	}
+	if upload < 0 || upload > convert {
+		t.Errorf("the upload must come before the project's import: %v", f.calls)
+	}
+	uploads := 0
+	for _, call := range f.calls {
+		if strings.HasSuffix(call, "/upload-to-new") {
+			uploads++
+		}
+	}
+	if uploads != 2 {
+		t.Errorf("%d uploads, want 2 (before, which also decides the values, and after)", uploads)
+	}
+	dl, _ := l5x.Parse(f.running)
+	if v := tagIn(t, dl, "", "HiLevelSP").Value; v != 72.5 {
+		t.Errorf("downloaded HiLevelSP = %v, want the controller's 72.5", v)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "tag values: 12 kept from the controller") {
+		t.Errorf("log = %v", lines)
+	}
+
+	// --reset-values: the project's values, and no upload before the build.
+	f, c = newFakeAgent(t, running(t))
+	rep, err = Run(context.Background(), src, Options{Client: c, Target: keepTarget(t), Mode: Download, ResetValues: true})
+	if err != nil || rep.Values != nil {
+		t.Fatalf("err = %v, values = %+v", err, rep.Values)
+	}
+	dl, _ = l5x.Parse(f.running)
+	if v := tagIn(t, dl, "", "HiLevelSP").Value; v != 85.0 {
+		t.Errorf("reset: HiLevelSP = %v, want the project's 85", v)
+	}
+}
+
+// A build reports what a download would do with the values; an online
+// edit does not look at them.
+func TestBuildReportsTheValuePlan(t *testing.T) {
+	_, c := newFakeAgent(t, running(t))
+	o := keepTarget(t)
+	o.Tags["SpareSP"], o.Inits["SpareSP"] = "REAL", 5.0
+	src := strings.Replace(keepSource(t), "SpareSP    : DINT;", "SpareSP    : REAL;", 1)
+	src = strings.Replace(src, "GE(SpareSP, 0)", "GE(SpareSP, 0.0)", 1)
+	rep, err := Run(context.Background(), src, Options{Client: c, Target: o, Mode: BuildOnly})
+	if err != nil || rep.Values == nil || len(rep.Values.Reset) != 1 || rep.Values.Reset[0] != "SpareSP: DINT → REAL" {
+		t.Fatalf("err = %v, values = %+v", err, rep.Values)
 	}
 }

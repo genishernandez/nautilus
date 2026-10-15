@@ -26,6 +26,10 @@ export type DeployEvent =
       modeBefore?: string;
       mode?: string;
       elapsedMs?: number;
+      /** A download: how many tags kept the controller's value (-1: none were kept). */
+      valuesKept?: number;
+      /** A download: the tags reset to the project's value, each with its reason. */
+      resets?: string[];
     }
   | { event: "error"; status?: number; error: string };
 
@@ -66,11 +70,17 @@ export function onlineEditConfirmMessage(info: LogixInfo, programFile: string): 
 }
 
 /** The modal before a download — always shown, whatever
- * nautilus.confirmControllerWrites says: a download stops a PLC. */
-export function downloadConfirmMessage(info: LogixInfo, programFile: string): string {
+ * nautilus.confirmControllerWrites says: a download stops a PLC. It says
+ * what happens to the tag values: kept (the default) or reset
+ * (nautilus.logix.resetValuesOnDownload). */
+export function downloadConfirmMessage(info: LogixInfo, programFile: string, resetValues = false): string {
+  const values = resetValues
+    ? "its tags are reset to the project's values (nautilus.logix.resetValuesOnDownload is on)"
+    : "tag values are kept — each tag whose name and type are unchanged starts with the value it has on the controller now, " +
+      "new and changed tags start at the project's values, and timer and counter presets come from the project";
   return (
     `Download ${programFile} to ${where(info)}? ` +
-    "A DOWNLOAD STOPS THE CONTROLLER: it must be in Program mode, its tags are reset to the project's values, " +
+    `A DOWNLOAD STOPS THE CONTROLLER: it must be in Program mode, ${values}, ` +
     "and it stays in Program mode afterwards — nautilus never switches it back to Run."
   );
 }
@@ -126,13 +136,23 @@ export function doneSummary(mode: DeployMode, info: LogixInfo, ev: Extract<Deplo
   const verified = ev.verified ? " and verified" : " (NOT verified)";
   if (mode === "download") {
     return (
-      `nautilus: downloaded to ${name}${verified}${seconds(ev.elapsedMs)} — the controller is in ` +
+      `nautilus: downloaded to ${name}${verified}${seconds(ev.elapsedMs)}${valuesNote(ev)} — the controller is in ` +
       `${ev.mode || "Program"} mode; put it in Run when the process is ready`
     );
   }
   const rungs = ev.replaced ? `, ${ev.replaced} rung${ev.replaced === 1 ? "" : "s"} replaced` : "";
   const mode_ = ev.mode ? `, controller still in ${ev.mode}` : "";
   return `nautilus: online edit live on ${name}${verified}${rungs}${mode_}${seconds(ev.elapsedMs)} — commit the file to keep it`;
+}
+
+/** What a download did with the tag values, for its summary. */
+function valuesNote(ev: Extract<DeployEvent, { event: "done" }>): string {
+  if (ev.valuesKept === undefined) return "";
+  if (ev.valuesKept < 0) return ", tags at the project's values";
+  const n = ev.valuesKept;
+  let s = `, ${n} tag value${n === 1 ? "" : "s"} kept`;
+  if (ev.resets?.length) s += `, reset to the project's: ${ev.resets.join("; ")}`;
+  return s;
 }
 
 /** Does a refusal say the change needs a download (new tags, no routine)? */
