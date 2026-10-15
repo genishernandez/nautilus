@@ -33,6 +33,16 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   validation for the option that schedules the program in a CONTINUOUS
   Logix task, as the controller it was imported from did; `naut logix
   import --project` sets it. Needs a `naut` newer than 0.17.0.
+- **`target.logix.all-tags` and `target.logix.controller-scoped` in
+  `nautilus.yaml`.** Completion and validation for the two options
+  `naut logix import --project` now sets, so an imported project writes
+  back with the export's tags where the export had them: `all-tags: true`
+  writes every typed manifest tag the Logix target can carry as a
+  controller tag, named by a program or not (a tag only an EtherNet/IP
+  client writes is still the controller's), and `controller-scoped` lists program variables, such as
+  a timer the export had at controller scope, written back as controller
+  tags with their descriptions. Without `all-tags`, a tag no program names
+  is still not written. Needs a `naut` newer than 0.17.0.
 
 ### Changed
 

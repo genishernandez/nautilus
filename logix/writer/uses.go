@@ -1,6 +1,9 @@
 package writer
 
 import (
+	"sort"
+	"strings"
+
 	"github.com/joyautomation/nautilus/lang/fbd"
 	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/lang/ld"
@@ -184,4 +187,64 @@ func (u *useWalker) expr(e st.Expression) {
 	case *st.TypedLit:
 		// INT#5 wraps a number; Mode#Run names a member, not a variable.
 	}
+}
+
+// declareUnnamed is Options.AllTags: every manifest tag the program
+// neither declares nor names becomes a controller tag too, typed, seeded
+// and described from the manifest exactly as a named one is, in name
+// order (#370). One the Logix subset cannot carry (a STRING, a LINT) is
+// not written and refuses nothing: the program does not use it, and an
+// imported project, whose tag file holds every controller tag, reports
+// each such tag at import. The side code's heartbeat is the side code's
+// to declare.
+func (lw *lowered) declareUnnamed() {
+	if !lw.opts.AllTags {
+		return
+	}
+	names := make([]string, 0, len(lw.opts.Tags))
+	for name := range lw.opts.Tags {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	hb := strings.ToLower(strings.TrimSpace(lw.opts.Side.Heartbeat))
+	for _, name := range names {
+		k := strings.ToLower(name)
+		if _, declared := lw.vars[k]; declared || k == hb || lw.opts.Tags[name] == "" {
+			continue
+		}
+		v := ld.VarDecl{Name: name, Type: lw.opts.Tags[name], Section: "VAR_EXTERNAL"}
+		n, tags := len(lw.diags), len(lw.ctrlTags)
+		lw.declare(v)
+		if len(lw.diags) > n {
+			lw.diags, lw.ctrlTags = lw.diags[:n], lw.ctrlTags[:tags]
+			continue
+		}
+		lw.vars[k] = v
+	}
+}
+
+// checkControllerScoped refuses an Options.ControllerScoped name that is
+// not a program VAR: a controller tag already, or nothing at all, is a
+// stale target.logix.controller-scoped entry, never silently ignored.
+func (lw *lowered) checkControllerScoped() {
+	for _, name := range lw.opts.ControllerScoped {
+		v, ok := lw.vars[strings.ToLower(name)]
+		switch {
+		case !ok:
+			lw.diag(ruleVarSection, 0, "", "target.logix.controller-scoped names %s, which program %s does not declare; declare it VAR or remove the entry", name, lw.opts.Program)
+		case !strings.EqualFold(v.Section, "VAR"):
+			lw.diag(ruleVarSection, v.Line, "", "target.logix.controller-scoped names %s, which is %s, not a VAR: only a program variable moves to controller scope; remove the entry", name, v.Section)
+		}
+	}
+}
+
+// controllerScoped reports whether a program VAR is written at controller
+// scope (Options.ControllerScoped).
+func (lw *lowered) controllerScoped(name string) bool {
+	for _, n := range lw.opts.ControllerScoped {
+		if strings.EqualFold(n, name) {
+			return true
+		}
+	}
+	return false
 }

@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,10 +57,10 @@ func newFakeLogixd(t *testing.T) (*fakeLogixd, string, func()) {
 			name := strings.TrimPrefix(r.URL.Path, "/v1/files/")
 			switch r.Method {
 			case http.MethodPut:
-				buf := make([]byte, 1<<20)
-				n, _ := r.Body.Read(buf)
-				f.files[name] = append([]byte(nil), buf[:n]...)
-				ok(map[string]any{"path": name, "bytes": n})
+				// One Read may return part of the body; read all of it.
+				buf, _ := io.ReadAll(r.Body)
+				f.files[name] = buf
+				ok(map[string]any{"path": name, "bytes": len(buf)})
 			case http.MethodGet:
 				body, found := f.files[name]
 				if !found {

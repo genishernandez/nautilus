@@ -111,6 +111,44 @@ func TestLogixDeployTypesUndeclaredTagsFromTheManifest(t *testing.T) {
 	}
 }
 
+// target.logix.all-tags and controller-scoped, as `naut logix import`
+// writes them (#370, #371), reach both `naut logix deploy` and `naut logix
+// write`: the manifest tag no program names is written too, typed from
+// its init:, and the program's VAR listed under controller-scoped is a
+// controller tag carrying the description the entry gives it.
+func TestLogixDeployAllTagsAndControllerScoped(t *testing.T) {
+	t.Setenv("NAUTILUS_LOGIXD_URL", "")
+	f, url, stop := newFakeLogixd(t)
+	defer stop()
+	extra := "    all-tags: true\n    controller-scoped:\n      - { name: Step, desc: \"the fill step\" }\n"
+	dir := writeFiles(t, map[string]string{"nautilus.yaml": fillManifest(url, extra), "Fill.ld": fillLadder})
+
+	out := writeFiles(t, nil)
+	if code := runLogixWrite([]string{"-o", out + "/w.L5X", dir + "/Fill.ld"}); code != 0 {
+		t.Fatalf("naut logix write exit %d", code)
+	}
+	w, err := l5x.ParseFile(out + "/w.L5X")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, doc := range map[string]*l5x.File{"deploy": deployed(t, f, dir), "write": w} {
+		c := doc.Controller
+		got := map[string]*l5x.Tag{}
+		for _, tg := range c.Tags {
+			got[tg.Name] = tg
+		}
+		if u := got["Unused"]; u == nil || u.DataType != "REAL" {
+			t.Errorf("%s: the tag no program names = %+v, want a REAL controller tag", name, u)
+		}
+		if s := got["Step"]; s == nil || s.DataType != "DINT" || s.Description != "the fill step" {
+			t.Errorf("%s: controller-scoped Step = %+v", name, s)
+		}
+		if n := len(c.Programs[0].Tags); n != 0 {
+			t.Errorf("%s: %d program tags, want none", name, n)
+		}
+	}
+}
+
 // LGA-003: the task becomes a periodic Logix task at its scan rate, the
 // program a Logix program with its VAR as program tags, the rungs its
 // MainRoutine; program, routine and task under target.logix rename them.

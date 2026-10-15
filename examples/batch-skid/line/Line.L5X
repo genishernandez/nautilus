@@ -86,7 +86,7 @@
 <![CDATA[LT-line: ready for a transfer while the receiving tank isn't full]]>
 </Comment>
 <Text>
-<![CDATA[LES(Line_TankLevel,80.0)OTE(Line_Ready);]]>
+<![CDATA[LT(Line_TankLevel,80.0)OTE(Line_Ready);]]>
 </Text>
 </Rung>
 <Rung Number="1" Type="N">

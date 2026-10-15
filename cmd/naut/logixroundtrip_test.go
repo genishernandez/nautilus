@@ -6,7 +6,8 @@ package main
 // TestRoundTripPublicYardstick is the library-level form of the rung
 // comparison; this pins the user's flow and everything it puts back —
 // controller, task, routine, initial values, descriptions — and names
-// every difference that remains.
+// every difference that remains: none in the logic, none in a tag's
+// value or description.
 
 import (
 	"fmt"
@@ -48,20 +49,13 @@ func TestLogixRoundTripYardstickCLI(t *testing.T) {
 		t.Fatalf("write: exit %d\n%s", code, out)
 	}
 
-	// 3. naut logix normalize --logic --check back.L5X Line.L5X — every
-	// logic difference, named. These are the documented ones
-	// (docs/design/logix-authoring.md, "Round trip on the yardstick"); a
-	// new one fails here.
+	// 3. naut logix normalize --logic --check back.L5X Line.L5X — the
+	// logic is the same: every tag back at its own scope (AcceptTmr at
+	// controller scope, #371; Line_BatchId, which no routine names, #370)
+	// and every rung byte-identical (#372). A difference fails here
+	// (docs/design/logix-authoring.md, "Round trip on the yardstick").
 	out, code = capture(t, func() int { return runLogix([]string{"normalize", "--logic", "--check", back, src}) })
-	want := fmt.Sprintf(`4 logic difference(s) between %s (first) and %s (second):
-  tag AcceptTmr (TIMER): only on the first side
-  tag Line_BatchId (DINT): only on the first side
-  tag MainProgram.AcceptTmr (TIMER): only on the second side
-  routine MainProgram/Receive rung 0:
-    LES(Line_TankLevel,80.0)OTE(Line_Ready);
-    LT(Line_TankLevel,80.0)OTE(Line_Ready);
-`, src, back)
-	if code != 1 || out != want {
+	if want := fmt.Sprintf("%s and %s have the same logic\n", src, back); code != 0 || out != want {
 		t.Errorf("logic check: exit %d\n%s\nwant\n%s", code, out, want)
 	}
 
@@ -110,12 +104,13 @@ func TestLogixRoundTripYardstickCLI(t *testing.T) {
 		}
 	}
 	sort.Strings(diffs)
-	wantDiffs := []string{
-		`AcceptTmr: description "", want "Accept-handshake settling delay"`,
-		"Line_BatchId: missing",
+	if len(diffs) > 0 {
+		t.Errorf("tag differences:\n  %s", strings.Join(diffs, "\n  "))
 	}
-	if !reflect.DeepEqual(diffs, wantDiffs) {
-		t.Errorf("tag differences:\n  %s\nwant\n  %s", strings.Join(diffs, "\n  "), strings.Join(wantDiffs, "\n  "))
+	// Each written where the export had it: every tag at controller
+	// scope, none in the program.
+	if n := len(gc.Programs[0].Tags); n != 0 || len(gc.Tags) != len(oc.Tags) {
+		t.Errorf("%d controller tags and %d program tags, want %d and 0", len(gc.Tags), n, len(oc.Tags))
 	}
 
 	// A flag still overrides the manifest.

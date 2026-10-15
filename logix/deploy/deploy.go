@@ -72,6 +72,11 @@ type Target struct {
 	// Tags are the manifest's tags and their IEC types (writer.Options.Tags):
 	// a rung naming one without VAR_EXTERNAL still gets its controller tag.
 	Tags map[string]string
+	// AllTags writes every manifest tag, named by the program or not
+	// (writer.Options.AllTags); ControllerScoped the program variables
+	// written at controller scope (writer.Options.ControllerScoped).
+	AllTags          bool
+	ControllerScoped []string
 	// Side is the side code to emit (writer.Side).
 	Side writer.Side
 	// Language is the program's language, "ld" (default) or "st".
@@ -181,6 +186,7 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 		Controller: t.Controller, Program: t.Program, Routine: t.Routine, Task: t.Task,
 		PeriodMs: t.PeriodMs, ProcessorType: t.Processor, MajorRev: major, MinorRev: minor, Libs: t.Libs,
 		Inits: t.Inits, Descs: t.Descs, Aliases: t.Aliases, Tags: t.Tags, Side: t.Side,
+		AllTags: t.AllTags, ControllerScoped: t.ControllerScoped,
 	}
 	full, diags, err := t.write(src, wopts)
 	if err != nil {

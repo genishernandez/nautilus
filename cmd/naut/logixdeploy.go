@@ -101,6 +101,13 @@ func loadLogixProject(dir string) (*logixProject, error) {
 			aliases[tg.Name] = tg.Alias
 		}
 	}
+	var scoped []string
+	for _, cs := range tgt.ControllerScoped {
+		scoped = append(scoped, cs.Name)
+		if cs.Desc != "" {
+			descs[cs.Name] = cs.Desc
+		}
+	}
 	var side writer.Side
 	if tgt.Side != nil {
 		side.Heartbeat = tgt.Side.Heartbeat
@@ -116,6 +123,7 @@ func loadLogixProject(dir string) (*logixProject, error) {
 			Program: tgt.Program, Routine: tgt.Routine, Task: tgt.Task,
 			PeriodMs: period,
 			CommPath: tgt.CommPath, Libs: libs, Inits: inits, Descs: descs, Aliases: aliases, Tags: tags, Side: side,
+			AllTags: tgt.AllTags, ControllerScoped: scoped,
 			Language: writer.Language(progPath),
 		},
 		host: tgt.Host, slot: tgt.Slot, port: tgt.Port, agent: tgt.Agent,

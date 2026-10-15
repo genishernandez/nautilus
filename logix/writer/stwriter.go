@@ -140,6 +140,8 @@ func lowerST(src string, opts Options) (*lowered, error) {
 	for _, v := range append(m.Vars, implicit...) {
 		lw.declare(v)
 	}
+	lw.declareUnnamed()
+	lw.checkControllerScoped()
 	w := &stWriter{lw: lw}
 	w.block(prog.Statements, 0)
 	lw.stLines = w.lines

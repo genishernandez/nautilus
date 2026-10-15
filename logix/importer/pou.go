@@ -511,7 +511,7 @@ func (im *importer) declareFound(sc *scope, p *pou, f *found, blockType string) 
 		}
 		d := decl{Name: l5x.Ident(f.tag.Name), Type: typ, Section: "VAR", Comment: firstLine(f.tag.Description)}
 		if f.ext && sc.ctrl != nil {
-			d.Comment = strings.TrimSpace("controller-scoped in the export; a block instance is program-scoped in nautilus. " + d.Comment)
+			d.Comment = strings.TrimSpace(movedComment + d.Comment)
 			im.movedInstance(f)
 		}
 		p.declare(d)
@@ -528,7 +528,7 @@ func (im *importer) declareFound(sc *scope, p *pou, f *found, blockType string) 
 			return false
 		}
 		if f.ext && sc.ctrl != nil {
-			d.Comment = strings.TrimSpace("controller-scoped in the export; a block instance is program-scoped in nautilus. " + d.Comment)
+			d.Comment = strings.TrimSpace(movedComment + d.Comment)
 			im.movedInstance(f)
 		}
 		p.declare(d)
@@ -547,10 +547,17 @@ func (im *importer) declareFound(sc *scope, p *pou, f *found, blockType string) 
 	return true
 }
 
+// movedComment heads the declaration of a controller-scoped block
+// instance: a block instance is a program's in nautilus, and the
+// manifest's target.logix.controller-scoped puts it back at controller
+// scope when the program is written as Logix (#371).
+const movedComment = "controller-scoped in the export, and written back there (target.logix.controller-scoped in nautilus.yaml). "
+
 // movedInstance records a controller tag the import declared as a block
 // instance inside a program: it is program-scoped now, so the tag file
 // must not also carry it, or every program declaring it shadows a
-// project tag of the same name.
+// project tag of the same name; the manifest lists it under
+// target.logix.controller-scoped instead.
 func (im *importer) movedInstance(f *found) {
 	if f.tag != nil && im.ctrl[strings.ToLower(f.tag.Name)] == f.tag {
 		im.moved[strings.ToLower(f.tag.Name)] = true

@@ -6,11 +6,25 @@ claims:
     claim: >-
       The manifest tags a program names become controller-scope Logix tags
       carrying their initial values and descriptions; a tag no program names
-      is not written.
+      is not written, unless `target.logix` sets `all-tags: true`, and then
+      every manifest tag with a type the subset carries is a controller
+      tag, named or not.
     source: "#a-project-with-a-logix-target"
     tests:
       - go ./logix/writer TestManifestInitsAndDescriptionsLandOnControllerTags
       - go ./logix/writer TestImplicitTagsBecomeControllerTags
+      - go ./logix/writer TestAllTagsWritesTagsNoProgramNames
+      - go ./logix/writer TestAllTagsSkipsWhatLogixCannotCarry
+      - go ./cmd/naut TestLogixDeployAllTagsAndControllerScoped
+    note: >-
+      TestAllTagsWritesTagsNoProgramNames writes the same ladder and ST
+      programs with all-tags off (the unnamed DINT, REAL and INT array are
+      not written) and on (each is, typed, seeded and described from the
+      manifest; the side code's heartbeat stays the side code's). An
+      unnamed tag the subset cannot carry (a STRING, a LINT) is not written
+      and refuses nothing, where the same tag named is refused. The CLI
+      test reads all-tags from nautilus.yaml through both `naut logix deploy`
+      (to a fake agent) and `naut logix write`.
 
   - id: LGA-002
     claim: >-
@@ -391,6 +405,36 @@ claims:
       ("the export has no module definition to type it"), of a tag not in
       the export, of a whole TIMER, of a member the target lacks, and a
       program-scoped alias tag.
+
+  - id: LGA-044
+    claim: >-
+      An imported project writes back with the export's tags where the
+      export had them: a controller-scoped timer, counter or Add-On
+      Instruction instance, declared in its program, is listed under
+      `target.logix.controller-scoped` with its description and written back
+      at controller scope, and with `all-tags: true` a controller tag no
+      imported routine names is written back too, the tag file typing each
+      tag. A tag with no nautilus type, or one the subset lacks, is
+      reported. On the public yardstick
+      (`examples/batch-skid/line/Line.L5X`) the logic comparison finds no
+      differences.
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./cmd/naut TestLogixRoundTripYardstickCLI
+      - go ./logix/importer TestRoundTripPublicYardstick
+      - go ./logix/importer TestImportTypesEveryControllerTag
+      - go ./logix/writer TestControllerScopedVarBecomesAControllerTag
+      - go ./logix/writer TestControllerScopedAOIInstance
+      - go ./logix/writer TestControllerScopedRefusesWhatIsNotAProgramVar
+      - go ./cmd/naut TestLogixDeployAllTagsAndControllerScoped
+    note: >-
+      TestLogixRoundTripYardstickCLI runs import --project, naut check, naut
+      logix write and normalize --logic --check on the public yardstick: "the
+      same logic", every tag's value and description equal to the export's,
+      AcceptTmr and Line_BatchId among the controller tags and no program
+      tags. TestImportTypesEveryControllerTag asserts the tag file's types
+      (a DINT, an array, a tag with no value) and the report for a MESSAGE, a
+      multi-dimensional array, an unnamed TIMER and a LINT.
 
   - id: LGA-026
     claim: >-

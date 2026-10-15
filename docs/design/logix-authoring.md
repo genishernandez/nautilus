@@ -356,7 +356,7 @@ corpus. Estimate was about a week; it took one session. Timebox not hit.
   mnemonics) are in the emit set.** The seventh, `LES`, is the editor
   caption, not neutral text (§21 of `logix-target.md`: it is `LT`), so
   that fixture would fail an SDK build exactly as DemoProgram's `GEQ` did —
-  worth a one-token fix in `examples/`. The real gap is the data model:
+  worth a one-token fix in `examples/` (made 2026-10-14, #372). The real gap is the data model:
   `Line.L5X` has one UDT (`Line_Status`) and a coil on its member, and v1
   has no UDTs. **Instruction set: covered. Types: not yet.**
 - *An instruction not equivalent and not rejectable* — none in v1. The two
@@ -628,7 +628,8 @@ loop; generated rungs online-edit; licence as recorded.
   One rule changed from a conformance finding (CTU ends its rung).
 - *The equivalent subset is too small to be useful* — the yardstick is
   batch-skid `line/Line.L5X`. Its instruction set is covered (all of
-  `XIC XIO OTE OTU TON GE`, plus `LT` once its `LES` caption is fixed),
+  `XIC XIO OTE OTU TON GE`, plus `LT` once its `LES` caption is fixed —
+  fixed 2026-10-14, #372),
   and every instruction family now has behavioural equivalence measured on
   Echo. What it cannot express is the UDT (`Line_Status` with a coil on a
   member). **Instructions: not a toy. Types: still v1.** Widening to UDTs
@@ -677,8 +678,9 @@ over EtherNet/IP that the controller's logic then acts on.
 
 **The yardstick, written:** `logix/writer/testdata/conformance/yardstick`
 is batch-skid's `line/Line.L5X` Receive routine as a nautilus project. The
-writer emits the export's rung text, with `LES` spelled `LT`
-(`TestYardstickMatchesLineL5X`). **Downloaded to Echo and run there: 3 of
+writer emits the export's rung text byte for byte
+(`TestYardstickMatchesLineL5X`; until #372 corrected the example's `LES`
+caption, with `LES` spelled `LT`). **Downloaded to Echo and run there: 3 of
 3 scenarios pass on both runtimes** (ready below 80 %, the 2 s settle
 before accept with a fault dropping it and raising the structure's alarm
 member, the high-level cutoff unlatching an accept the same scan the OTE
@@ -1493,7 +1495,8 @@ program, was also left in the tag file). Fixed here:
   honour instead of turning the task PERIODIC at the 10 ms nautilus scan.
 - A controller-scoped TIMER/COUNTER the import declares as a program
   instance is left out of the tag file (unless some program also names it
-  as a tag), so the imported project checks clean.
+  as a tag), so the imported project checks clean. (The follow-up below
+  lists it under `target.logix.controller-scoped` instead.)
 - `naut logix normalize --check` gained `--logic`: drift `--logic`'s
   comparison (programs, routines, rung text and comments, tag names,
   scopes and types; never values) between two files on disk, each
@@ -1501,32 +1504,34 @@ program, was also left in the tag file). Fixed here:
   a lean export can never be equal (below), so this is the diff the beat
   shows.
 
-**Outcome: equivalent, not identical, with four logic differences, each
-named** (`TestLogixRoundTripYardstickCLI` in `cmd/naut` pins the exact
-output; a new difference fails it):
+**Outcome on #276: equivalent, not identical, with four logic
+differences, each named** — rung 0's `LES(` came back `LT(`, `AcceptTmr`
+came back program-scoped (`MainProgram.AcceptTmr`) and without its
+description, and `Line_BatchId`, which no routine names, was not written.
+Each became an issue; all three are closed by the follow-up below.
+
+**Follow-up (2026-10-14, #370, #371, #372): the same logic, no
+differences.** `TestLogixRoundTripYardstickCLI` in `cmd/naut` pins the
+exact output; any difference fails it:
 
 ```
-4 logic difference(s) between Line.L5X (first) and back.L5X (second):
-  tag AcceptTmr (TIMER): only on the first side
-  tag Line_BatchId (DINT): only on the first side
-  tag MainProgram.AcceptTmr (TIMER): only on the second side
-  routine MainProgram/Receive rung 0:
-    LES(Line_TankLevel,80.0)OTE(Line_Ready);
-    LT(Line_TankLevel,80.0)OTE(Line_Ready);
+Line.L5X and back.L5X have the same logic
 ```
 
-| difference | class | issue |
+| was | fix | issue |
 | --- | --- | --- |
-| rung 0 `LES(` → `LT(` | equivalent: spelling. `LES` is the editor caption, `LT` what an export carries (logix-target.md, display/neutral-text split); the yardstick was hand-written with the caption. Checked on the v38 SDK (2026-10-14, #377): `LT(a,c)` imports, builds and exports as `LT`; `LES(a,c)` imports and exports unchanged but fails the build (`RxCMP_E_AUDIT_INVALIDOPTYPE`, DINT and REAL operands alike), so the writer's `LT` is what a controller takes | #372 (correct the example) |
-| `AcceptTmr` controller → program scope | semantic for an external client (`AcceptTmr.ACC` moves to `Program:MainProgram.AcceptTmr.ACC`); the rungs run the same | #371 |
-| `Line_BatchId` not written | semantic: a tag the skid writes over EtherNet/IP is missing; no routine names it and the writer emits only the tags a program names | #370 |
+| rung 0 `LES(` → `LT(` (spelling: `LES` is the editor caption, `LT` what an export carries, logix-target.md's display/neutral-text split) | The example itself was wrong: on the v38 SDK (2026-10-14, #377) `LT(a,c)` imports, builds and exports as `LT`, while `LES(a,c)` imports and exports unchanged but fails the build (`RxCMP_E_AUDIT_INVALIDOPTYPE`, DINT and REAL operands alike). Rung 0 of `Line.L5X` now reads `LT(Line_TankLevel,80.0)OTE(Line_Ready);`, a third commit on the file (the README's two-revision interlock story is unchanged). No other example or fixture L5X carries a caption in rung text | #372 |
+| `AcceptTmr` controller → program scope, description dropped (semantic for an external client: `AcceptTmr.ACC` moved to `Program:MainProgram.AcceptTmr.ACC`) | A block instance is still a program's in nautilus (a manifest tag cannot be a TON), so the import keeps declaring it in `MainProgram.ld`; it also lists it in the manifest, `target.logix.controller-scoped: [{ name: AcceptTmr, desc: "Accept-handshake settling delay" }]`, and the writer emits a listed program `VAR` as a controller tag with that description. The rungs are unchanged. A listed name that is not a program `VAR` is a diagnostic, never ignored | #371 |
+| `Line_BatchId` not written (semantic: the skid writes it over EtherNet/IP; no routine names it and the writer emitted only the tags a program names) | The import sets `target.logix.all-tags: true` — its tag file is the controller's tag set — and the writer then emits every typed manifest tag it can carry, named or not. The tag file now types each tag whose `init:` does not already say its type (`Line_BatchId`: `type: DINT`, since `init: 0` alone is a REAL); a tag with no nautilus type (`MESSAGE`, a multi-dimensional array, an unnamed TIMER) stays in the tag file as documentation, and one whose type the v1 subset lacks (`STRING`, `LINT`, unsigned) stays there too and is skipped by the writer, not refused; the import reports each, because no write can create it. Without `all-tags` a tag no program names is still not written (LGA-001): the opt-in keeps a hand-written project's tag set, and so its `--online` deploys, unchanged | #370 |
 
-Rungs 1–4 are byte-identical, all five rung comments are identical, the
+Rungs 0–4 are byte-identical, all five rung comments are identical, the
 controller (`LineController`, 1769-L33ER, 36.11), program, routine
-(`Receive`) and task (`MainTask`, CONTINUOUS) are identical, and every
-written tag's initial value and description equals the export's.
+(`Receive`) and task (`MainTask`, CONTINUOUS) are identical, every one of
+the export's eight controller tags comes back at controller scope with its
+initial value and description, and the program has no tags, as in the
+export.
 
-Outside the logic comparison (the raw `diff` is 133 lines; `normalize
+Outside the logic comparison (the raw `diff` is 129 lines; `normalize
 --check` without `--logic` says "differ"):
 
 - **Equivalent — envelope.** The writer emits a whole project where the
@@ -1535,18 +1540,23 @@ Outside the logic comparison (the raw `diff` is 133 lines; `normalize
   `WallClockTime`, `Trends`, `TimeSynchronize`, `EthernetPorts`, more
   `Controller` attributes, `Owner="nautilus"`, a different
   `ExportOptions`, and `ExportDate="(pinned)"`.
-- **Equivalent — formatting.** Controller tags in name order rather than
-  declaration order; each value also as `<Data Format="L5K">`; the
+- **Equivalent — formatting.** Controller tags in the program's
+  declaration order (its `VAR_EXTERNAL`, which the import sorts by name,
+  then `AcceptTmr`, then `Line_BatchId`, which no routine names) rather
+  than the export's; each value also as `<Data Format="L5K">`; the
   Decorated data on its own lines.
 - **Named — metadata.** `SoftwareRevision` 38.01 against 36.00; the UDT's
-  description and `AcceptTmr`'s are not written (#373, #371). The `Local`
-  module's product code and backplane are the 1756-L85E's whatever the
-  processor (#373, unverified for CompactLogix).
+  description is not written (#373). The `Local` module's product code
+  and backplane are the 1756-L85E's whatever the processor (#373,
+  unverified for CompactLogix).
+
+Not yet checked on a controller: the v38 build of the corrected
+`Line.L5X` and of a write-back with a controller-scoped `TIMER`.
 
 What the video can say, word for word: *"Import, write back, compare the
-logic: four differences, and each one has a name — one is a spelling, the
-timer moved into the program, and one tag no rung uses isn't written."*
-If #372 lands first the spelling line disappears.
+logic: no differences — every rung, and every tag where the controller had
+it, including a timer at controller scope and a tag only the skid
+writes."*
 
 ### Follow-up — deploy from the editor, verified on a controller (2026-10-14, #375)
 
