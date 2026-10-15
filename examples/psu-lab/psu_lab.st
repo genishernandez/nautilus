@@ -1,7 +1,7 @@
 (* psu_lab.st: a synthetic fixture for the supply blocks of lib/server.st:
    LAB1 with one supply (PsuSingle) and LAB4 with four (PsuUnit), wired as
    gen.py wires a server. Hand-written, not generated; none of it is part
-   of the recorded cluster. The tests are in it-cluster_test.yaml. *)
+   of the recorded cluster. The tests are in psu-lab_test.yaml. *)
 PROGRAM PsuLab
 VAR_EXTERNAL
   Sim_Room : SimRoom;

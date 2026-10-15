@@ -14,3 +14,4 @@
 - { name: Sim_LAB4_PSU3, role: state, type: SimPSU, desc: "LAB4_PSU3 fault inputs (SIMULATION)" }
 - { name: LAB4_PSU4, role: state, type: PSU, init: { CapacityW: 860, InputOk: true, InputV: 230, Name: "Bay 4", Present: true }, desc: "LAB4_PSU4 as the fixture reports it" }
 - { name: Sim_LAB4_PSU4, role: state, type: SimPSU, desc: "LAB4_PSU4 fault inputs (SIMULATION)" }
+- { name: Sim_Room, role: state, type: SimRoom, desc: "The room (SIMULATION)" }

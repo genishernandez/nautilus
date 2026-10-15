@@ -23,9 +23,6 @@ tasks:
     program: scenarios.st
     scan: 1s
     dt-tag: ScenarioDtS
-  - name: psu-lab
-    program: psu_lab.st
-    scan: 1s
 
 drivers:
   - type: replay
@@ -37,4 +34,3 @@ tag-files:
   - tags/switches.yaml
   - tags/nodes.yaml
   - tags/faults.yaml
-  - tags/psu_lab.yaml
