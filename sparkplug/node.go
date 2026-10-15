@@ -135,7 +135,8 @@ type Node struct {
 	snapBuf   map[string]runtime.Sample // reused across ticks; see Tags.SnapshotInto
 	snapGen   uint64                    // store write generation snapBuf holds
 
-	sf *storeForward // nil unless WithStoreForward
+	sf     *storeForward // nil unless WithStoreForward
+	sfFile string        // WithStoreForwardFile: journal sf here
 
 	tokenTimeout time.Duration // bound on every MQTT token wait; tests shorten it
 	// retryInterval is how long a client made by newSession waits between
@@ -242,6 +243,12 @@ func New(rt *runtime.Runtime, cfg Config, opts ...Option) (*Node, error) {
 	if err := validateWritable(n.writable); err != nil {
 		return nil, err
 	}
+	if n.sfFile != "" {
+		if n.sf == nil {
+			return nil, fmt.Errorf("sparkplug: WithStoreForwardFile needs WithStoreForward — the file journals that buffer")
+		}
+		n.sf.path, n.sf.log = n.sfFile, n.log
+	}
 	// Devices: each id births on its own topic, so it must be a legal topic
 	// level and unique; each tag rides exactly one device, or a command
 	// addressed to one could write a tag the other publishes.
@@ -303,16 +310,27 @@ func (n *Node) Start(ctx context.Context) error {
 	n.ownsClient = true
 	n.mu.Unlock()
 
+	// The store-and-forward file: a backlog a previous process left there
+	// is loaded now and replays, as historical, after the first birth.
+	if n.sf != nil {
+		if err := n.sf.open(); err != nil {
+			return err
+		}
+	}
+
 	opts, err := n.clientOptions()
 	if err != nil {
+		n.closeStoreForward()
 		return err
 	}
 	n.cli = mqtt.NewClient(opts)
 	tok := n.cli.Connect()
 	if !tok.WaitTimeout(connectTimeout) {
+		n.closeStoreForward()
 		return fmt.Errorf("sparkplug: connect %s: timed out", n.cfg.BrokerURL)
 	}
 	if tok.Error() != nil {
+		n.closeStoreForward()
 		return fmt.Errorf("sparkplug: connect %s: %w", n.cfg.BrokerURL, tok.Error())
 	}
 
@@ -395,6 +413,16 @@ func (n *Node) Stop() {
 	n.bdSeq = (n.bdSeq + 1) % 256
 	n.born = false
 	n.mu.Unlock()
+	// The tick loop has exited, so nothing buffers past here: sync and
+	// close the store-and-forward file. What it holds is the backlog the
+	// next process (or the next Start) replays.
+	n.closeStoreForward()
+}
+
+func (n *Node) closeStoreForward() {
+	if n.sf != nil {
+		n.sf.close()
+	}
 }
 
 // onConnect subscribes to the command topics (and the primary host's STATE)

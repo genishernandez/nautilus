@@ -192,6 +192,28 @@ claims:
     tests:
       - go ./sparkplug TestStoreForwardRingAndDrain
       - go ./sparkplug TestStoreForwardRingDropsOldestAndDrainsInBatches
+  - id: SPB-028
+    claim: >-
+      With `store-forward-file`, the store-and-forward buffer is journaled
+      to that file as it fills, so a process exit during an outage does not
+      lose it: the next start loads it and replays it, marked historical and
+      with its original timestamps, after the first birth (whether the
+      outage was the broker or the primary host, in either
+      `primary-host-offline` mode), then clears the file. The file is
+      bounded like the ring; a torn last record is skipped with a log line
+      and an unreadable file is set aside. Without the key nothing is
+      written to disk.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestStoreForwardFileSurvivesARestartDuringABrokerOutage
+      - go ./sparkplug TestStoreForwardFileSurvivesARestartDuringAHostOutage
+      - go ./sparkplug TestStoreForwardFileRoundTrip
+      - go ./sparkplug TestStoreForwardFileIsBoundedLikeTheRing
+      - go ./sparkplug TestStoreForwardFileSkipsATornLastRecord
+      - go ./sparkplug TestStoreForwardFileSetsAnUnreadableFileAside
+      - go ./sparkplug TestStoreForwardFileMisconfiguration
+      - go ./sparkplug TestStoreForwardWithoutAFileTouchesNoDisk
+      - go ./internal/project TestSparkplugStoreForwardFile
   - id: SPB-022
     claim: >-
       `bdseq-file` persists the birth-death sequence number across

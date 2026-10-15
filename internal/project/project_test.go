@@ -3,6 +3,7 @@ package project
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -278,6 +279,33 @@ func TestSparkplugPrimaryHostOffline(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: error %v, want one containing %q", extra, err, want)
 		}
+	}
+}
+
+// store-forward-file journals the store-forward buffer; it needs that
+// buffer, and the node it builds starts with the file.
+func TestSparkplugStoreForwardFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "sf.log")
+	section := func(extra string) string {
+		return manifest + "\nsparkplug:\n  broker: tcp://x:1883\n  group-id: Joy\n" + extra
+	}
+	p, err := Load(fsys(section("  store-forward: 50\n  store-forward-file: "+file+"\n")), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.sparkplug.StoreForwardFile; got != file {
+		t.Fatalf("store-forward-file = %q, want %q", got, file)
+	}
+	rt, err := runtime.New(p.Runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := p.Sparkplug(rt); err != nil || n == nil {
+		t.Fatalf("node %v, %v", n, err)
+	}
+	_, err = Load(fsys(section("  store-forward-file: sf.log\n")), "")
+	if err == nil || !strings.Contains(err.Error(), "store-forward-file needs store-forward") {
+		t.Fatalf("store-forward-file without store-forward: %v", err)
 	}
 }
 

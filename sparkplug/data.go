@@ -230,6 +230,9 @@ func (n *Node) drainStoreForward() bool {
 	sent, ok := n.publishRecords(recs)
 	if !ok {
 		n.sf.requeue(recs[sent:])
+	}
+	n.sf.delivered(recs[:sent]) // the file's bookkeeping; no-op without one
+	if !ok {
 		return false
 	}
 	if left := n.sf.len(); left > 0 {
