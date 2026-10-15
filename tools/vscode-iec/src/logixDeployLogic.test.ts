@@ -9,7 +9,10 @@ import {
   downloadConfirmMessage,
   NdjsonSplitter,
   needsDownload,
+  needsProgramMode,
   onlineEditConfirmMessage,
+  readDeployStream,
+  refusalButtons,
   serveCliArgs,
   shellLine,
 } from "./logixDeployLogic";
@@ -106,4 +109,100 @@ test("serveCliArgs serves the project where nautilus.runtimeUrl points", () => {
 test("shellLine quotes what a shell would split", () => {
   assert.equal(shellLine("naut", ["logix", "serve", "--project", "/w/demo line"]), "naut logix serve --project '/w/demo line'");
   assert.equal(shellLine("C:\\Program Files\\naut.exe", ["logix", "C:\\w\\demo"], true), '& "C:\\Program Files\\naut.exe" logix C:\\w\\demo');
+});
+
+/** A stream the test feeds by hand: read() waits for the next push. */
+function handStream() {
+  const queue: (string | undefined)[] = [];
+  let wake: (() => void) | undefined;
+  return {
+    push(chunk: string | undefined) {
+      queue.push(chunk);
+      wake?.();
+    },
+    async read(): Promise<string | undefined> {
+      while (queue.length === 0) await new Promise<void>((r) => (wake = r));
+      wake = undefined;
+      return queue.shift();
+    },
+  };
+}
+
+test("readDeployStream answers with a download's result before its stream ends", async () => {
+  const s = handStream();
+  const seen: [string, boolean][] = [];
+  s.push('{"event":"progress","message":"downloaded"}\n{"event":"progress","message":"verified"}\n');
+  s.push('{"event":"done","applied":"download","verified":true,"elapsedMs":120000}\n{"event":"progress","message":"opening the online session for the next edit"}\n');
+  // Nothing more yet: the session is still opening. The result must not
+  // wait for it (#379: the summary came ~50 s late).
+  const { result, rest } = await readDeployStream(s.read, (m, after) => seen.push([m, after]));
+  assert.equal(result?.event, "done");
+  assert.deepEqual(seen, [
+    ["downloaded", false],
+    ["verified", false],
+    ["opening the online session for the next edit", true],
+  ]);
+  let ended = false;
+  void rest.then(() => (ended = true));
+  s.push('{"event":"progress","message":"session open and online"}');
+  s.push(undefined);
+  await rest;
+  assert.equal(ended, true);
+  assert.deepEqual(seen[3], ["session open and online", true]);
+});
+
+test("readDeployStream: an error is the result; a stream with none ends with none", async () => {
+  const s = handStream();
+  s.push('{"event":"progress","message":"starting a download"}\n{"event":"error","status":409,"error":"in Run","needsProgramMode":true}\n');
+  s.push(undefined);
+  const { result } = await readDeployStream(s.read, () => {});
+  assert.deepEqual(result, { event: "error", status: 409, error: "in Run", needsProgramMode: true });
+
+  const t = handStream();
+  const seen: string[] = [];
+  t.push('{"event":"progress","message":"a"}\n{"event":"progress","mess');
+  t.push('age":"b"}');
+  t.push(undefined);
+  const { result: none, rest } = await readDeployStream(t.read, (m) => seen.push(m));
+  await rest;
+  assert.equal(none, undefined);
+  assert.deepEqual(seen, ["a", "b"]);
+});
+
+test("needsProgramMode: the server's flag, or an older server's bare SDK text", () => {
+  assert.equal(needsProgramMode({ event: "error", status: 409, error: "the controller is in Run mode…", needsProgramMode: true }), true);
+  assert.equal(
+    needsProgramMode({
+      event: "error",
+      status: 502,
+      error: "download: logixd: operation_failed (OperationFailedException): RxE_INVALID_START_STATE - Invalid start state.  Internal error.",
+    }),
+    true
+  );
+  assert.equal(needsProgramMode({ event: "error", status: 422, error: "the tag set changed; a download is needed" }), false);
+  assert.equal(needsProgramMode({ event: "error", error: "fetch failed" }), false);
+});
+
+test("a summary's time is the whole wait the server reports", () => {
+  // The first edit of a session: 47 s opening it, 3 s editing.
+  const msg = doneSummary("online", INFO, { event: "done", applied: "online edit", verified: true, replaced: 2, mode: "Run", elapsedMs: 50_200, deployMs: 3_000 });
+  assert.match(msg, / in 50 s /);
+  assert.doesNotMatch(msg, /3\.0 s/);
+});
+
+test("a plain download refused in Run offers the Program-mode download; nothing else does", () => {
+  const inRun = { event: "error" as const, status: 409, error: "the controller is in Run mode…", needsProgramMode: true };
+  assert.deepEqual(refusalButtons("download", inRun), ["Switch to Program Mode and Download", "Show Output"]);
+  // Already asked for Program mode: offering it again is no way out.
+  assert.deepEqual(refusalButtons("download", inRun, true), ["Show Output"]);
+  assert.deepEqual(refusalButtons("download", { event: "error", status: 502, error: "verification failed" }), ["Show Output"]);
+  // The online edit's ways out are as they were.
+  assert.deepEqual(refusalButtons("online", { event: "error", status: 422, error: "the tag set changed; a download is needed" }), [
+    "Download Project…",
+    "Show Output",
+  ]);
+  assert.deepEqual(refusalButtons("online", { event: "error", status: 409, error: "controller program changed since your base" }), [
+    "Push Anyway",
+    "Show Output",
+  ]);
 });

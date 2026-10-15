@@ -214,6 +214,7 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 	rep.Rungs = len(want.Routines[rep.Program+"/"+rep.Routine].Rungs)
 
 	if s.s == nil {
+		s.log("the online session was closed; reopening it (upload, open, go online: about a minute)")
 		if err := s.open(ctx); err != nil {
 			return done(err)
 		}
@@ -247,6 +248,7 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 
 	run := "edit-" + time.Now().UTC().Format("20060102-150405.000")
 	xpath := logixd.RoutinePath(s.prog, s.rout)
+	s.log("%d difference(s) from the controller; replacing %s/%s online (FinalizeEdits)", len(rep.Diffs), s.prog, s.rout)
 	mode, _ := s.s.Mode(ctx)
 	rep.ModeBefore = string(mode)
 	var replaced uint32
@@ -287,6 +289,7 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 	rep.Applied, rep.Replaced, rep.ModeAfter = Online, replaced, string(after)
 
 	// Verify from the controller: export the routine and compare rungs.
+	s.log("edit finalized, controller %s; verifying from the controller", after)
 	out := path.Join(run, "routine.L5X")
 	if _, err := s.s.PartialExport(ctx, xpath, out); err != nil {
 		return done(fmt.Errorf("verify export: %w", err))

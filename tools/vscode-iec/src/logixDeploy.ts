@@ -25,12 +25,15 @@ import {
   doneSummary,
   downloadConfirmMessage,
   LogixInfo,
-  NdjsonSplitter,
-  needsDownload,
+  DOWNLOAD_PROJECT,
   onlineEditConfirmMessage,
   PUSH,
+  PUSH_ANYWAY,
+  readDeployStream,
+  refusalButtons,
   serveCliArgs,
   shellLine,
+  SHOW_OUTPUT,
 } from "./logixDeployLogic";
 
 const CONTEXT_KEY = "nautilus.logixTarget";
@@ -203,28 +206,21 @@ export class LogixDeploy implements vscode.Disposable {
             headers: writeHeaders(),
             body: JSON.stringify({ mode, source: prog.programBody, ...extra }),
           });
-          const split = new NdjsonSplitter();
-          let last: DeployEvent | undefined;
-          const take = (evs: DeployEvent[]) => {
-            for (const ev of evs) {
-              if (ev.event === "progress") {
-                this.out.appendLine("  " + ev.message);
-                progress.report({ message: ev.message });
-              } else {
-                last = ev;
-              }
-            }
+          const reader = res.body?.getReader();
+          const dec = new TextDecoder();
+          const read = async (): Promise<string | undefined> => {
+            if (!reader) return undefined;
+            const { done, value } = await reader.read();
+            return done ? undefined : dec.decode(value, { stream: true });
           };
-          if (res.body) {
-            const reader = res.body.getReader();
-            const dec = new TextDecoder();
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              take(split.feed(dec.decode(value, { stream: true })));
-            }
-          }
-          take(split.flush());
+          // The result ends the notification at once; a download's stream
+          // goes on (the online session for the next edit opening), and
+          // what it says goes to the output channel only.
+          const { result } = await readDeployStream(read, (message, after) => {
+            this.out.appendLine("  " + message);
+            if (!after) progress.report({ message });
+          });
+          let last = result;
           if (!last && !res.ok) last = { event: "error", status: res.status, error: res.statusText };
           if (last?.event === "error" && last.status === undefined) last.status = res.status;
           return last;
@@ -244,16 +240,17 @@ export class LogixDeploy implements vscode.Disposable {
     }
     const err = final?.event === "error" ? final : { event: "error" as const, error: "the server closed the stream without a result" };
     this.out.appendLine("  FAILED: " + err.error);
-    const SHOW = "Show Output";
-    const buttons = [SHOW];
-    if (mode === "online" && err.status === 409 && /changed since your base/.test(err.error)) buttons.unshift("Push Anyway");
-    if (mode === "online" && needsDownload(err)) buttons.unshift("Download Project…");
+    if (err.detail) this.out.appendLine("  the SDK said: " + err.detail.replace(/\n/g, "\n  "));
+    const buttons = refusalButtons(mode, err, extra.programMode === true);
     // A status is the server's answer; without one the request never got one.
     const verdict = err.status !== undefined ? "refused" : "failed";
     const pick = await notifyError(`nautilus: ${what} ${verdict} — ${err.error}`, ...buttons);
-    if (pick === SHOW) this.out.show(true);
-    else if (pick === "Push Anyway") await this.deploy("online", info, prog, {});
-    else if (pick === "Download Project…") await this.download();
+    if (pick === SHOW_OUTPUT) this.out.show(true);
+    else if (pick === PUSH_ANYWAY) await this.deploy("online", info, prog, {});
+    else if (pick === DOWNLOAD_PROJECT) await this.download();
+    // The user has already said yes to a download that stops the
+    // controller; this one switches it to Program mode first.
+    else if (pick === DOWNLOAD_PROGRAM_MODE) await this.deploy("download", info, prog, { ...extra, programMode: true });
   }
 
   /** Run a naut verb in a VS Code terminal, which still never leaves the

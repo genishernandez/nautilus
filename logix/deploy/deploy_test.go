@@ -30,6 +30,9 @@ type fakeAgent struct {
 	// routineImports records whole-routine online imports (ST).
 	routineImports []map[string]any
 	mode           string
+	// startState makes a download refuse unless it switches to Program
+	// mode, as the SDK does with a controller in Run.
+	startState bool
 }
 
 func newFakeAgent(t *testing.T, running []byte) (*fakeAgent, *logixd.Client) {
@@ -138,6 +141,18 @@ func (f *fakeAgent) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		ok(map[string]any{"insertPosition": body["insertPosition"], "replaceCount": body["replaceCount"], "onlineOption": body["onlineOption"], "elapsedMs": 3})
 	case strings.HasSuffix(r.URL.Path, "/download"):
+		if f.startState && (f.mode == "Run" || body["ensureProgramMode"] == true) {
+			// The SDK's answer, its status lines with it (on Echo, ~20).
+			w.WriteHeader(500)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false,
+				"error": map[string]any{"kind": "operation_failed", "type": "OperationFailedException",
+					"message": "RxE_INVALID_START_STATE - Invalid start state.  Internal error. (C:\\work\\DemoLine.ACD)", "fatal": false},
+				"events": []any{
+					map[string]any{"kind": "status", "source": "Download", "message": "Preparing the download"},
+					map[string]any{"kind": "error", "source": "Download", "message": "Failed to download to the controller"},
+				}})
+			return
+		}
 		f.running = f.generated()
 		f.mode = "Program"
 		ok(map[string]any{})
@@ -306,6 +321,41 @@ func TestEmptyControllerNeedsADownload(t *testing.T) {
 	}
 	if len(f.imports) != 0 {
 		t.Error("a download must not import rungs")
+	}
+}
+
+// A plain download to a controller in Run is refused by the SDK with
+// RxE_INVALID_START_STATE; the error says what to do instead and keeps
+// the SDK's own text underneath (#379). Asked for Program mode and still
+// refused (a keyswitch in RUN), the hint would be wrong: the SDK's answer
+// goes as it is.
+func TestDownloadInRunSaysToSwitchToProgramMode(t *testing.T) {
+	src := demoSource(t)
+	f, c := newFakeAgent(t, nil)
+	f.startState = true
+	_, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download})
+	var se *StartStateError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v (%T)", err, err)
+	}
+	if se.Mode != "Run" || !strings.Contains(err.Error(), "the controller is in Run mode") ||
+		!strings.Contains(err.Error(), `"Switch to Program Mode and Download"`) || !strings.Contains(err.Error(), "--program-mode") {
+		t.Errorf("message = %q", err)
+	}
+	if strings.Contains(err.Error(), "RxE_") {
+		t.Errorf("the message carries the SDK's code: %q", err)
+	}
+	if raw := se.Raw.Error(); !strings.Contains(raw, "RxE_INVALID_START_STATE") || !strings.Contains(raw, "Failed to download to the controller") {
+		t.Errorf("raw = %q", raw)
+	}
+	if (&StartStateError{}).Error() == "" || !strings.Contains((&StartStateError{}).Error(), "is not in Program mode") {
+		t.Errorf("no mode: %q", (&StartStateError{}).Error())
+	}
+
+	// Program mode asked for, and refused all the same.
+	_, err = Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download, ProgramMode: true})
+	if errors.As(err, &se) || err == nil || !strings.Contains(err.Error(), "RxE_INVALID_START_STATE") {
+		t.Errorf("program mode, refused: %v (%T)", err, err)
 	}
 }
 

@@ -211,8 +211,10 @@ func displayAddr(a net.Addr) string {
 // line both on stderr and to the editor that asked. release closes the
 // online session the plane holds, if any: call it when the serve stops.
 func logixProgramPlane(dir string, p *logixProject, client *logixd.Client) (plane *facade.ProgramPlane, release func()) {
-	// One deploy runs at a time (the plane refuses a second), so one sink
-	// is enough: the request's progress callback while it runs.
+	// One deploy or warm-up runs at a time — whichever holds mu — so one
+	// sink is enough: that request's progress callback while it runs. It
+	// is attached only under mu, so an edit waiting for a download's
+	// warm-up does not take that stream's lines.
 	var sink atomic.Pointer[func(string)]
 	logf := func(format string, a ...any) {
 		line := fmt.Sprintf(format, a...)
@@ -229,10 +231,23 @@ func logixProgramPlane(dir string, p *logixProject, client *logixd.Client) (plan
 	// The Download button is the warm path: one project held open and
 	// online, an edit is one rung import. The session opens on the first
 	// edit and reopens itself if the agent drops it.
-	// mu guards sess: the plane runs one deploy at a time, and release
-	// waits for the one in flight.
+	// mu guards sess and dopts: the plane runs one deploy at a time,
+	// a download's warm-up runs after it (the plane is free by then, so an
+	// edit may queue behind it here), and release waits for whichever is
+	// in flight.
 	var mu sync.Mutex
 	var sess *deploy.Session
+	var warming atomic.Bool
+	// lock takes mu, saying so on progress when it has to wait.
+	lock := func(progress func(string)) {
+		if mu.TryLock() {
+			return
+		}
+		if warming.Load() {
+			progress("waiting for the online session the download is opening")
+		}
+		mu.Lock()
+	}
 	release = func() {
 		mu.Lock()
 		defer mu.Unlock()
@@ -249,9 +264,9 @@ func logixProgramPlane(dir string, p *logixProject, client *logixd.Client) (plan
 		Controller: p.target.Controller,
 		CommPath:   p.target.CommPath,
 		Deploy: func(ctx context.Context, src string, progress func(string)) (*deploy.Report, error) {
-			defer attach(progress)()
-			mu.Lock()
+			lock(progress)
 			defer mu.Unlock()
+			defer attach(progress)()
 			if sess == nil {
 				logf("opening the online session (upload, open, go online): the first edit takes about a minute")
 				s, err := deploy.Connect(ctx, dopts)
@@ -263,9 +278,9 @@ func logixProgramPlane(dir string, p *logixProject, client *logixd.Client) (plan
 			return sess.Edit(ctx, src)
 		},
 		Download: func(ctx context.Context, src string, do facade.DownloadOptions, progress func(string)) (*deploy.Report, error) {
-			defer attach(progress)()
-			mu.Lock()
+			lock(progress)
 			defer mu.Unlock()
+			defer attach(progress)()
 			// The manifest as it is now: a download is how new tags reach
 			// the controller, so the target is read again, not remembered.
 			fresh, err := loadLogixProject(dir)
@@ -291,16 +306,29 @@ func logixProgramPlane(dir string, p *logixProject, client *logixd.Client) (plan
 			if err != nil {
 				return rep, err
 			}
-			// Warm the next online edit now, so it is a rung import and
-			// not another minute. Best effort: the edit opens it otherwise.
+			// The next online edit edits what was downloaded. Warm opens
+			// its session once this report is out.
 			dopts.Target = fresh.target
+			return rep, nil
+		},
+		// Warm the next online edit after a download, so it is a rung
+		// import and not another minute. Best effort: the edit opens the
+		// session itself otherwise.
+		Warm: func(ctx context.Context, progress func(string)) {
+			warming.Store(true)
+			defer warming.Store(false)
+			mu.Lock()
+			defer mu.Unlock()
+			defer attach(progress)()
+			if sess != nil {
+				return
+			}
 			logf("opening the online session for the next edit")
 			if s, err := deploy.Connect(ctx, dopts); err != nil {
 				logf("online session not opened (%v); the next online edit opens it", err)
 			} else {
 				sess = s
 			}
-			return rep, nil
 		},
 	}, release
 }

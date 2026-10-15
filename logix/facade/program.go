@@ -38,6 +38,15 @@ import (
 // then one {"event":"done",…report} or {"event":"error","status":…,
 // "error":…}. Refusals that need no controller (a stale base, a deploy
 // already running, no "yes") are ordinary HTTP errors before the stream.
+//
+// The headers go out at once, and the report goes out the moment the
+// deploy has verified. A download's stream may go on after its report:
+// Warm gets the next online edit ready (an online session takes most of a
+// minute to open), its progress lines following the report, while the
+// plane already takes the next deploy. A report's elapsedMs is the whole
+// wait from the request to the report — the session the first edit
+// opens, the warm-up an edit waited for — and deployMs the deploy's own
+// part of it.
 
 // DownloadOptions are the choices a download request carries.
 type DownloadOptions struct {
@@ -62,6 +71,11 @@ type ProgramPlane struct {
 	// controller — and reports. Nil leaves POST /api/logix/deploy's
 	// download mode refused.
 	Download func(ctx context.Context, src string, o DownloadOptions, progress func(string)) (*deploy.Report, error)
+	// Warm, when set, runs after a download's report is sent, on the
+	// same stream: what the next online edit needs ready (the serve opens
+	// its online session here). The plane is free while it runs, so a
+	// Deploy that arrives meanwhile must wait for it.
+	Warm func(ctx context.Context, progress func(string))
 	// Controller and CommPath name the target on GET /api/program, so a
 	// confirmation can say where a download goes.
 	Controller, CommPath string
@@ -124,6 +138,7 @@ func (p *programPlane) get(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (p *programPlane) put(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	if code, msg := p.auth(r); code != 0 {
 		writeJSON(w, code, msg)
 		return
@@ -148,7 +163,7 @@ func (p *programPlane) put(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, code, msg)
 		return
 	}
-	writeAny(w, http.StatusOK, p.applied(req.Source, rep))
+	writeAny(w, http.StatusOK, p.applied(req.Source, rep, started))
 }
 
 // begin claims the plane for one deploy, or answers why not: another
@@ -184,7 +199,9 @@ func (p *programPlane) timeout() time.Duration {
 }
 
 // applied records a successful deploy of src and returns the answer body.
-func (p *programPlane) applied(src string, rep *deploy.Report) map[string]any {
+// elapsedMs is the wait since the request arrived, started; deployMs is
+// the deploy's own time.
+func (p *programPlane) applied(src string, rep *deploy.Report, started time.Time) map[string]any {
 	p.mu.Lock()
 	p.source = src
 	p.last = rep
@@ -194,7 +211,7 @@ func (p *programPlane) applied(src string, rep *deploy.Report) map[string]any {
 	return map[string]any{
 		"hash": hash, "task": "main", "applied": rep.Applied.String(), "same": rep.Same,
 		"replaced": rep.Replaced, "verified": rep.Verified, "modeBefore": rep.ModeBefore, "mode": rep.ModeAfter,
-		"elapsedMs": rep.Elapsed.Milliseconds(), "resets": resets(rep),
+		"elapsedMs": time.Since(started).Milliseconds(), "deployMs": rep.Elapsed.Milliseconds(), "resets": resets(rep),
 		"valuesKept": valuesKept(rep),
 	}
 }
@@ -223,7 +240,10 @@ func deployError(err error) (int, string) {
 	var de *deploy.DiagError
 	var nd *deploy.NeedsDownloadError
 	var ve *deploy.VerifyError
+	var se *deploy.StartStateError
 	switch {
+	case errors.As(err, &se):
+		return http.StatusConflict, se.Error()
 	case errors.As(err, &de):
 		var lines []string
 		for _, d := range de.Diags {
@@ -239,9 +259,27 @@ func deployError(err error) (int, string) {
 	}
 }
 
+// errorEvent is the stream's answer to a refused or failed deploy. A
+// download the controller refused for its mode says so in plain words,
+// with needsProgramMode set (the editor offers the Program-mode download)
+// and the SDK's own error, status lines and all, as detail.
+func errorEvent(err error) map[string]any {
+	code, msg := deployError(err)
+	ev := map[string]any{"event": "error", "status": code, "error": msg}
+	var se *deploy.StartStateError
+	if errors.As(err, &se) {
+		ev["needsProgramMode"] = true
+		if se.Raw != nil {
+			ev["detail"] = se.Raw.Error()
+		}
+	}
+	return ev
+}
+
 // deployStream is POST /api/logix/deploy: an online edit or a download,
 // its progress streamed as NDJSON.
 func (p *programPlane) deployStream(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	if code, msg := p.auth(r); code != 0 {
 		writeJSON(w, code, msg)
 		return
@@ -276,12 +314,18 @@ func (p *programPlane) deployStream(w http.ResponseWriter, r *http.Request) {
 	if !p.begin(w, req.BaseHash) {
 		return
 	}
-	defer p.end()
+	// The plane is let go of when the report is out, before a warm-up.
+	var endOnce sync.Once
+	end := func() { endOnce.Do(p.end) }
+	defer end()
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
+	// The headers now, not with the first line: a warm edit's first line
+	// can be seconds away, and its report the first thing it says.
+	_ = rc.Flush()
 	var wmu sync.Mutex
 	open := true
 	emit := func(v any) {
@@ -305,19 +349,38 @@ func (p *programPlane) deployStream(w http.ResponseWriter, r *http.Request) {
 	var rep *deploy.Report
 	var err error
 	if req.Mode == "download" {
-		progress("starting a download to " + p.cfg.CommPath)
+		progress("starting a download to " + p.where())
 		rep, err = p.cfg.Download(ctx, req.Source, DownloadOptions{ProgramMode: req.ProgramMode, ResetValues: req.ResetValues}, progress)
 	} else {
+		progress("starting an online edit on " + p.where())
 		rep, err = p.cfg.Deploy(ctx, req.Source, progress)
 	}
 	if err != nil {
-		code, msg := deployError(err)
-		emit(map[string]any{"event": "error", "status": code, "error": msg})
+		emit(errorEvent(err))
 		return
 	}
-	body := p.applied(req.Source, rep)
+	body := p.applied(req.Source, rep, started)
 	body["event"] = "done"
 	emit(body)
+	if req.Mode != "download" || p.cfg.Warm == nil {
+		return
+	}
+	// The report is out and the plane free; the warm-up is the next
+	// edit's. Like the deploy, it stops if the request goes away (a
+	// stopping serve), and the next edit then opens the session itself.
+	end()
+	p.cfg.Warm(ctx, progress)
+}
+
+// where names the controller a deploy goes to, for its first line.
+func (p *programPlane) where() string {
+	if p.cfg.CommPath != "" {
+		return p.cfg.CommPath
+	}
+	if p.cfg.Controller != "" {
+		return p.cfg.Controller
+	}
+	return "the controller"
 }
 
 func writeAny(w http.ResponseWriter, code int, v any) {
