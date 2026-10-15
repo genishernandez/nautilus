@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -148,5 +150,24 @@ func TestNautRunServesDashboardAndState(t *testing.T) {
 	code, page, ok := get("/")
 	if !ok || code != 200 || !strings.Contains(page, "/api/stream") {
 		t.Errorf("GET / = %d (reached=%v), want the dashboard (it names /api/stream)", code, ok)
+	}
+
+	// SIGTERM (what systemd and Kubernetes send to stop a service) shuts
+	// down the way Ctrl+C does: the deferred teardown runs (final retain
+	// save, lease hand-over, Sparkplug death certificates) and the process
+	// exits 0, rather than being killed by the signal's default action.
+	if goruntime.GOOS == "windows" {
+		return
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("naut run did not exit within 15 s of SIGTERM; stderr:\n%s", stderr.String())
+	}
+	if c := cmd.ProcessState.ExitCode(); c != 0 {
+		t.Errorf("naut run exited %d after SIGTERM (%v), want 0: a clean shutdown; stderr:\n%s", c, cmd.ProcessState, stderr.String())
 	}
 }

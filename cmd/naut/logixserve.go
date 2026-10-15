@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/joyautomation/nautilus/lang/l5x"
@@ -129,7 +130,7 @@ func runLogixServe(args []string) int {
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	fmt.Fprintf(os.Stderr, "browsing %s (slot %d)...\n", *host, *slot)
