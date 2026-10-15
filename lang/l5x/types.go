@@ -148,7 +148,7 @@ func Types(f *File, opts TypesOptions) (src string, unresolved []string, err err
 			missing[name] = true
 			return
 		}
-		b := &builtType{name: ident(dt.Name)}
+		b := &builtType{name: ident(dt.Name), comment: dt.Description}
 		built[name] = b // before recursing, so a self-reference cannot loop
 		for _, m := range dt.Members {
 			// Hidden members are the byte hosts Logix generates to carry
@@ -166,7 +166,11 @@ func Types(f *File, opts TypesOptions) (src string, unresolved []string, err err
 			if ref != "" {
 				visit(ref)
 			}
-			b.fields = append(b.fields, stgen.Field(ident(m.Name), t))
+			// A description rides along as the declaration's trailing
+			// comment, where the Logix writer reads it back (#373).
+			f := stgen.Field(ident(m.Name), t)
+			f.Comment = m.Description
+			b.fields = append(b.fields, f)
 			b.refs = append(b.refs, ref)
 		}
 	}
@@ -212,7 +216,9 @@ func Types(f *File, opts TypesOptions) (src string, unresolved []string, err err
 		if dropped[name] {
 			continue
 		}
-		structs = append(structs, stgen.Struct(b.name, b.fields...))
+		sd := stgen.Struct(b.name, b.fields...)
+		sd.Comment = b.comment
+		structs = append(structs, sd)
 	}
 	sort.Slice(structs, func(i, j int) bool { return structs[i].Name < structs[j].Name })
 
@@ -233,9 +239,10 @@ func Types(f *File, opts TypesOptions) (src string, unresolved []string, err err
 // builtType is a type under construction: its rendered fields alongside,
 // per field, the named type that field depends on ("" for an elementary).
 type builtType struct {
-	name   string
-	fields []stgen.FieldDef
-	refs   []string
+	name    string
+	comment string // the type's description
+	fields  []stgen.FieldDef
+	refs    []string
 }
 
 // memberType maps a UDT member to its IEC type, resolving BIT to BOOL and

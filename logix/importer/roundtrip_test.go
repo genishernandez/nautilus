@@ -57,6 +57,11 @@ func TestRoundTripPublicYardstick(t *testing.T) {
 			t.Errorf("nautilus.yaml lacks %q:\n%s", want, p.Files["nautilus.yaml"])
 		}
 	}
+	// The UDT keeps its description, as the declaration's trailing
+	// comment the writer reads back (#373).
+	if want := "  LineStatus : STRUCT (* Mode/alarm summary the skid polls alongside the handshake tags *)\n"; !strings.Contains(string(p.Files["lib/logix_types.st"]), want) {
+		t.Errorf("lib/logix_types.st lacks %q:\n%s", want, p.Files["lib/logix_types.st"])
+	}
 	if strings.Contains(string(p.Files["tags/logix.yaml"]), "AcceptTmr") {
 		t.Errorf("tags/logix.yaml carries the program's timer:\n%s", p.Files["tags/logix.yaml"])
 	}
@@ -93,6 +98,9 @@ func TestRoundTripPublicYardstick(t *testing.T) {
 			back, err := l5x.Parse(out)
 			if err != nil {
 				t.Fatalf("%s: written export does not parse: %v", name, err)
+			}
+			if len(back.Controller.DataTypes) != 1 || back.Controller.DataTypes[0].Description != orig.Controller.DataTypes[0].Description {
+				t.Errorf("%s: data types written back %+v, want LineStatus with its description", name, back.Controller.DataTypes)
 			}
 			a := rungTexts(orig, prog.Name, r.Name)
 			b := rungTexts(back, l5x.Ident(prog.Name), "MainRoutine")

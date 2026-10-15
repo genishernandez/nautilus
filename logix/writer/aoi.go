@@ -173,7 +173,7 @@ func (lw *lowered) libs() *libIndex {
 // parent's types and options.
 func (lw *lowered) child(name string, vars []ld.VarDecl) *lowered {
 	c := &lowered{model: &ld.Model{Name: name}, opts: lw.opts, vars: map[string]ld.VarDecl{},
-		presetVars: map[string]bool{}, genNames: map[string]bool{}, types: lw.types, rawTypes: lw.rawTypes, enums: lw.enums,
+		presetVars: map[string]bool{}, genNames: map[string]bool{}, types: lw.types, rawTypes: lw.rawTypes, typeSrc: lw.typeSrc, enums: lw.enums,
 		aois: lw.aois, inAOI: true, st: lw.st, libIx: lw.libs(), clocks: map[string]bool{}, clockUsed: map[string]bool{}}
 	c.opts.Program = name
 	// A block's locals are its own: the program's scope choices and the

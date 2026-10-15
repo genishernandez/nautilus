@@ -16,6 +16,7 @@ import (
 	"github.com/joyautomation/nautilus/logix/deploy"
 	"github.com/joyautomation/nautilus/logix/facade"
 	"github.com/joyautomation/nautilus/logix/logixd"
+	"github.com/joyautomation/nautilus/logix/writer"
 	"github.com/joyautomation/nautilus/runtime"
 	"github.com/joyautomation/nautilus/server"
 )
@@ -278,6 +279,9 @@ func logixProgramPlane(dir string, p *logixProject, client *logixd.Client) (plan
 				logf("closing the online session: the download replaces its project")
 				_ = sess.Close(ctx)
 				sess = nil
+			}
+			if w := writer.LocalModuleWarning(fresh.target.Processor); w != "" {
+				logf("warning: %s", w)
 			}
 			o := dopts
 			o.Target, o.Mode, o.ProgramMode = fresh.target, deploy.Download, programMode

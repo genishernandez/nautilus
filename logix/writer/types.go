@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/joyautomation/nautilus/lang/fbcatalog"
 	"github.com/joyautomation/nautilus/lang/st"
 )
 
@@ -22,8 +23,16 @@ import (
 // of 32, as everywhere in Logix). TIME, STRING and block instances inside
 // a type are refused, with the type and member named.
 
+//
+// A type's or member's description is its declaration's trailing comment,
+// `LineStatus : STRUCT (* … *)` and `Mode : DINT; (* … *)` — the IEC
+// habit for documenting a declaration, and what `naut logix import`
+// writes for a UDT's and its members' Logix descriptions (#373). It is
+// written as the <DataType>'s and <Member>'s <Description>.
+
 type udt struct {
 	Name    string
+	Desc    string
 	Members []udtMember
 	Line    int
 }
@@ -33,6 +42,7 @@ type udtMember struct {
 	DataType string // Logix atomic, or a UDT name
 	Dim      int
 	Struct   *udt // set for a UDT member
+	Desc     string
 	Line     int
 }
 
@@ -41,15 +51,21 @@ type udtMember struct {
 func (lw *lowered) loadTypes() {
 	lw.types = map[string]*udt{}
 	lw.rawTypes = map[string]*st.TypeDecl{}
+	lw.typeSrc = map[string]*commentSrc{}
 	for _, lib := range lw.opts.Libs {
 		prog, err := st.Parse(lib)
 		if err != nil {
 			continue // the compiler reports a broken library; not ours
 		}
+		var cs *commentSrc
 		for i := range prog.TypeDecls {
 			td := &prog.TypeDecls[i]
 			if _, ok := td.Type.(*st.StructType); ok {
 				lw.rawTypes[strings.ToLower(td.Name)] = td
+				if cs == nil {
+					cs = newCommentSrc(lib)
+				}
+				lw.typeSrc[strings.ToLower(td.Name)] = cs
 			}
 		}
 	}
@@ -70,7 +86,8 @@ func (lw *lowered) resolveType(name string, line int, use string) (*udt, bool) {
 		return nil, false
 	}
 	lw.types[key] = nil // guards recursion
-	u := &udt{Name: td.Name, Line: td.Pos.Line}
+	src := lw.typeSrc[key]
+	u := &udt{Name: td.Name, Line: td.Pos.Line, Desc: src.trailingComment(td.Pos.Line)}
 	fields := td.Type.(*st.StructType).Fields
 	good := true
 	for _, f := range fields {
@@ -79,6 +96,7 @@ func (lw *lowered) resolveType(name string, line int, use string) (*udt, bool) {
 			good = false
 			continue
 		}
+		m.Desc = src.trailingComment(f.Pos.Line)
 		u.Members = append(u.Members, m)
 	}
 	if !good || len(u.Members) == 0 {
@@ -298,4 +316,86 @@ func scalarInit(dt string, v any) string {
 		return s
 	}
 	return zeroOf(dt)
+}
+
+// commentSrc is a library source prepared for trailingComment: its text,
+// the same text with every comment blanked (fbcatalog.StripComments), and
+// the offset each line starts at — computed once per library, not per
+// declaration.
+type commentSrc struct {
+	src, code string
+	starts    []int
+}
+
+func newCommentSrc(src string) *commentSrc {
+	c := &commentSrc{src: src, code: fbcatalog.StripComments(src), starts: []int{0}}
+	for i := 0; i < len(src); i++ {
+		if src[i] == '\n' {
+			c.starts = append(c.starts, i+1)
+		}
+	}
+	return c
+}
+
+// trailingComment is the comment that follows code on a source line (1-based)
+// — `Mode : DINT; (* the skid's mode *)` — or "" when the line has none.
+// A (* … *) comment may run onto the lines after it (a multi-line
+// description); each of its lines is trimmed, and the lines are joined
+// with "\n". A (* @… *) pragma is not prose and gives "". A comment on a
+// line of its own documents nothing here: it is not trailing.
+func (c *commentSrc) trailingComment(line int) string {
+	if c == nil || line < 1 || line > len(c.starts) {
+		return ""
+	}
+	src, code := c.src, c.code
+	start, end := c.starts[line-1], len(src)
+	if line < len(c.starts) {
+		end = c.starts[line] - 1
+	}
+	open := -1
+	for i := start; i < end; i++ {
+		if src[i] != code[i] {
+			open = i
+			break
+		}
+	}
+	if open < 0 || strings.TrimSpace(code[start:open]) == "" {
+		return ""
+	}
+	var text string
+	if strings.HasPrefix(src[open:], "//") {
+		text = src[open+2 : end]
+	} else {
+		text = closeBlock(src[open:])
+	}
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	lines := strings.Split(text, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(lines[i])
+	}
+	text = strings.Join(lines, "\n")
+	if strings.HasPrefix(text, "@") {
+		return ""
+	}
+	return text
+}
+
+// closeBlock is the text inside the (* … *) comment s starts with, nested
+// comments included; an unclosed comment runs to the end of s.
+func closeBlock(s string) string {
+	depth := 0
+	for i := 0; i+1 < len(s); i++ {
+		switch {
+		case s[i] == '(' && s[i+1] == '*':
+			depth++
+			i++
+		case s[i] == '*' && s[i+1] == ')':
+			depth--
+			i++
+			if depth == 0 {
+				return s[2 : i-1]
+			}
+		}
+	}
+	return s[2:]
 }

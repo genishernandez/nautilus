@@ -178,6 +178,9 @@ func runLogixDeploy(args []string) int {
 				"  for a rung change that keeps the controller running.\n", p.target.CommPath)
 		return 2
 	}
+	if w := writer.LocalModuleWarning(p.target.Processor); w != "" {
+		fmt.Fprintln(os.Stderr, "naut logix deploy: warning:", w)
+	}
 	mode := deploy.BuildOnly
 	switch {
 	case *online:

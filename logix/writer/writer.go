@@ -73,9 +73,10 @@ type Options struct {
 	// PeriodMs makes the task PERIODIC at this rate; 0 is CONTINUOUS.
 	PeriodMs int
 	// ProcessorType, MajorRev, MinorRev and SoftwareRevision identify the
-	// target. Defaults: 1756-L85E, 38, 11, 38.01 — what ECHO1 runs. A
-	// hardware.L5X merge replaces these in a later phase
-	// (logix-authoring.md §6, decision 1).
+	// target. Defaults: 1756-L85E, 38, 11 — what ECHO1 runs — and the
+	// software revision of the target's major revision
+	// (SoftwareRevisionFor). A hardware.L5X merge replaces these in a
+	// later phase (logix-authoring.md §6, decision 1).
 	ProcessorType    string
 	MajorRev         string
 	MinorRev         string
@@ -151,9 +152,74 @@ func (o Options) withDefaults(program string) Options {
 	def(&o.ProcessorType, "1756-L85E")
 	def(&o.MajorRev, "38")
 	def(&o.MinorRev, "11")
-	def(&o.SoftwareRevision, "38.01")
+	def(&o.SoftwareRevision, SoftwareRevisionFor(o.MajorRev))
 	def(&o.ExportDate, "(pinned)")
 	return o
+}
+
+// SoftwareRevisionFor is the SoftwareRevision an export of a project at
+// this major firmware revision carries: the Logix Designer release that
+// wrote it, which shares the controller's major revision but not its
+// minor. A v38.11 controller's export says "38.01" (lang/l5x/testdata/
+// demoline.L5X, exported by ECHO1's Logix Designer), the only release a
+// real export in the repo shows; any other major gets its first release,
+// "<major>.00" — "36.00" for v36, which is what the batch-skid yardstick
+// (examples/batch-skid/line/Line.L5X, a stand-in export) says. Before
+// #373 every project claimed 38.01, whatever its target.
+func SoftwareRevisionFor(major string) string {
+	major = strings.TrimSpace(major)
+	if major == "" || major == "38" {
+		return "38.01"
+	}
+	return major + ".00"
+}
+
+// localModule is the controller's own entry under <Modules>: the identity
+// Logix Designer checks the processor against, and its ports.
+type localModule struct {
+	ProductType, ProductCode string
+	// BusSize is the backplane (ICP) port's slot count.
+	BusSize int
+}
+
+// localModules are the Local modules taken from real exports, by catalog
+// number. Only the 1756-L85E's is known (lang/l5x/testdata/demoline.L5X,
+// ECHO1): no export of any other controller in the repo carries a
+// <Modules> section — the batch-skid yardstick's 1769-L33ER export is
+// lean — so a CompactLogix's product code and ports are not known, and
+// are not guessed (#373).
+var localModules = map[string]localModule{
+	"1756-L85E": {ProductType: "14", ProductCode: "168", BusSize: 17},
+}
+
+// fallbackLocal is what a project for a processor with no known Local
+// module gets: the 1756-L85E's, as every project did before #373, so
+// existing output is unchanged. LocalModuleWarning says so.
+var fallbackLocal = localModules["1756-L85E"]
+
+func localModuleFor(processor string) (localModule, bool) {
+	m, ok := localModules[strings.ToUpper(strings.TrimSpace(processor))]
+	if !ok {
+		return fallbackLocal, false
+	}
+	return m, true
+}
+
+// LocalModuleWarning is "" when the writer knows the processor's own Local
+// module (its identity and backplane, from a real export), and otherwise
+// the warning `naut logix write` and `naut logix deploy` print: the
+// project is written with the 1756-L85E's Local module and only the
+// catalog number changed, which Logix Designer may refuse or misidentify.
+// An empty processor is the default, the 1756-L85E.
+func LocalModuleWarning(processor string) string {
+	if strings.TrimSpace(processor) == "" {
+		return ""
+	}
+	if _, ok := localModuleFor(processor); ok {
+		return ""
+	}
+	return fmt.Sprintf("processor %s: nautilus has no verified Local module for it (only for the 1756-L85E), so the project's Local module is the 1756-L85E's — ProductType %s, ProductCode %s, a %d-slot backplane — with only the catalog number changed; Logix Designer may refuse the project or misidentify the controller, so check that it opens before a download (#373)",
+		processor, fallbackLocal.ProductType, fallbackLocal.ProductCode, fallbackLocal.BusSize)
 }
 
 // Diag is one thing the writer cannot express, located in the source.
@@ -235,6 +301,9 @@ type lowered struct {
 	// TYPE declarations found in the libraries (types.go).
 	types    map[string]*udt
 	rawTypes map[string]*st.TypeDecl
+	// typeSrc is the library source each raw type is declared in, for
+	// its descriptions (types.go).
+	typeSrc map[string]*commentSrc
 	// enums are the enumerations the libraries declare, by ir.NameKey
 	// (enum.go): DINT tags, their members integers.
 	enums map[string]*ir.EnumDef

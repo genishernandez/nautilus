@@ -1545,10 +1545,31 @@ Outside the logic comparison (the raw `diff` is 129 lines; `normalize
   then `AcceptTmr`, then `Line_BatchId`, which no routine names) rather
   than the export's; each value also as `<Data Format="L5K">`; the
   Decorated data on its own lines.
-- **Named — metadata.** `SoftwareRevision` 38.01 against 36.00; the UDT's
-  description is not written (#373). The `Local` module's product code
-  and backplane are the 1756-L85E's whatever the processor (#373,
-  unverified for CompactLogix).
+- **Named — the `Local` module.** Its product code and backplane are the
+  1756-L85E's whatever the processor (#373, below): `naut logix write`
+  warns for the yardstick's 1769-L33ER.
+
+**Follow-up (2026-10-14, #373): metadata.** Two of the three named
+metadata differences are gone; the third is now said out loud.
+`TestLogixRoundTripYardstickCLI` also compares `SoftwareRevision` and each
+UDT's description and its members' with the export's.
+
+| was | fix |
+| --- | --- |
+| `SoftwareRevision="38.01"` for any target (the yardstick's export says `36.00`) | The default is the target's own Logix Designer release, `writer.SoftwareRevisionFor(major)`: `38.01` for v38 (what ECHO1's real exports, `lang/l5x/testdata/demoline.L5X` and its siblings, carry) and `<major>.00` for any other major — `36.00` for v36, which is what the yardstick, a stand-in export, says. The firmware minor (`.11`) is not the software minor, so the controller's `MinorRev` is not used. `naut logix write --software` still overrides it, and now defaults to empty (derived); deploy and serve get the derived value because they leave `SoftwareRevision` unset. A v38 project's output is unchanged, so no golden moved |
+| the UDT's description dropped | `naut logix import` writes a UDT's description, and each member's, as the declaration's trailing comment in `lib/logix_types.st` (`LineStatus : STRUCT (* Mode/alarm summary … *)`, `Mode : DINT; (* … *)`) — the IEC habit the LSP already reads for a VAR's description, and the type stays the one place it is said, rather than a manifest field beside it. The writer reads a STRUCT's and member's trailing comment (`//` or `(* … *)`, a multi-line one joined line by line, a `(* @… *)` pragma ignored, a comment on a line of its own not attached) and writes it as the `<DataType>`'s and `<Member>`'s `<Description>`, the member in the element form an export uses. A `*)` or `(*` inside a description is written `* )` / `( *`, so that round trip is lossy by one space |
+| the `Local` module is the 1756-L85E's for any processor | Not fixed, because the repo has no data to fix it with: the only `<Modules>` section in any example or fixture export is DemoLine's 1756-L85E (`ProductType="14" ProductCode="168"`, ICP `Bus Size="17"`); the yardstick and `upstream.L5X` (1769-L33ER) are lean exports without one, and no other CompactLogix export is in the repo. Product codes are not guessed. The writer keeps a table of verified Local modules (`localModules`, one row) and falls back to the L85E's; for any other processor `writer.LocalModuleWarning` says so and `naut logix write`, `naut logix deploy` (stderr) and a download from `naut logix serve` (a progress line) print it. Refusing (a `logix/*` rule) was the alternative and was not taken: it would refuse the yardstick's own write-back, whose logic is right and whose only open question is whether Logix Designer accepts the envelope. Adding a CompactLogix is a row in the table, from a real export of one |
+
+Needs a controller-side (Logix Designer) check: that v36 Logix Designer
+opens a write-back claiming `36.00` (and v38 one claiming `38.01`, as
+today); that a UDT and member `<Description>` written in this shape import
+and survive a build; and what a 1769-L33ER (or any 1769/5069
+CompactLogix) export's `Local` module carries — or whether Logix
+Designer accepts the 1756-L85E's with a 1769 catalog number at all. Echo
+emulates CompactLogix 5380 at v36–38 (`logix-target.md` §3), so a new
+5069 project exported from the SDK machine's Logix Designer would give
+the first CompactLogix row without hardware; a 1769-L33ER (5370) still
+needs a real export.
 
 Not yet checked on a controller: the v38 build of the corrected
 `Line.L5X` and of a write-back with a controller-scoped `TIMER`.

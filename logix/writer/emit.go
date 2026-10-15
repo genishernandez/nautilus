@@ -32,13 +32,29 @@ func emit(lw *lowered, o Options) []byte {
 		w(`<DataTypes>`)
 		for _, u := range types {
 			w(`<DataType Name="%s" Family="NoFamily" Class="User">`, attr(u.Name))
+			if u.Desc != "" {
+				w(`<Description>`)
+				w(`%s`, cdata(u.Desc))
+				w(`</Description>`)
+			}
 			w(`<Members>`)
 			for _, m := range u.Members {
-				switch {
-				case m.Struct != nil:
-					w(`<Member Name="%s" DataType="%s" Dimension="%d" Radix="NullType" Hidden="false" ExternalAccess="Read/Write"/>`, attr(m.Name), m.DataType, m.Dim)
-				default:
-					w(`<Member Name="%s" DataType="%s" Dimension="%d" Radix="%s" Hidden="false" ExternalAccess="Read/Write"/>`, attr(m.Name), m.DataType, m.Dim, radixOf(m.DataType))
+				radix := radixOf(m.DataType)
+				if m.Struct != nil {
+					radix = "NullType"
+				}
+				// A member with a description is the element form Logix
+				// exports: the <Description> inside, then </Member>.
+				end := "/>"
+				if m.Desc != "" {
+					end = ">"
+				}
+				w(`<Member Name="%s" DataType="%s" Dimension="%d" Radix="%s" Hidden="false" ExternalAccess="Read/Write"%s`, attr(m.Name), m.DataType, m.Dim, radix, end)
+				if m.Desc != "" {
+					w(`<Description>`)
+					w(`%s`, cdata(m.Desc))
+					w(`</Description>`)
+					w(`</Member>`)
 				}
 			}
 			w(`</Members>`)
@@ -49,12 +65,15 @@ func emit(lw *lowered, o Options) []byte {
 		w(`<DataTypes/>`)
 	}
 	w(`<Modules>`)
-	w(`<Module Name="Local" CatalogNumber="%s" Vendor="1" ProductType="14" ProductCode="168" Major="%s" Minor="%s" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
-		attr(o.ProcessorType), attr(o.MajorRev), attr(o.MinorRev))
+	// The processor's own Local module where a real export showed it,
+	// else the 1756-L85E's (LocalModuleWarning, #373).
+	lm, _ := localModuleFor(o.ProcessorType)
+	w(`<Module Name="Local" CatalogNumber="%s" Vendor="1" ProductType="%s" ProductCode="%s" Major="%s" Minor="%s" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
+		attr(o.ProcessorType), lm.ProductType, lm.ProductCode, attr(o.MajorRev), attr(o.MinorRev))
 	w(`<EKey State="Disabled"/>`)
 	w(`<Ports>`)
 	w(`<Port Id="1" Address="0" Type="ICP" Upstream="false">`)
-	w(`<Bus Size="17"/>`)
+	w(`<Bus Size="%d"/>`, lm.BusSize)
 	w(`</Port>`)
 	w(`<Port Id="2" Type="Ethernet" Upstream="false">`)
 	w(`<Bus/>`)
