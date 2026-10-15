@@ -28,11 +28,38 @@ type Driver struct {
 
 	mu      sync.Mutex
 	h       *History
+	given   bool // WithHistory: the recording is never read from fsys
+	ready   bool // h is loaded and its loop window is not empty
 	loadErr error
-	loaded  bool
+	tried   bool      // a read has been attempted
+	stamp   fileStamp // the recording as that attempt found it
+	nextTry time.Time // the earliest the next attempt may look again
 	clock   Clock
-	matched map[string]int // tag → members found in the recording
+	matched map[string]int         // tag → members found in the recording
+	quality map[string]nio.Quality // once ready: the tags the recording has nothing for
 	reads   uint64
+}
+
+// retryEvery is how often a recording that failed to load (absent, unreadable,
+// corrupt, or a loop window that came out empty) is looked at again. Looking
+// is a stat; it is read again only once the file has changed, so a broken
+// multi-megabyte recording is not re-parsed on the scan every few seconds.
+const retryEvery = 10 * time.Second
+
+// fileStamp is what a retry compares: a recording that has not changed since
+// it failed would fail again.
+type fileStamp struct {
+	missing bool
+	size    int64
+	mod     time.Time
+	mode    fs.FileMode
+}
+
+func stampOf(fi fs.FileInfo, err error) fileStamp {
+	if err != nil {
+		return fileStamp{missing: true}
+	}
+	return fileStamp{size: fi.Size(), mod: fi.ModTime(), mode: fi.Mode()}
 }
 
 // Option configures a Driver.
@@ -47,7 +74,7 @@ func WithClock(now func() time.Time) Option { return func(d *Driver) { d.now = n
 // WithHistory supplies the recording directly instead of reading
 // m.History from the project (tests).
 func WithHistory(h *History) Option {
-	return func(d *Driver) { d.h, d.loaded = h, true }
+	return func(d *Driver) { d.h, d.given = h, true }
 }
 
 // New builds the driver. Nothing is read yet: the recording loads on Start
@@ -69,34 +96,48 @@ func New(m Manifest, fsys fs.FS, opts ...Option) (*Driver, error) {
 func (d *Driver) Start(context.Context) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.loadLocked()
+	d.loadLocked(d.now())
 }
 
 // Stop is a no-op: the driver has no goroutines.
 func (d *Driver) Stop() {}
 
-func (d *Driver) loadLocked() {
-	if d.h == nil && !d.loaded {
-		d.loaded = true
-		f, err := d.fsys.Open(path.Clean(d.m.History))
-		if err != nil {
-			d.loadErr = fmt.Errorf("replay: %s: %w", d.m.History, err)
-			d.log.Error("replay: cannot read the recording; its tags stay NotConnected", "history", d.m.History, "error", err)
+// loadLocked makes the driver ready: the recording read, matched against
+// the manifest, and its loop window set. A failure is not final — the
+// recording may be a link to a dataset that is not mounted yet, or a file
+// being replaced — so every read looks again, at most every retryEvery,
+// and re-reads once the file has changed. Until then every tag reads
+// NotConnected, and Health carries the reason.
+func (d *Driver) loadLocked(now time.Time) {
+	if d.ready || (d.given && d.tried) {
+		return // a given recording cannot change: its verdict is final
+	}
+	if d.given {
+		d.tried = true
+	} else {
+		if d.tried && now.Before(d.nextTry) {
 			return
 		}
-		defer f.Close()
-		h, err := LoadHistory(f)
+		d.nextTry = now.Add(retryEvery)
+		name := path.Clean(d.m.History)
+		stamp := stampOf(fs.Stat(d.fsys, name))
+		if d.tried && stamp == d.stamp {
+			return // unchanged since it failed: it would fail the same way
+		}
+		d.tried, d.stamp = true, stamp
+		h, err := d.read(name)
 		if err != nil {
 			d.loadErr = fmt.Errorf("replay: %s: %w", d.m.History, err)
-			d.log.Error("replay: cannot load the recording", "history", d.m.History, "error", err)
+			d.log.Error("replay: cannot load the recording; its tags stay NotConnected until it changes", "history", d.m.History, "error", err)
 			return
 		}
 		d.h = h
 	}
-	if d.h == nil || d.matched != nil {
+	if d.h == nil {
 		return
 	}
 	d.matched = map[string]int{}
+	d.quality = nil
 	complete := 0 // the first sample by which every replayed series is real
 	for _, t := range d.m.Tags {
 		ht, _ := hw.TypeByName(t.Type)
@@ -107,18 +148,37 @@ func (d *Driver) loadLocked() {
 			}
 		}
 		if d.matched[t.Name] == 0 {
-			d.log.Warn("replay: no series in the recording for this tag; it delivers its constants only", "tag", t.Name, "series", t.Series)
+			// Constants and zeros are all it can deliver, and nothing the
+			// recording holds will ever change that: Bad, not a Good 0.
+			if d.quality == nil {
+				d.quality = map[string]nio.Quality{}
+			}
+			d.quality[t.Name] = nio.Bad
+			d.log.Warn("replay: no series in the recording for this tag; it delivers its constants only, at Bad quality", "tag", t.Name, "series", t.Series)
 		}
 	}
 	// By default the loop starts where the recording is complete: a series
 	// that began late is back-filled before that, and a baseline that
 	// opens on hours of flat lines is not the one that was recorded.
-	from, to := float64(d.h.T0+int64(complete)*d.h.Step), float64(d.h.End())
+	completeAt := float64(d.h.T0 + int64(complete)*d.h.Step)
+	from, to := completeAt, float64(d.h.End())
 	if !d.m.From.IsZero() {
 		from = math.Max(from, float64(d.m.From.Unix()))
 	}
 	if !d.m.To.IsZero() {
 		to = math.Min(to, float64(d.m.To.Unix()))
+	}
+	if to <= from {
+		// An empty loop would never wrap: the clock would run off the end
+		// and hold the last sample forever, looking live.
+		utc := func(x float64) string { return time.Unix(int64(x), 0).UTC().Format(time.RFC3339) }
+		d.loadErr = fmt.Errorf("replay: %s: the loop window is empty: from %s is not before to %s (the recording runs %s to %s and is complete — every replayed series sampled — from %s; check from:/to:)",
+			d.m.History, utc(from), utc(to), utc(float64(d.h.T0)), utc(float64(d.h.End())), utc(completeAt))
+		d.log.Error("replay: nothing to play; its tags stay NotConnected", "error", d.loadErr)
+		if !d.given {
+			d.h = nil // read again once the file changes
+		}
+		return
 	}
 	start := from
 	if !d.m.Start.IsZero() {
@@ -126,8 +186,19 @@ func (d *Driver) loadLocked() {
 	}
 	d.clock.From, d.clock.To = from, to
 	d.clock.Seek(start)
+	d.ready, d.loadErr = true, nil
 	d.log.Info("replay: loaded", "history", d.m.History, "series", len(d.h.Series),
 		"from", time.Unix(int64(from), 0).UTC(), "to", time.Unix(int64(to), 0).UTC())
+}
+
+// read opens and parses the recording.
+func (d *Driver) read(name string) (*History, error) {
+	f, err := d.fsys.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return LoadHistory(f)
 }
 
 // InputNames are the replayed tags and the clock's read-backs.
@@ -161,8 +232,9 @@ func (d *Driver) ReadInputs() (nio.Values, error) {
 func (d *Driver) ReadInputsInto(dst nio.Values) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.loadLocked()
-	if d.h == nil {
+	now := d.now()
+	d.loadLocked(now)
+	if !d.ready {
 		// No recording: deliver every tag at its constants and zero, and
 		// the clock at 0, so the store holds a value of the right shape —
 		// a program that reads Rec_X must not fault — and Quality says
@@ -178,7 +250,7 @@ func (d *Driver) ReadInputsInto(dst nio.Values) error {
 		return nil
 	}
 	d.reads++
-	t := d.clock.Advance(d.now())
+	t := d.clock.Advance(now)
 	dst[TagAt] = int64(t)
 	dst[TagFrom] = int64(d.clock.From)
 	dst[TagTo] = int64(d.clock.To)
@@ -222,9 +294,10 @@ func (d *Driver) value(tag Tag, t float64) (ir.Value, error) {
 	return v, nil
 }
 
-// recorded is the series at t, or false with no recording (constants only).
+// recorded is the series at t, or false until the driver is ready
+// (constants only).
 func (d *Driver) recorded(name string, t float64) (float64, bool) {
-	if d.h == nil {
+	if !d.ready {
 		return 0, false
 	}
 	return d.h.At(name, t)
@@ -249,9 +322,18 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 		}
 	}
 	if v, ok := vals[TagSeek]; ok {
-		if s, ok := number(v); ok && s > 0 && int64(s) != d.clock.lastSeek {
-			d.clock.lastSeek = int64(s)
-			d.clock.Seek(s)
+		// Outputs arrive as a whole set whenever any of them changes, so
+		// "a change of SeekS" is what jumps — a Speed write must not re-seek.
+		// 0 (or less) is idle and RE-ARMS: SeekS := T for a scan, then 0,
+		// is a pulse that jumps to T every time, the same T included.
+		if s, ok := number(v); ok {
+			switch {
+			case s <= 0:
+				d.clock.lastSeek = 0
+			case int64(s) != d.clock.lastSeek:
+				d.clock.lastSeek = int64(s)
+				d.clock.Seek(s)
+			}
 		}
 	}
 	return nil
@@ -259,11 +341,15 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 
 // Quality reads NotConnected on every replayed tag until the recording has
 // loaded: nothing has been delivered, and nothing will be until it does.
+// Once it has, a tag the recording holds no series for is Bad: it delivers
+// its constants and zeros, which are not a reading. (A tag with some of
+// its members recorded is Good: the rest read as the recorded system's own
+// unbound members did — zero — and quality is a property of the whole tag.)
 func (d *Driver) Quality() map[string]nio.Quality {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.h != nil {
-		return nil
+	if d.ready {
+		return d.quality
 	}
 	out := map[string]nio.Quality{}
 	for _, n := range d.InputNames() {
@@ -294,13 +380,15 @@ type Health struct {
 func (d *Driver) Health() Health {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	h := Health{History: d.m.History, Loaded: d.h != nil, Tags: len(d.m.Tags), Speed: d.clock.Speed,
+	h := Health{History: d.m.History, Loaded: d.ready, Tags: len(d.m.Tags), Speed: d.clock.Speed,
 		Paused: d.clock.Pause, Loops: d.clock.Loops, Reads: d.reads}
 	if d.loadErr != nil {
 		h.LastError = d.loadErr.Error()
 	}
 	if d.h != nil {
 		h.Series = len(d.h.Series)
+	}
+	if d.ready {
 		h.AtS, h.FromS, h.ToS = int64(d.clock.Pos), int64(d.clock.From), int64(d.clock.To)
 	}
 	names := make([]string, 0, len(d.matched))

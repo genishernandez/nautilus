@@ -14,6 +14,20 @@ import "time"
 // rebooted or the exporter restarted — and no honest rate exists for that
 // interval: Observe reports ok=false and the caller keeps the last rate.
 //
+// A 32-bit counter can reset too, and from the counter alone a reset and a
+// wrap look the same: both step backwards. Two rules tell them apart:
+//
+//   - A step backwards that, read as a wrap, would mean the counter moved
+//     more than HALF its range (2³¹) in one interval is a reset, not a
+//     wrap. A counter that really moves that fast is already one interval
+//     from a double wrap nobody can see (at the default 10 s that is
+//     1.7 Gb/s on an octet counter — RFC 2863 has every port over 20 Mb/s
+//     on the 64-bit columns), so nothing honest is lost; a reset from the
+//     lower half of the range, the common case, is no longer a spike.
+//   - A reset from the upper half still reads as a plausible wrap. Only the
+//     device can say it restarted: Discontinuity takes that word (an SNMP
+//     source's sysUpTime) and drops the sample from before it.
+//
 // A counter whose wire value changes between integer and float (an exporter
 // that formats 1e+06 one scrape and 1000001 the next) starts over on the
 // switch: the two paths keep separate last samples and different reset
@@ -50,7 +64,11 @@ func (c *Counter) Observe(v uint64, width int, now time.Time) (rate float64, ok 
 	case v >= c.last:
 		delta = float64(v - c.last)
 	case width == 32:
-		delta = float64(v + (1<<32 - c.last))
+		wrapped := v + (1<<32 - c.last)
+		if wrapped > 1<<31 {
+			return 0, false // half the range in one interval: a reset, not a wrap
+		}
+		delta = float64(wrapped)
 	default:
 		return 0, false // 64-bit went backwards: a reset, not a wrap
 	}
@@ -71,6 +89,18 @@ func (c *Counter) ObserveFloat(v float64, now time.Time) (rate float64, ok bool)
 		return 0, false
 	}
 	return (v - c.lastF) / dt, true
+}
+
+// Discontinuity says the source's counters started over at restart (an SNMP
+// agent's sysUpTime, read alongside them, puts its last start at poll time
+// minus the uptime). A previous sample taken before then belongs to the old
+// run, so it is forgotten and the next sample is a first sample: no rate is
+// computed across the restart, whatever the counter's width or how far it
+// has climbed since. A sample taken after the restart is kept.
+func (c *Counter) Discontinuity(restart time.Time) {
+	if c.seen != pathNone && c.at.Before(restart) {
+		c.Reset()
+	}
 }
 
 // Reset forgets the previous sample — a source that reconnected after an

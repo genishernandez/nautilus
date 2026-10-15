@@ -116,7 +116,18 @@ type classPlan struct {
 	columns []column
 	uses    map[string][]use // OID → the members it feeds
 	tags    []string
+	// counters are the plan's rate bindings. A plan with any also reads
+	// sysUpTime.0, so a poll can tell an agent restart (counters back to
+	// zero) from a 32-bit wrap — see restarted. uptime is the last reading.
+	counters   []*hw.Counter
+	uptime     uint64
+	uptimeSeen bool
 }
+
+// sysUpTimeOID is SNMPv2-MIB::sysUpTime.0: TimeTicks (1/100 s) since the
+// agent (re)started — the discontinuity indicator for every counter it
+// serves (RFC 2578 §7.1.6, RFC 2863 ifCounterDiscontinuityTime).
+const sysUpTimeOID = "1.3.6.1.2.1.1.3.0"
 
 type column struct {
 	prefix string // the column OID, walked with GetBulk
@@ -230,6 +241,7 @@ func New(m Manifest, opts ...Option) (*Driver, error) {
 			if mb.Rate {
 				u.counter = &hw.Counter{}
 				src.counters[p] = u.counter
+				plan.counters = append(plan.counters, u.counter)
 			}
 			plan.uses[oid] = append(plan.uses[oid], u)
 		}
@@ -260,6 +272,11 @@ func (p *classPlan) build() {
 			parent = "" // a scalar is never walked
 		}
 		byParent[parent] = append(byParent[parent], oid)
+	}
+	if _, bound := p.uses[sysUpTimeOID]; len(p.counters) > 0 && !bound {
+		// Not bound to a member, so no tag turns Bad if an agent lacks it:
+		// restart detection just falls back to the counter's own rules.
+		byParent[""] = append(byParent[""], sysUpTimeOID)
 	}
 	for parent, oids := range byParent {
 		sort.Slice(oids, func(i, j int) bool { return walk.Compare(oids[i], oids[j]) < 0 })
@@ -456,6 +473,7 @@ func (d *Driver) poll(ctx context.Context, sourceID, class string) (hw.Result, e
 	}
 
 	s.perClass[class] = requests
+	restarted(plan, got)
 
 	res := hw.Result{Requests: requests}
 	for _, oid := range sortedKeys(plan.uses) {
@@ -507,6 +525,39 @@ func (d *Driver) poll(ctx context.Context, sourceID, class string) (hw.Result, e
 		}
 	}
 	return res, nil
+}
+
+// restarted applies the agent's sysUpTime to the plan's rate counters
+// before this poll's samples reach them. Uptime that went BACKWARDS since
+// the plan's last poll means the agent restarted in between — a reboot, or
+// an agent restart that zeroed its counters between two good polls with no
+// poll missed — at t − U by this reading, and a counter whose last sample
+// is older than that is from the previous run (hw.Counter.Discontinuity).
+// Without this a 32-bit counter that reset from high in its range reads as
+// a wrap and delivers a plausible, wrong rate; a 64-bit one that climbed
+// past its old value within the interval reads as traffic. An agent that
+// does not answer sysUpTime leaves the counters to hw.Counter's own rules.
+//
+// Backwards, not merely "t − U is after the last sample": a stand-in whose
+// sysUpTime is a recorded constant would otherwise restart every poll once
+// that many seconds had passed, and no rate would ever be delivered.
+// Conservative where it can be wrong: net-snmp's sysUpTime is the daemon's,
+// so restarting snmpd (kernel counters intact) costs one rate sample, and
+// so does sysUpTime's own wrap after 497 days.
+func restarted(plan *classPlan, got map[string]sample) {
+	smp, ok := got[sysUpTimeOID]
+	if !ok || smp.vb.Type != walk.TimeTicks || len(plan.counters) == 0 {
+		return
+	}
+	back := plan.uptimeSeen && smp.vb.Uint < plan.uptime
+	plan.uptime, plan.uptimeSeen = smp.vb.Uint, true
+	if !back {
+		return
+	}
+	at := smp.at.Add(-time.Duration(smp.vb.Uint) * 10 * time.Millisecond)
+	for _, c := range plan.counters {
+		c.Discontinuity(at)
+	}
 }
 
 // sample is one varbind and the moment its response arrived. A rate is
@@ -587,7 +638,7 @@ func (d *Driver) warnOnce(s *source, key, msg string, args ...any) {
 
 // write is hw.WriteFunc: one SetRequest per changed command. The value is
 // mapped through Set ({true: 1, false: 2}) when the write declares one;
-// otherwise an INT is written as itself and a BOOL as 1/0.
+// otherwise an INT is written as itself. A BOOL always needs Set (Validate).
 func (d *Driver) write(ctx context.Context, sourceID string, w hw.WriteDecl, v ir.Value) error {
 	wr, ok := d.writes[w.Name]
 	if !ok {
@@ -603,13 +654,11 @@ func (d *Driver) write(ctx context.Context, sourceID string, w hw.WriteDecl, v i
 		wire = n
 	} else {
 		switch v.Kind {
-		case ir.TypeBool:
-			if v.B {
-				wire = 1
-			}
 		case ir.TypeInt:
 			wire = v.I
 		default:
+			// A BOOL lands here too: Validate requires set: for one (SNMP
+			// has no boolean, and 1/0 is not TruthValue's 1/2).
 			return fmt.Errorf("write %s: a %s command needs set: to name the wire integer", w.Name, v.Kind)
 		}
 	}

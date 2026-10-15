@@ -97,6 +97,14 @@ claims:
       import. TestForeignImportByteIdenticalOnRerun was removed: its
       "recording" is the parsed scrape re-rendered by prom.RenderText, not
       a recorded body, and it compares the manifest only.
+  - id: IT-036
+    claim: >-
+      A live `naut prometheus import` whose scrape does not finish within
+      `--timeout` fails rather than generating a manifest from the part of
+      the body that arrived.
+    source: "#import-then-run"
+    tests:
+      - go ./cmd/naut TestScrapeOnceTimeoutIsAnError
   - id: IT-008
     claim: >-
       `manifest:` is the only required key and `New` never dials, so check
@@ -206,21 +214,29 @@ claims:
     claim: >-
       `InBps`, `OutBps` and `ErrorRate` are per-second rates of wire
       counters, with 32-bit wrap and 64-bit reset handled (a backwards step
-      on a 64-bit counter is a reboot, not a wrap), and the first sample
-      after connect delivers no rate.
+      on a 64-bit counter is a reboot, not a wrap); a 32-bit step backwards
+      that would mean more than half its range in one interval is a reset,
+      an SNMP source's `sysUpTime` going backwards makes every rate across
+      the restart a reset, a reset delivers no rate for that interval, and
+      the first sample after connect delivers no rate.
     source: "#quality-rates-and-companions"
     tests:
       - go ./hw TestCounterRate
       - go ./hw TestCounterWrap32
+      - go ./hw TestCounterReset32
+      - go ./hw TestCounterDiscontinuity
       - go ./hw TestCounterFloat
       - go ./snmp TestDriverCounterRate
       - go ./snmp TestForeignCounterRate
+      - go ./snmp TestPollAgentRestartIsNotAWrap
       - go ./prom TestPollReconnectResetsRateCounters
     partial: true
     note: >-
       Rates read 0 for exactly one interval after connect; the tests assert
       no rate on the first sample and a reset on reconnect, not the literal
-      zero in the delivered tag.
+      zero in the delivered tag. That the rate before a reset is kept is
+      the caller's (hw.Base leaves a member whose binding delivers nothing
+      as it was) and is not asserted for the reset case.
   - id: IT-017
     claim: >-
       A refused OID, a 404 resource or a metric the exporter no longer
@@ -289,6 +305,20 @@ claims:
     note: >-
       The Redfish importer asserts no `writes:`; the SNMP and Prometheus
       importers are not asserted to emit none.
+  - id: IT-037
+    claim: >-
+      A BOOL command over SNMP must have `set:` naming the INTEGER each
+      value writes; `naut check` refuses a BOOL write without it rather
+      than send 0 for false.
+    source: "#writes-are-off"
+    tests:
+      - go ./snmp TestManifestValidate/bool write without set
+      - go ./snmp TestWriteMapping
+    partial: true
+    note: >-
+      The refusal is asserted in the manifest's Validate, which `naut check`
+      reaches through the driver's `New`; the check command itself is not
+      run against such a manifest.
   - id: IT-022
     claim: >-
       A Redfish `PowerCmd` is an INT (0 none, 1 on, 2 graceful shutdown, 3

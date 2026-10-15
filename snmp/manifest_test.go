@@ -160,6 +160,9 @@ func TestManifestValidate(t *testing.T) {
 			m.Tags[0].Members["OperUp"] = mb
 		}, "SNMP has no booleans"},
 		{"write without oid", func(m *Manifest) { m.Writes[0].OID = "" }, "needs an oid"},
+		// A BOOL command without set: would write 0 for false — not
+		// TruthValue's false(2), and rarely any MIB's.
+		{"bool write without set", func(m *Manifest) { m.Writes[0].Set = nil }, "UPS1.OnBattery is a BOOL, and SNMP has no booleans — add set:"},
 		{"dup tag", func(m *Manifest) { m.Tags[1].Name = "SW1_Port01" }, "duplicate tag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
