@@ -208,13 +208,19 @@ claims:
       - go ./logix/writer TestGoldenConversions
       - go ./logix/writer TestNarrowingWrapMatchesNautilus
       - go ./logix/writer TestRealToIntegerStores
+      - naut logix/writer/testdata/conformance/conversions case 1, xd = 70000, xr = 2.5
+      - naut logix/writer/testdata/conformance/conversions case 10, xd = 5, xr = 3.5
+      - naut logix/writer/testdata/conformance/conversions case 11, xd = -5, xr = -3.5
     partial: true
     note: >-
       The tests assert what is written and that the wrap equals nautilus's
-      narrowing under either MOD sign rule. That the controller computes
-      the same was verified once on an Echo v38 controller (#297: 271 of
-      279 results identical over 9 input sets, the rest float32 rounding of
-      a 3.7 input; REAL stores round halves to even), not in CI.
+      narrowing under either MOD sign rule. The conformance project
+      `logix/writer/testdata/conformance/conversions` writes every written
+      class into its own tag (and passes a conversion to a user block's
+      input); its 12 scenarios pass on nautilus here and passed unchanged on
+      an Echo v38 controller with `naut test --target logix` (#255,
+      2026-10-14), exact to the bit with float32-exact REAL inputs. The
+      controller run is not in CI.
 
   - id: LGA-017
     claim: >-
@@ -255,10 +261,14 @@ claims:
       - go ./logix/writer TestConversionsRefused
       - go ./logix/writer TestIntegerDivisionUnchanged
       - go ./logix/writer TestLadderIntegerDivision
+      - naut logix/writer/testdata/conformance/division minus seven by two truncates toward zero
     note: >-
       That Logix divides integers in REAL beside a REAL (7 / 2 = 3.5) was
       observed on an Echo v38 controller, in ST (#361) and in ladder DIV,
-      CPT and CMP (#368), not in CI.
+      CPT and CMP (#368), not in CI. The written forms (`conformance/division`:
+      DIV and CPT into an integer, a CMP against an integer, a quotient
+      through a DINT tag into a REAL) passed 4 of 4 scenarios on the same
+      controller.
 
   - id: LGA-040
     claim: >-

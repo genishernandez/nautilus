@@ -1,0 +1,67 @@
+# The conversions the Logix ST writer writes (#255, #297, #367, #368),
+# each into its own result tag, run on both runtimes with `naut test` and
+# `naut test --target logix`. What the writer refuses (logix/conversion)
+# cannot be here; convert_test.go has those cases, and logix-authoring.md
+# §4 has the table of what the controller was seen to do.
+name: conformance-conversions
+tasks:
+  - program: Main.st
+    scan: 10ms
+tags:
+  - { name: xd, role: input }
+  - { name: xa, role: input }
+  - { name: xi, role: input }
+  - { name: xs, role: input }
+  - { name: xr, role: input }
+  - { name: xb, role: input }
+  - { name: xt, role: input }
+  - { name: xk, role: input }
+  - { name: rI1, role: output }
+  - { name: rS1, role: output }
+  - { name: rS2, role: output }
+  - { name: rI2, role: output }
+  - { name: rD1, role: output }
+  - { name: rD2, role: output }
+  - { name: rD3, role: output }
+  - { name: rD4, role: output }
+  - { name: rD5, role: output }
+  - { name: rI3, role: output }
+  - { name: rD6, role: output }
+  - { name: rI4, role: output }
+  - { name: rD7, role: output }
+  - { name: rI5, role: output }
+  - { name: rT1, role: output }
+  - { name: rR1, role: output }
+  - { name: rR2, role: output }
+  - { name: rR3, role: output }
+  - { name: rR4, role: output }
+  - { name: rL1, role: output }
+  - { name: rL2, role: output }
+  - { name: rR5, role: output }
+  - { name: rB1, role: output }
+  - { name: rB2, role: output }
+  - { name: rB3, role: output }
+  - { name: rB4, role: output }
+  - { name: rD8, role: output }
+  - { name: rR6, role: output }
+  - { name: rD9, role: output }
+  - { name: rB5, role: output }
+  - { name: rR7, role: output }
+  - { name: rD10, role: output }
+  - { name: rI6, role: output }
+  - { name: rS3, role: output }
+  - { name: rT2, role: output }
+  - { name: rD11, role: output }
+  - { name: rR8, role: output }
+  - { name: rR10, role: output }
+  - { name: rR11, role: output }
+  - { name: rD12, role: output }
+target:
+  logix:
+    controller: DemoLine
+    processor: 1756-L85E
+    revision: "38.11"
+    comm-path: AB_ETH-1\100.93.56.45\Backplane\0
+    host: 100.93.56.45
+    side:
+      heartbeat: Nautilus_Scan

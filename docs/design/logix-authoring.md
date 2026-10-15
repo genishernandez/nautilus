@@ -1440,12 +1440,23 @@ as a tag path or a number; a negative literal is written `-5` (not
 `DINT_TO_REAL(a)` into a REAL input is written as `a`. Not built: an
 element with a tag index (`arr[k]`), which the writer accepts.
 
-**Not done:** the conversion cases in the `naut test --target logix`
-conformance set (#255's last item). A project with every written class
-was drafted (convcheck's statements with 3.75 for 3.7, the REAL → integer
-stores, `xa / 2` through a DINT tag, AOI inputs) but not run or
-committed; whether an AOI's copy-in rounds a REAL to a DINT input halves
-to even is open.
+**The conformance set (#255's last item).** Two projects under
+`logix/writer/testdata/conformance/`, run on Echo with `naut test --target
+logix` from a copy whose target block names ws-test:
+
+| project | scenarios | nautilus | Echo |
+|---|---|---|---|
+| `conversions` (ST): every written class into its own tag — the narrowing wraps, widening, TIME as DINT ms, int → REAL / LREAL, BOOL both ways, TRUNC, REAL → DINT / INT / SINT / TIME as a store, a comparison and an index of their own, `xa / 2` into a DINT and through it into a REAL, and three user-block inputs (a DINT tag into a REAL input, `DINT_TO_REAL(xd)`, `REAL_TO_DINT(xr)` into a DINT input) | 12 | pass | **12 of 12 pass**, exact |
+| `division` (ladder): DIV and CPT into a DINT and an INT, a CMP against a DINT, the quotient through a DINT tag into a REAL (MOVE), a REAL divided by a DINT, that tag compared with a REAL | 4 | pass | **4 of 4 pass** |
+
+The REAL inputs are exact in float32 (2.5, 3.75, 100.25, …), so the
+#297 run's 8 float32 differences of a `3.7` input do not recur, and every
+assertion is an exact comparison. The ties 2.5, −2.5, 3.5, −3.5, 1.5,
+0.5 and −0.5 are among the inputs, so the user-block input
+`REAL_TO_DINT(xr)` shows that the copy into an AOI parameter rounds halves
+to even like an assignment. An INT store out of range is not asserted
+(`division`'s large quotient): the controller wraps where nautilus keeps
+the value (`st-int-width`), which is not a conversion question.
 
 ## 8. The demo this enables
 
