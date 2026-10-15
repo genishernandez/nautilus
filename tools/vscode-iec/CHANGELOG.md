@@ -7,6 +7,13 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
 
 ### Added
 
+- **`sparkplug.store-forward-file` in `nautilus.yaml`.** Completion and
+  validation for the new option that journals the store-and-forward
+  buffer to a file, so a restart during a broker or primary-host outage
+  no longer loses it: the next start replays it, marked historical, after
+  its first birth. Omitted, the buffer stays in memory, as before. Needs a
+  `naut` newer than 0.17.0.
+
 - **Deploy to a Logix controller without leaving the editor.** In a
   project whose `nautilus.yaml` has a `target: logix` section, with
   `naut logix serve --project` at `nautilus.runtimeUrl`:

@@ -729,6 +729,10 @@
           "minimum": 1,
           "description": "Buffer up to this many data messages while the broker (or the primary host) is unreachable and replay them, marked historical, on reconnect. Omit to disable."
         },
+        "store-forward-file": {
+          "type": "string",
+          "description": "Journal the store-forward buffer to this file so a restart, upgrade or crash during an outage does not lose it: the next start loads it and replays it, marked historical, after its first birth. Relative to the working directory. Omit to buffer in memory only (the default). Needs store-forward."
+        },
         "flatten-udts": {
           "type": "boolean",
           "default": false,

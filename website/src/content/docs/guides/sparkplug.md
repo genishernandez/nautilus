@@ -195,6 +195,42 @@ a gap in the host's historian. The buffer is a bounded ring: when full,
 the oldest record drops so recent data always survives, and the drain is
 rate-limited so a backlog doesn't flood the broker on reconnect.
 
+The buffer lives in memory, so by default a process that exits during an
+outage (restarted to fix it, upgraded, crashed) loses it. Set
+`store-forward-file` to keep it on disk:
+
+```yaml
+sparkplug:
+  store-forward: 5000
+  store-forward-file: /var/lib/nautilus/storeforward.log
+```
+
+Each record is appended to the file as it is buffered. On start, a
+backlog the last process left there is loaded and replayed, marked
+historical and with its original timestamps, after the node's first birth
+(after the primary host is ONLINE, when there is one); once it has gone
+out the file is cleared. A relative path is relative to the working
+directory, like `bdseq-file`.
+
+- **Durability.** Each record is one write to the file as it is buffered,
+  so any process exit, `kill -9` included, keeps it. The file is synced to
+  disk at most once a second while buffering (and on stop), which keeps a
+  long outage from costing a disk flush per tick; a power loss can lose
+  the last second of records.
+- **At least once.** Records a replay sent just before the process exited
+  can be sent again by the next one, as historical, with the same
+  timestamps.
+- **Bounded.** The file holds at most about twice the ring and loads as
+  the newest `store-forward` records, as the ring would have kept.
+- **Damage.** A torn last record (a crash mid-write) is skipped with a log
+  line. A file that is not a store-forward file, or is damaged part-way,
+  is renamed aside to `<file>.corrupt-<time>` and logged, and the node
+  starts with what it could read. A file it cannot create or write at
+  start (a missing directory, permissions) fails the start.
+
+A replayed backlog carries the metric names it was buffered with: a tag
+renamed between the two runs replays under its old name.
+
 `bdseq-file` persists the birth-death sequence number across restarts, as
 the spec expects; without it bdSeq restarts at 0 each run.
 
@@ -221,6 +257,7 @@ node, _ := sparkplug.New(rt, sparkplug.Config{
     sparkplug.WithPublishClass("fast", sparkplug.RBE{Deadband: 0.1, MaxInterval: 5 * time.Second}),
     sparkplug.WithMetricClass("fast", "PIT_*"),
     sparkplug.WithStoreForward(5000),
+    sparkplug.WithStoreForwardFile("/var/lib/nautilus/line1.sf"), // omit: memory only
     sparkplug.WithWritable("LevelSP", "Pump*.SpeedSP"), // omit: read-only
     // Any io.Driver's tags can be a device; DBIRTH/DDEATH track its health.
     sparkplug.WithDevice(sparkplug.Device{

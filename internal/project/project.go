@@ -222,6 +222,12 @@ type SparkplugConfig struct {
 	// (or the primary host) is unreachable and replays them, marked
 	// historical, on reconnect. Zero disables (the default).
 	StoreForward int `yaml:"store-forward"`
+	// StoreForwardFile journals that buffer to a file, so a process exit
+	// during an outage does not lose it: the next start loads it and
+	// replays it, as historical, after its first birth. Relative to the
+	// working directory, like bdseq-file. Empty (the default): memory only.
+	// Needs store-forward.
+	StoreForwardFile string `yaml:"store-forward-file"`
 	// FlattenUDTs publishes each UDT member as a plain metric
 	// ("P101/Running") instead of the tag as one Sparkplug Template, for
 	// hosts that do not read Templates. Default false: Templates.
@@ -494,6 +500,9 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 	var opts []sparkplug.Option
 	if c.StoreForward > 0 {
 		opts = append(opts, sparkplug.WithStoreForward(c.StoreForward))
+		if c.StoreForwardFile != "" { // Load refused it without store-forward
+			opts = append(opts, sparkplug.WithStoreForwardFile(c.StoreForwardFile))
+		}
 	}
 	if c.FlattenUDTs {
 		opts = append(opts, sparkplug.WithFlattenUDTs())
@@ -789,6 +798,9 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 			}
 		default:
 			return nil, fmt.Errorf("sparkplug.primary-host-offline: %q is not buffer or disconnect", m.Sparkplug.PrimaryHostOffline)
+		}
+		if m.Sparkplug.StoreForwardFile != "" && m.Sparkplug.StoreForward <= 0 {
+			return nil, fmt.Errorf("sparkplug.store-forward-file needs store-forward: the file journals that buffer")
 		}
 	}
 	if m.Sparkplug != nil && m.Sparkplug.Device != "" {
