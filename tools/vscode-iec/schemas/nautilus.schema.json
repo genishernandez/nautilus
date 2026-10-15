@@ -200,6 +200,10 @@
                 }
               }
             },
+            "hardware": {
+              "type": "string",
+              "description": "An L5X, relative to the project, whose <Modules> section is the controller's I/O configuration: the chassis, its modules, and the adapters and modules beyond it that alias: tags name. The writer carries it into every project it writes, unchanged, in place of the controller's generated Local module, and refuses an alias of a rack point whose module it lacks (logix/io-module). `naut logix import --project` writes one, hardware.L5X, from an export with I/O modules; a Logix Designer export of the whole project works as it is. Its Local module must be the target's processor at the target's revision."
+            },
             "side": {
               "type": [
                 "object",

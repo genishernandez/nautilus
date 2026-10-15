@@ -202,6 +202,10 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 		return nil, err
 	}
 	p.Files["tags/logix.yaml"] = raw
+	if hw := hardwareFile(f); hw != nil {
+		p.Files[HardwareFile] = hw
+		im.hardware = HardwareFile
+	}
 	p.Files["nautilus.yaml"] = im.manifest(tasks)
 	sort.SliceStable(p.Notes, func(i, j int) bool {
 		if p.Notes[i].Owner != p.Notes[j].Owner {
@@ -324,6 +328,8 @@ type importer struct {
 	// ioAliases are the alias tags the import made for rack points the
 	// logic named directly: tag name → Logix operand.
 	ioAliases map[string]string
+	// hardware is the project's hardware configuration file, "" for none.
+	hardware string
 	// usesDialect is set when a routine needed a dialect block (TONR);
 	// the manifest then opts into dialect: logix.
 	usesDialect bool
@@ -401,6 +407,10 @@ func (im *importer) manifest(tasks []manifestTask) []byte {
 	}
 	if im.opts.Host != "" {
 		fmt.Fprintf(&b, "    host: %s\n", im.opts.Host)
+	}
+	if im.hardware != "" {
+		// The export's I/O modules, which the alias tags land on (#275).
+		fmt.Fprintf(&b, "    hardware: %s\n", im.hardware)
 	}
 	// The tag file is the controller's tag set: write every tag back,
 	// named by a routine or not (#370).

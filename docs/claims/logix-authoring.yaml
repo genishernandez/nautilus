@@ -346,6 +346,43 @@ claims:
       deploy (to a fake agent) writes those tags as alias tags (AliasFor) with
       the rung naming the tags.
 
+  - id: LGA-052
+    claim: >-
+      With `target.logix.hardware` set, the writer puts that L5X's
+      `<Modules>` section into the project unchanged, in place of the
+      generated controller module. An alias of a rack point whose module
+      the configuration lacks (a slot of `Local` or of an adapter, or a
+      module by name), or with no configuration at all, stops `naut logix
+      write` and `naut logix deploy` with `logix/io-module` naming the alias
+      and the module; a configuration whose `Local` module is not the
+      target's processor at its revision stops them with `logix/hardware`.
+      A project written with a configuration imports and builds in Logix
+      Designer with its aliases resolved.
+    source: "#io-tag-aliases"
+    tests:
+      - go ./logix/writer TestHardwareModulesWrittenVerbatim
+      - go ./logix/writer TestIOModuleRule
+      - go ./logix/writer TestHardwareMustMatchTheTarget
+      - go ./logix/writer TestRackPoint
+      - go ./cmd/naut TestAliasedTagsRunInSimulationAndDeployAsAliases
+      - go ./cmd/naut TestLogixImportHardwareRoundTrip
+      - go ./logix/writer TestSDKConvertAndBuild/ioline
+    partial: true
+    note: >-
+      The writer tests use a real Logix Designer v38.01 export with two 1756
+      modules in the controller's chassis and a 1734-AENT adapter with a
+      1734-IB8 under it (lang/l5x/testdata/ioline.L5X), in ladder and ST.
+      TestSDKConvertAndBuild/ioline imports and builds the written project
+      with the SDK; it runs only against a logixd (ws-test, #275), so CI
+      does not run it. Measured by hand on ws-test (Logix Designer v38.01,
+      Echo 5580, 2026-10-14): the same aliases with no modules import and
+      then fail the build with RxTAG_ALIAS_TARGET_NOT_FOUND, the failure
+      logix/io-module now reports at write time; the project with the
+      hardware configuration downloads, verifies, runs in Run, and writing
+      the input alias tags moves Local:1:I.Data and the seal-in drives
+      Local:2:O.Data. The rule checks that the module is there, not that
+      the point exists on it.
+
   - id: LGA-022
     claim: >-
       `naut logix import --project` writes a nautilus project from a full
@@ -367,6 +404,25 @@ claims:
       manifest, each with its own rung; the manifest's target filled from the
       controller (name, processor, revision); controller-scope descriptions in
       the tag file.
+
+  - id: LGA-053
+    claim: >-
+      `naut logix import --project` of an export with I/O modules writes
+      `hardware.L5X`, the export's `<Modules>` section unchanged, and names
+      it in the manifest (`target.logix.hardware`), so the write-back
+      carries the same modules with the alias tags on them; an export whose
+      only module is the controller's own gets no hardware file.
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./logix/importer TestImportCarriesHardware
+      - go ./cmd/naut TestLogixImportHardwareRoundTrip
+      - go ./lang/l5x TestParseModules
+    note: >-
+      Line ends are made LF (XML reads CRLF the same); otherwise the
+      section is the export's bytes. Measured by hand on ws-test (Logix
+      Designer v38.01, 2026-10-14): the write-back of the imported
+      ioline export, imported into Logix Designer and exported again, has
+      a `<Modules>` section byte for byte the original export's.
 
   - id: LGA-023
     claim: >-

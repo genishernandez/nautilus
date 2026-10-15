@@ -181,6 +181,8 @@ message:
 | `logix/st` | no `RETURN`, `CONTINUE`, `STRING`, `MIN`/`MAX`/`LIMIT`/`SEL`/`MUX`, `ATAN2`, user calls |
 | `logix/data-op` | an assignment Logix has a data instruction or a `CPT` for |
 | `logix/conversion` | a conversion the controller would compute differently: REAL to an integer inside an expression or into a tag of another type (as the whole right-hand side into a tag of its own type it is written as a store), an integer `/` whose quotient meets a REAL, in ST or on a rung (`r := a / 2`, `a / 2 > x` with `x` REAL, `{ r := a / 2 }`, `GT(a / 2, x)`: the controller divides in REAL, 3.5 where nautilus gives 3; compute it into a DINT tag first), unsigned, bit-string, `LINT`, `LTIME` and `STRING` conversions, a BOOL or `LREAL` conversion inside an expression, an integer *expression* converted to REAL |
+| `logix/io-module` | an alias of a rack point whose module the hardware configuration has (`naut logix write` and deploy only; see [I/O](#io-tag-aliases)) |
+| `logix/hardware` | a hardware configuration whose `Local` module is the target's processor at its revision (`naut logix write` and deploy only) |
 
 ## Vendor idioms: `dialect: logix`
 
@@ -220,9 +222,49 @@ The program uses `StartPB`. The writer emits an alias tag
 so the same source runs in simulation. It is the one place a hardware
 address lives in the project.
 
-The writer does not create I/O modules, so an alias to a rack point only
-builds against a controller project that already has the module. See
-[What it does not do yet](#what-it-does-not-do-yet).
+The modules those points live on are the project's **hardware
+configuration**: an L5X whose `<Modules>` section holds the controller's
+chassis, its I/O modules, and any adapters and the modules under them.
+`target.logix.hardware` names it:
+
+```yaml
+target:
+  logix:
+    controller: IOLine
+    processor: 1756-L85E
+    revision: "38.11"
+    hardware: hardware.L5X
+```
+
+The writer copies that section into every project it writes, unchanged,
+in place of the controller module it would otherwise generate. Nothing in
+it is nautilus's: each module's identity, configuration and connections
+are what Logix Designer exported. `naut logix import --project` writes
+`hardware.L5X` from an export with I/O modules (below); a Logix Designer
+export of the whole project works as it is, so changing the hardware is
+changing it in Logix Designer and exporting over the file.
+
+An alias of a rack point needs its module in the configuration, and
+`naut logix write` and `naut logix deploy` check that before anything
+reaches Logix Designer (`logix/io-module`; `naut check` does not read the
+hardware configuration): `Local:1:I.Data.3` needs a module in slot 1 of the
+controller's chassis, `Remote1:1:I.Data.0` one in slot 1 under the
+adapter `Remote1`, `Drive1:I.Speed` a module named `Drive1`. The error
+names the alias, the module it needs and the modules the configuration
+has; without a hardware configuration it says to add one. (Unchecked,
+Logix Designer imports the project and then fails its build with
+`RxTAG_ALIAS_TARGET_NOT_FOUND`, naming no tag.) The configuration's
+`Local` module must be the target's `processor` at its `revision`
+(`logix/hardware`). The check is whether the module is there, not
+whether the point exists on it.
+
+Verified on Logix Designer v38 and a 5580 on Logix Echo: a project
+imported from an export with two 1756 modules in the controller's chassis
+and a 1734 POINT I/O adapter with a module under it wrote back, imported
+and built with no errors, downloaded, and ran in Run with its alias tags
+driving the module points (Echo emulates no I/O, so nothing answers on
+the modules' connections). Exported again from Logix Designer, the
+`<Modules>` section was byte for byte the one imported.
 
 ## Bringing an existing program in
 
@@ -240,8 +282,13 @@ directly, become tags with `alias:`. A rung that names an alias tag comes
 in like any other: the tag takes its target's type, whether the target is
 a tag, a member of a UDT or Add-On Instruction instance, an array element,
 a bit (`Status.5`) or a rack point's bit (`Local:1:I.Data.3`). An alias the
-export cannot type, such as one of a whole rack word with no module
-definition, is refused by name. A rung with no nautilus form is kept
+import cannot type, such as one of a whole rack word, is refused by name.
+An export with I/O modules also gives the project its hardware
+configuration: `hardware.L5X`, holding the export's `<Modules>` section
+unchanged, and `hardware: hardware.L5X` in the manifest, so the write-back
+carries the same modules and the alias tags land on them. (An export whose
+only module is the controller's own gets none: the writer generates that
+module from the processor.) A rung with no nautilus form is kept
 as a comment and reported, never guessed at. `--comm-path` and `--host`
 fill in how to reach the controller.
 
@@ -427,7 +474,8 @@ and the `resets`. The answer is a stream of JSON lines (`progress` events, then
   processor (a 5370 L1 or L2, a 5480, a safety controller, a 5570) it is
   the 1756-L85E's with only the catalog number changed; `naut logix write`
   and `naut logix deploy` say so, and Logix Designer will likely refuse
-  the project.
+  the project, unless the project has a hardware configuration
+  (`target.logix.hardware`), whose own `Local` module is used instead.
 - **One task, one program.** Multi-task projects, FBD and SFC are not in
   the subset.
 - **Not everything IEC 61131-3 has.** No `STRING`, unsigned, bit-string,
@@ -444,8 +492,11 @@ and the `resets`. The answer is a stream of JSON lines (`progress` events, then
   of range for the integer it is stored into wraps silently on the
   controller, where nautilus faults the scan. nautilus does not wrap an
   integer at its declared width; the controller does.
-- **No hardware configuration.** The writer emits no I/O modules, so
-  aliases to rack points need a controller project that already has them.
+- **The hardware configuration comes from Logix Designer.** The writer
+  carries an exported `<Modules>` section; it does not create a module from
+  a description (catalog number and slot) yet, so a new module is added in
+  Logix Designer and exported. With a hardware configuration, the
+  controller's own module is the configuration's, not the writer's.
 - **A download keeps values only for tags it can match.** A renamed or
   retyped tag starts at the project's value, and the values are the ones
   uploaded about half a minute before the controller stops. There is no

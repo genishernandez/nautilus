@@ -198,6 +198,15 @@ and a running controller's values always move.
    the repo, captured once from an existing project (or created by `logixd`
    for a bare controller), and merged by the writer. It is the one
    Studio-shaped artifact left; generating it from YAML is a later phase.
+   **Decided and built (2026-10-14, #275):** the merge, as proposed. A
+   project names an L5X with `target.logix.hardware` (the import writes
+   `hardware.L5X` at the project root); the writer copies its `<Modules>`
+   verbatim in place of the generated `Local` module, and the alias tags'
+   modules are checked at write time (`logix/io-module`). Controller model
+   and revision stay in `target.logix`, checked against the file's `Local`
+   module (`logix/hardware`). Generated stubs from a manifest description
+   are not built; the stub evidence is in §7b, "Follow-up — the hardware
+   configuration".
 2. **Online edit or download.** Rung-only changes go as an online edit
    (verified path). New tags or structural changes need a download, which
    stops the controller and so needs explicit confirmation. Unverified: how
@@ -1786,6 +1795,92 @@ downloads, and a download resets every connection open before it, so it
 now dials per access.
 
 
+### Follow-up — the hardware configuration (2026-10-14, #275)
+
+Decision 1 of §6, built as proposed: the project carries Logix Designer's
+own `<Modules>` section, and the writer merges it. Alias tags of rack
+points (Phase E) now land on modules, so an imported real-shaped program
+with I/O writes, builds and downloads.
+
+**Built.**
+
+- `lang/l5x` reads `<Modules>`: each module's identity (`Vendor`,
+  `ProductType`, `ProductCode`, `Major`/`Minor`), parent, parent port and
+  ports, and the element's own bytes (`Controller.ModulesXML`).
+- `target.logix.hardware`: an L5X, relative to the project, whose
+  `<Modules>` is the I/O configuration. Any whole-project export works;
+  only that section is read. `writer.Options.Hardware` replaces the
+  generated `Local` module with it, verbatim (CRLF made LF, which XML
+  reads the same). `naut logix write`, `naut logix deploy`, the editor's
+  deploy (`naut logix serve --project`) and `naut test --target logix`
+  all load it through `loadLogixProject`; a file that does not parse, or
+  has no `<Modules>` or no `Local` module, stops them by name. With a
+  configuration the unverified-`Local`-module warning (#382) is not
+  printed: the module is the export's.
+- Rules. `logix/io-module`: an alias whose target is a rack point —
+  `Local:1:I.Data.3` (slot 1 of the controller's chassis),
+  `Remote1:1:I.Data.0` (slot 1 under the adapter `Remote1`),
+  `Drive1:I.Speed` (the module `Drive1`) — needs that module in the
+  configuration; the message names the alias, the module, and what the
+  configuration has, or, with no configuration, says to add one.
+  `logix/hardware`: the configuration's `Local` module is the target's
+  processor at the target's revision. Both fire in `naut logix write` and
+  deploy, not in `naut check` or the editor's live diagnostics, which do
+  not read the manifest's target.
+- `naut logix import --project` writes `hardware.L5X` (the controller's
+  name, processor and revision around the export's `<Modules>`, with a
+  comment saying where it came from) and `hardware: hardware.L5X` when
+  the export has a module besides `Local`. A `Local`-only export gets
+  none: the writer's table (#373) already reproduces that module.
+
+**Why not stubs first.** The 2026-10-06 spike found that Logix Designer's
+import takes a module stub — `Name`, `CatalogNumber`, `Vendor`,
+`ProductType`, `ProductCode`, `Major`, `Minor`, `ParentModule`,
+`ParentModPortId`, the upstream port's `Address` (slot or IP) and an
+`EKey` — and fills in the rest, but that the identity is the key: a
+missing code aborts the import (`XMLSrv_E_IMPORT_ABORTED_NO_CHANGES`) and
+a wrong one silently makes it a different module (in the spike,
+product code 13 came back as a 1756-OA16). A generated module is only as good
+as an identity table nobody has a public source for, and a module's
+configuration (filters, fault modes, RPI) is the plant's, not a default.
+A merged export carries both exactly. So the merge is the primary path,
+and generation waits for a table verified module by module.
+
+**Measured on ws-test** (Logix Designer v38.01, an Echo 5580 at v38.11):
+
+| step | result |
+|---|---|
+| a synthetic 1756-L85E project (`IOLine`: seal-in + flow alarm), aliases `StartPB`/`StopPB` → `Local:1:I.Data.0/1`, `RunCmd` → `Local:2:O.Data.0`, `FlowSw` → `Remote1:1:I.Data.0`, written with no modules | SDK import 0 errors, build fails: `RxTAG_ALIAS_TARGET_NOT_FOUND - The target of this alias was not found` (no tag named) — what `logix/io-module` now says at write time |
+| the same with four module stubs: 1756-IB16 (1/7/11, 3.1) in slot 1, 1756-OB16E (1/7/16, 3.1) in slot 2, 1734-AENT (1/12/108, 3.1) `Remote1` at 192.168.1.20 on the controller's Ethernet port, 1734-IB8 (1/7/216, 3.1) in its slot 1, all `EKey State="Disabled"` | import 0 errors, build succeeded; exported, every module has its configuration tag, connections and `ExtendedProperties` filled in, and two catalog numbers gained their series (`1734-AENT/A`, `1734-IB8/C`). That export is `lang/l5x/testdata/ioline.L5X` |
+| `naut logix import --project` of it, `naut logix write` back | `hardware.L5X` + `hardware: hardware.L5X`; the write-back imports with 0 errors and builds; converted back to L5X, its `<Modules>` is byte for byte the original export's (module `DataExchangeId`s included); the whole file differs only in dates and the controller's and tags' `DataExchangeId`s |
+| `naut logix deploy --download --yes --program-mode` of the imported project | 13 differences (a new tag set), downloaded and verified in 2 m 4 s; `naut logix mode run` → Run. The controller browses `Local:1:C/I`, `Local:2:C/I/O`, `Remote1:I/O`, `Remote1:1:C/I` beside the alias tags. Echo emulates no I/O, so the module connections never open; the controller runs regardless |
+| over EtherNet/IP in Run: write `StartPB` 1, then 0, then `StopPB` 1 | `Local:1:I.Data` 1 → 0 → 2 (the alias tags are the module's bits); `RunCmd` 1, sealed in at 1, then 0, and `Local:2:O.Data` follows it bit for bit; `FlowAlm` follows `RunCmd` (`FlowSw` 0) |
+| restored | `DemoLine.ACD` downloaded, Run, `naut logix drift` against `DemoLine.L5X`: no drift |
+
+`TestSDKConvertAndBuild/ioline` repeats the import and build against any
+logixd (passed on ws-test, 1.9 s import and build). The stub identities
+above are verified only in that sense: Logix Designer v38 kept each
+catalog number (adding a series) and built. They are the start of a
+table for generated stubs, not one.
+
+**Not done.**
+
+- Generated stubs from a manifest description (name, catalog number,
+  slot or IP). Needs an identity table verified per catalog number as
+  above, and a call on where the description lives (the vendor-neutral
+  rule: a `target.logix` key, not the language).
+- `naut check` / the editor do not run `logix/io-module`, because they do
+  not read `target.logix`.
+- The importer still refuses an alias of a whole rack word
+  (`Local:1:I.Data`): the export now carries the module's connection
+  types (`AB:1756_DI:I:0`), but not their member layout in a non-detailed
+  export, so the word's type is still unknown.
+- The rule checks the module, not the point: `Local:1:I.Data.40` on a
+  16-point module passes it.
+- Only a 5580 at v38 has run it; a CompactLogix with embedded I/O
+  (1769-L1x/L2x), whose `Local` row #373 left out, should now write from
+  its own export's configuration, but no such export has been tried.
+
 ## 8. The demo this enables
 
 James's target demo (2026-10-03), which replaces the Tier A `ab01` draft in the
@@ -1832,7 +1927,7 @@ Last checked against `main` on 2026-10-14.
 | # | Caveat | Evidence | Status |
 |---|---|---|---|
 | 1 | Every behaviour test has run on one emulated controller, a ControlLogix 5580 at firmware v38 on FactoryTalk Logix Echo; nothing has run on real hardware yet. | §7b Echo runs (#297, #368, #375, #273); LGA-037 | open, 2026-10-14 |
-| 2 | For a processor nautilus has no Logix Designer export for, such as a CompactLogix 5370 L1 or L2, a CompactLogix 5480, a safety controller or a ControlLogix 5570, the write warns that Logix Designer may refuse the project. | `writer.LocalModuleWarning`; `TestLocalModule`; LGA-046; #373 | open, 2026-10-14 |
+| 2 | For a processor nautilus has no Logix Designer export for, such as a CompactLogix 5370 L1 or L2, a CompactLogix 5480, a safety controller or a ControlLogix 5570, the write warns that Logix Designer may refuse the project, unless the project carries its own hardware configuration. | `writer.LocalModuleWarning`; `TestLocalModule`; LGA-046; #373 | open, 2026-10-14 |
 | 3 | A Logix project is one task running one ladder or structured text program; multiple tasks, function block diagrams and SFC are refused. | `TestLogixTargetRefusesSFCAndASecondTask`; LGA-036 | open, 2026-10-14 |
 | 4 | The target has no STRING, unsigned, bit-string, LINT or LTIME types, and refuses a program that uses one. | `logix/type`, `logix/conversion`; `TestRejections` (`type`, `unsigned`) | open, 2026-10-14 |
 | 5 | The IEC TP, CTD and CTUD blocks and edge-trigger instances are refused, because their behaviour differs from the Logix instructions; TON, TOF and CTU are written. | `logix/fb`; `TestRejections` (`TP block`, `CTUD block`) | open, 2026-10-14 |
@@ -1846,7 +1941,7 @@ Last checked against `main` on 2026-10-14.
 | 13 | nautilus does not wrap an integer at its declared width and the controller does, so an overflowing INT gives a different value on each. | conformance `st-int-width`; #368 note (§7b) | open, 2026-10-14 |
 | 14 | A download still stops the controller; it keeps tag values it can match, but reads them about thirty seconds before the stop, so a value the program changes in that window is not carried. | #273; LGA-047; `deploy.PlanValues` | open, 2026-10-14 |
 | 15 | A tag that a download adds does not appear in live values until `naut logix serve` is restarted. | #375 Echo run (§7b); `logix/facade` browses the controller once at startup | open, 2026-10-14 |
-| 16 | nautilus does not yet write I/O module configuration, so a program that uses rack I/O needs a controller project that already has those modules. | #275 (in progress) | open, 2026-10-14 |
+| 16 | nautilus does not create I/O modules itself: a program that uses rack I/O takes its modules from a Logix Designer export kept in the project, which the import writes, so a new module is added in Logix Designer first. | #275; LGA-052, LGA-053; §7b "Follow-up — the hardware configuration" | open, 2026-10-14 |
 | 17 | Import keeps a rung it cannot express as a comment and reports it; message instructions and the buffer copies that feed them are the largest gap. | corpus of 52 exports: 97.9% of rungs, 81% of routines whole (guide) | open, 2026-10-14 |
 | 18 | Commercial licence terms (automation interface, pooling) are not settled. | §7b Phase A licence check (§1.4.10, §1.4.7) | open, 2026-10-14 |
 
@@ -1859,4 +1954,5 @@ Last checked against `main` on 2026-10-14.
 | no deploy from the editor | online edit and download from VS Code, verified on Echo | #375; LGA-041, LGA-042 | 2026-10-14 |
 | the import round trip differs | the public yardstick writes back with no logic differences | #380; LGA-044; `TestLogixRoundTripYardstickCLI` | 2026-10-14 |
 | one processor's `Local` module | Logix Designer's own for ControlLogix 5580, CompactLogix 5370 L3 and 5380; written projects import and build on v38 | #389; LGA-046; `TestLocalModulesMatchExports` | 2026-10-14 |
+| a program that uses rack I/O needs a controller project that already has the modules | the project carries the export's I/O modules (`target.logix.hardware`, `hardware.L5X` from the import); an imported program with rack-I/O aliases writes, builds, downloads and runs on Echo, and an alias of a missing module is refused at write time by name | #275; LGA-052, LGA-053; `TestSDKConvertAndBuild/ioline` | 2026-10-14 |
 | arrays of block instances | arrays of TON, TOF and CTU are one Logix array tag (user blocks: item 8) | Phase E (§7b); `TestTimerInstanceArrayOnLogix` | 2026-10-03 |

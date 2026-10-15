@@ -1,6 +1,6 @@
 # L5X fixtures
 
-Three files, and what each one is for.
+Four files, and what each one is for.
 
 ## `DemoProgram.L5X` — a partial export, verbatim
 
@@ -54,6 +54,21 @@ contained:
   carrying a whole expression, parallel outputs written as a branch of
   coils, an Add-On Instruction call, and a bare `NOP()`
 - an ST routine, to prove it is captured rather than lost
+
+## `ioline.L5X` — a project with I/O modules, verbatim
+
+A whole-project export, byte for byte as Logix Designer v38.01 wrote it
+(BOM and CRLF included), of a synthetic project made for #275: a
+1756-L85E with a 1756-IB16 in slot 1 and a 1756-OB16E in slot 2 of its
+own chassis, and a 1734-AENT (`Remote1`) on its Ethernet port with a
+1734-IB8 in slot 1, and four alias tags on their points
+(`Local:1:I.Data.0`, `Local:1:I.Data.1`, `Local:2:O.Data.0`,
+`Remote1:1:I.Data.0`). It was made on ws-test by importing an L5X whose
+modules were stubs (name, catalog number, CIP identity, revision,
+parent and slot or IP), building it, and exporting the result: every
+connection, configuration tag and module type in it is what Logix
+Designer filled in, including the series it appended to two catalog
+numbers (`1734-AENT/A`, `1734-IB8/C`). No client data.
 
 ## The corpus that is not here
 
