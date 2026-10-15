@@ -1,9 +1,11 @@
 package hw
 
 import (
-	"github.com/joyautomation/nautilus/lang/ir"
+	"math"
 	"testing"
 	"time"
+
+	"github.com/joyautomation/nautilus/lang/ir"
 )
 
 func TestCounterRate(t *testing.T) {
@@ -143,5 +145,41 @@ func TestCounterDiscontinuity(t *testing.T) {
 	fresh.Discontinuity(t0)
 	if _, ok := fresh.Observe(1, 64, t0.Add(time.Second)); ok {
 		t.Fatal("first sample")
+	}
+}
+
+// A source whose uptime goes backwards in the same poll its counter
+// changes slope — what a plant does when it sets a switch's uptime and a
+// port's rate in one snapshot. Where the uptime puts the restart decides
+// it: long before the last sample (42 s ago, polled 70 ms ago), the counter
+// never started over, the sample is kept, and the rate is the honest
+// average of the interval — the slope only covered part of it — then the
+// new slope exactly. Inside the interval, the old sample is dropped and the
+// first rate spans post-restart samples only.
+func TestCounterDiscontinuityWithASlopeChange(t *testing.T) {
+	near := func(got, want float64) bool { return math.Abs(got-want) <= want*1e-9 }
+	t0 := time.Unix(1000, 0)
+	t1 := t0.Add(70 * time.Millisecond) // the slope began 20 ms in
+	t2 := t1.Add(70 * time.Millisecond)
+	const slope = 1e6 // octets/s
+
+	var kept Counter
+	kept.Observe(1000, 64, t0)
+	kept.Discontinuity(t1.Add(-42 * time.Second))
+	if r, ok := kept.Observe(1000+slope*0.05, 64, t1); !ok || !near(r, slope*5/7) {
+		t.Fatalf("restart long before the last sample: rate %v, %v; want %v", r, ok, slope*5/7)
+	}
+	if r, ok := kept.Observe(1000+slope*0.12, 64, t2); !ok || !near(r, slope) {
+		t.Fatalf("next interval: rate %v, %v; want %v", r, ok, float64(slope))
+	}
+
+	var dropped Counter
+	dropped.Observe(1<<32-1000, 32, t0)
+	dropped.Discontinuity(t1.Add(-30 * time.Millisecond)) // uptime 30 ms
+	if r, ok := dropped.Observe(slope*0.03, 32, t1); ok {
+		t.Fatalf("a rate across the restart: %v", r)
+	}
+	if r, ok := dropped.Observe(slope*0.10, 32, t2); !ok || !near(r, slope) {
+		t.Fatalf("first post-restart rate %v, %v; want %v (post-restart samples only)", r, ok, float64(slope))
 	}
 }

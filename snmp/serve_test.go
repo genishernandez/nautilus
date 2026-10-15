@@ -186,11 +186,10 @@ func TestPlantDrivesTheDriver(t *testing.T) {
 		v := read(t, d)
 		return !member(t, v, "SW1_Port01", "OperUp").B && member(t, v, "SW1_Port01", "Down").B
 	})
-	waitPolls(t, d, "SW1", 3)
-	v := read(t, d)
-	if got := member(t, v, "SW1_Port01", "InBps").F; math.Abs(got-8e6) > 8e6*0.05 {
-		t.Errorf("InBps = %v, want ≈8e6", got)
-	}
+	// The first rate after Apply spans the poll from before the ramp began,
+	// so it reads low — an honest average of that interval — and any single
+	// rig-interval rate jitters under load (waitRates).
+	v := waitRates(t, d, rateWant{"SW1_Port01", "InBps", 8e6, 8e6 * 0.05})
 	if got := member(t, v, "SW1_Port01", "OutBps").F; got != 0 {
 		t.Errorf("OutBps = %v, want 0", got)
 	}
