@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -57,24 +58,16 @@ func startController(t *testing.T) (int, *logixserver.TagStore) {
 	for _, tc := range tags {
 		store.Set(tc.Path, tc.LeafType, tc.Default)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
+	// Bind :0 inside the server (no pick-then-bind window) and read the port back.
+	srv := logixserver.NewServer(store, schema, name, "127.0.0.1:0", nil)
+	if err := srv.Listen(); err != nil {
 		t.Fatal(err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	srv := logixserver.NewServer(store, schema, name, addr, nil)
+	_, ps, _ := net.SplitHostPort(srv.Addr())
+	port, _ := strconv.Atoi(ps)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = srv.Run(ctx) }()
-	waitFor(t, "emulator", func() bool {
-		c, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-		if err == nil {
-			_ = c.Close()
-		}
-		return err == nil
-	})
 	return port, store
 }
 
