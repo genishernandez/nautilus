@@ -1,6 +1,6 @@
 # Changelog — @joyautomation/nautilus-hmi-3d
 
-## Unreleased
+## 0.1.4 — 2026-10-15
 
 **Fixed.** The VLAN view held one ERPS state for the whole site: a failed
 link in one ring opened every ring's protection link. Each ring's RPL is
