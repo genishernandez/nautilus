@@ -188,9 +188,10 @@ vt ld_add_block-libraryFB PASS ld_add_block pump_run RateOfChange roc2
 vt ld_rename_block PASS ld_rename_block pump_run t2 t_run
 # The declare offer only shows for a name nothing declares: a manifest tag is
 # in scope without a declaration (a7c41bc), so SpareFlag, which the manifest
-# lacks, is the undeclared one.
+# lacks, is the undeclared one. Not a manifest tag, it is offered VAR only
+# (VAR_EXTERNAL is for a nautilus.yaml tag the manifest cannot type).
 vt ld_add_contact-undeclared PASS ld_add_contact pump_run SpareFlag
-vt ld_declare PASS ld_declare SpareFlag VAR_EXTERNAL
+vt ld_declare PASS ld_declare SpareFlag VAR
 vt ld_add_branch PASS ld_add_branch pump_run HornAck TempLowAlm
 # A rung that calls a block needs no coil: its "( _ )" deletes outright
 vt ld_add_rung-starter PASS ld_add_rung starter

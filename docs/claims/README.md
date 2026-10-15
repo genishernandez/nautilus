@@ -69,8 +69,12 @@ claims:
     The conformance corpus runs one subtest per feature and one per YAML
     test: `go ./lang/conformance TestConformance/<feature>/<yaml test name>`,
     or the whole feature with `go ./lang/conformance TestConformance/<feature>`.
-  - `naut <project root> <test name>` — a test in an example project's
-    `*_test.yaml`, which CI runs with `naut test -json`.
+  - `naut <project root> <test name>` — a test in a project's
+    `*_test.yaml`, which CI runs with `naut test -json` on nautilus: every
+    project under `examples/`, `testdata/projects/` and
+    `logix/writer/testdata/conformance/` (ci.yml). A root anywhere else
+    is never reported. A Logix conformance reference is the nautilus run;
+    its `--target logix` run needs a controller, so the note says so.
 - **partial** / **note**: say plainly what is not covered.
 
 An empty `tests: []` is a **gap**, and gaps are the point: they are listed
