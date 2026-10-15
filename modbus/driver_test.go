@@ -450,12 +450,16 @@ func TestSlaveDeathHoldsValuesQueuesWritesRecovers(t *testing.T) {
 
 	// Same address, new slave: the driver reconnects, delivers the queued
 	// write, and quality returns to Good.
+	// Populate unit 1 BEFORE listening: a request to a unit that does not
+	// exist yet answers exception 0x0B, and the driver (correctly) drops a
+	// refused write rather than re-queueing it forever. Creating the unit
+	// after Start raced the driver's first flush on reconnect.
 	srv2 := slave.NewServer(addr, nil)
+	srv2.Unit(1).SetHolding(0, 22)
 	if err := srv2.Start(); err != nil {
 		t.Fatalf("slave restart: %v", err)
 	}
 	t.Cleanup(srv2.Stop)
-	srv2.Unit(1).SetHolding(0, 22)
 
 	waitFor(t, "recovery", func() bool {
 		v, _ := d.ReadInputs()
