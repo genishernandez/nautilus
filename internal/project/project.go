@@ -137,10 +137,32 @@ type LogixTarget struct {
 	// the controller it was imported from did; the task's scan: is then
 	// only nautilus's own rate. Default false: a PERIODIC task at scan:.
 	Continuous bool `yaml:"continuous"`
+	// AllTags writes every manifest tag as a controller tag, whether or
+	// not a program names it, as `naut logix import` sets for a project
+	// whose tag file is the controller's tag set: a tag only an external
+	// client reads or writes is still the controller's. Default false: a
+	// tag no program names is not written. A tag with neither type: nor
+	// init: has no type to write either way, and an unnamed one whose type
+	// the Logix subset lacks (a STRING) is left out.
+	AllTags bool `yaml:"all-tags"`
+	// ControllerScoped lists program variables written as controller
+	// tags rather than program tags, each with the Logix tag's
+	// description: a timer or counter the export had at controller scope
+	// is a block instance in nautilus, so program-scoped, and the import
+	// records it here so the write-back keeps its tag path
+	// (AcceptTmr.ACC, not Program:MainProgram.AcceptTmr.ACC).
+	ControllerScoped []LogixScoped `yaml:"controller-scoped"`
 	// Side is the side code nautilus adds beside the program, in a Logix
 	// program of its own: testing, verification and metrics logic that
 	// never touches the user's routine.
 	Side *LogixSide `yaml:"side"`
+}
+
+// LogixScoped is one target.logix.controller-scoped entry: a program
+// variable and the description its controller tag carries.
+type LogixScoped struct {
+	Name string `yaml:"name"`
+	Desc string `yaml:"desc"`
 }
 
 // LogixSide selects the side code.

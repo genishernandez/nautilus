@@ -654,6 +654,7 @@ func runLogixWrite(args []string) int {
 				opts.PeriodMs = t.PeriodMs
 			}
 			opts.Inits, opts.Descs, opts.Aliases, opts.Side = t.Inits, t.Descs, t.Aliases, t.Side
+			opts.AllTags, opts.ControllerScoped = t.AllTags, t.ControllerScoped
 		}
 	}
 	opts.MajorRev, opts.MinorRev, _ = strings.Cut(*revision, ".")

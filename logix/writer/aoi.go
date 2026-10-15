@@ -176,6 +176,9 @@ func (lw *lowered) child(name string, vars []ld.VarDecl) *lowered {
 		presetVars: map[string]bool{}, genNames: map[string]bool{}, types: lw.types, rawTypes: lw.rawTypes, enums: lw.enums,
 		aois: lw.aois, inAOI: true, st: lw.st, libIx: lw.libs(), clocks: map[string]bool{}, clockUsed: map[string]bool{}}
 	c.opts.Program = name
+	// A block's locals are its own: the program's scope choices and the
+	// manifest's unnamed tags are not the block's to declare.
+	c.opts.ControllerScoped, c.opts.AllTags = nil, false
 	for _, v := range vars {
 		c.vars[strings.ToLower(v.Name)] = v
 	}

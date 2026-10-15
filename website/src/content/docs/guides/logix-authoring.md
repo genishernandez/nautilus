@@ -86,7 +86,11 @@ tags, with their initial values and descriptions. The `VAR_EXTERNAL` block
 is optional: every program sees the project's tags without declaring them
 ([the tag model](/guides/tag-model/)), and a ladder or ST program that names
 one undeclared gets its controller tag all the same, typed from the
-manifest. A tag no program names is not written. A manifest tag with no
+manifest. A tag no program names is not written, unless `target.logix`
+sets `all-tags: true` (an imported project does): then every manifest
+tag with a type (its `type:`, or the one its `init:` implies) is a
+controller tag, named or not, except one whose type the target does not
+carry (a `STRING`), which is left out. A manifest tag with no
 `role:` stops `naut logix deploy` and `naut logix write` with an error
 naming the tag, as it stops the runtime. A program's `VAR` become
 program tags. The task
@@ -253,11 +257,21 @@ task (`continuous: true` for a continuous one) from the imported
 `target: logix`, and each tag's initial value and description from the
 tag file. `--logic` compares programs, routines, rung text and comments,
 and each tag's name, scope and type, and lists every difference; the two
-files' envelopes always differ (the writer emits a whole project). Two
-differences are expected on any import: a timer or counter that was
-controller-scoped comes back program-scoped (a block instance is
-program-scoped in nautilus), and a controller tag no imported routine
-names is not written back.
+files' envelopes always differ (the writer emits a whole project). The
+import keeps two things a nautilus project would otherwise change. A
+controller-scoped timer, counter or Add-On Instruction instance is a block
+instance in nautilus, so it is declared in its program; the manifest lists
+it under `target.logix.controller-scoped`, with its description, and the
+write puts it back at controller scope, where a client reading
+`AcceptTmr.ACC` finds it. And the manifest sets `all-tags: true`, so a
+controller tag no imported routine names, such as one only an
+EtherNet/IP client writes, is written back too; the tag file types each
+tag (`type: DINT`, where `init: 0` alone would be a REAL). A tag with no
+nautilus type (a `MESSAGE`, a multi-dimensional array), or with one the
+target does not carry (a `STRING`, a `LINT`), stays in the tag file and is
+reported, because the write cannot create it.
+On the public yardstick, `examples/batch-skid/line/Line.L5X`, the
+comparison finds no differences.
 
 On a corpus of 52 real production exports, 97.9% of rungs import, 81% of
 ladder routines import whole, and most complete routines write back

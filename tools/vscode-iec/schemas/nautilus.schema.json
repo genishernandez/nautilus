@@ -175,6 +175,31 @@
               "type": "boolean",
               "description": "Schedule the program in a CONTINUOUS Logix task, as the controller it was imported from did; the task's scan: is then only nautilus's own rate. Default false: a PERIODIC task at scan:."
             },
+            "all-tags": {
+              "type": "boolean",
+              "description": "Write every manifest tag as a controller tag, whether or not a program names it, as `naut logix import` sets for a project whose tag file is the controller's tag set: a tag only an external client reads or writes is still the controller's. Default false: a tag no program names is not written. A tag with neither type: nor init: has no type to write either way, and an unnamed one whose type the Logix subset lacks (a STRING) is left out."
+            },
+            "controller-scoped": {
+              "type": "array",
+              "description": "Program variables written as controller tags rather than program tags. `naut logix import` lists a timer or counter the export had at controller scope (a block instance is program-scoped in nautilus), so the write-back keeps its tag path (AcceptTmr.ACC, not Program:MainProgram.AcceptTmr.ACC) and its description.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "A VAR of the task program."
+                  },
+                  "desc": {
+                    "type": "string",
+                    "description": "The Logix tag's description."
+                  }
+                }
+              }
+            },
             "side": {
               "type": [
                 "object",

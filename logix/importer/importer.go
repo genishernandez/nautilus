@@ -147,6 +147,10 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
+	byIdent := map[string]*l5x.Tag{}
+	for _, t := range c.Tags {
+		byIdent[l5x.Ident(t.Name)] = t
+	}
 	kept := tags[:0]
 	for _, t := range tags {
 		k := strings.ToLower(t.Name)
@@ -155,6 +159,17 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 		}
 		if im.written[k] {
 			t.Role = "output"
+		}
+		// Every controller tag is written back (target.logix.all-tags),
+		// named by a routine or not, so each carries the type that
+		// writes it (#370); one no write can create is reported.
+		if src := byIdent[t.Name]; src != nil {
+			if t.Type == "" {
+				t.Type = im.tagType(src, t.Init)
+			}
+			if why := im.notWritten(src, t); why != "" && !im.external[k] {
+				p.note("", -1, "tag", t.Name+" ("+logixTypeOf(src)+"): "+why)
+			}
 		}
 		kept = append(kept, t)
 	}
@@ -188,13 +203,77 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	}
 	p.Files["tags/logix.yaml"] = raw
 	p.Files["nautilus.yaml"] = im.manifest(tasks)
-	sort.Slice(p.Notes, func(i, j int) bool {
+	sort.SliceStable(p.Notes, func(i, j int) bool {
 		if p.Notes[i].Owner != p.Notes[j].Owner {
 			return p.Notes[i].Owner < p.Notes[j].Owner
 		}
 		return p.Notes[i].Rung < p.Notes[j].Rung
 	})
 	return p, nil
+}
+
+// tagType is the type: a controller tag's tag-file entry needs so that a
+// write-back creates it with its Logix type: "" when its init: already
+// implies that type (a BOOL, a REAL, a STRING) or it has no nautilus type
+// at all (a firmware structure, a block instance, a multi-dimensional
+// array). An alias tag is typed through its target.
+func (im *importer) tagType(t *l5x.Tag, init any) string {
+	dtype, dims := t.DataType, t.Dimensions
+	if t.AliasFor != "" {
+		var err *refusal
+		if dtype, dims, err = im.aliasType(t); err != nil {
+			return ""
+		}
+	}
+	if im.aois[strings.ToLower(dtype)] != nil {
+		return "" // a block instance, never a tag
+	}
+	typ, ok := im.typeText(dtype, dims)
+	if !ok {
+		return ""
+	}
+	switch init.(type) {
+	case bool:
+		if typ == "BOOL" {
+			return ""
+		}
+	case float64:
+		if typ == "REAL" {
+			return ""
+		}
+	}
+	return typ
+}
+
+// notWritten says why a write-back cannot create a controller tag no
+// routine names, or "" when it can: one with no nautilus type stays in
+// the tag file untyped, as documentation; one whose type nautilus has
+// but the Logix target's v1 subset lacks is skipped by the writer.
+func (im *importer) notWritten(src *l5x.Tag, t tagfile.Tag) string {
+	if t.Type == "" && t.Init == nil {
+		return "no nautilus type, so the tag file documents it untyped and a write-back does not create it"
+	}
+	dtype := src.DataType
+	if src.AliasFor != "" {
+		dtype, _, _ = im.aliasType(src)
+	}
+	switch up := strings.ToUpper(dtype); up {
+	case "STRING", "LINT", "USINT", "UINT", "UDINT", "ULINT":
+		return "the Logix target's subset has no " + up + ", so a write-back does not create it"
+	}
+	return ""
+}
+
+// logixTypeOf is a tag's Logix type as a note shows it.
+func logixTypeOf(t *l5x.Tag) string {
+	typ := t.DataType
+	if typ == "" && t.AliasFor != "" {
+		typ = "alias of " + t.AliasFor
+	}
+	if t.Dimensions != "" {
+		typ += "[" + t.Dimensions + "]"
+	}
+	return typ
 }
 
 func (p *Project) note(owner string, rung int, reason, text string) {
@@ -323,6 +402,28 @@ func (im *importer) manifest(tasks []manifestTask) []byte {
 	if im.opts.Host != "" {
 		fmt.Fprintf(&b, "    host: %s\n", im.opts.Host)
 	}
+	// The tag file is the controller's tag set: write every tag back,
+	// named by a routine or not (#370).
+	b.WriteString("    all-tags: true\n")
+	if len(im.moved) > 0 {
+		// Controller-scoped timers, counters and AOI instances are block
+		// instances in their program now; written back at controller
+		// scope, with their descriptions (#371).
+		names := make([]string, 0, len(im.moved))
+		for k := range im.moved {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		b.WriteString("    controller-scoped:\n")
+		for _, k := range names {
+			t := im.ctrl[k]
+			fmt.Fprintf(&b, "      - { name: %s", l5x.Ident(t.Name))
+			if d := strings.TrimSpace(t.Description); d != "" {
+				fmt.Fprintf(&b, ", desc: %s", yamlQuote(d))
+			}
+			b.WriteString(" }\n")
+		}
+	}
 	if len(tasks) == 1 {
 		// One program: tell the writer its Logix names, so a deploy (or
 		// `naut logix write`) puts it back where it was.
@@ -341,6 +442,12 @@ func (im *importer) manifest(tasks []manifestTask) []byte {
 		}
 	}
 	return []byte(b.String())
+}
+
+// yamlQuote is s as a YAML double-quoted scalar.
+func yamlQuote(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
+	return `"` + r.Replace(s) + `"`
 }
 
 func (im *importer) fileName(base, ext string) string {

@@ -103,6 +103,22 @@ type Options struct {
 	// ST — that does gets the tag as a controller tag, typed from here, as
 	// if it had said VAR_EXTERNAL (uses.go).
 	Tags map[string]string
+	// AllTags writes every tag in Tags as a controller tag, whether or not
+	// the program names it (target.logix.all-tags): an imported project's
+	// tag file is the controller's tag set, and a tag only an external
+	// client reads or writes is still a tag the controller must have
+	// (#370). Off, a tag no program names is not written (LGA-001). An
+	// unnamed tag the Logix subset cannot carry (a STRING, a LINT) is not
+	// written either way, and a manifest tag with neither type: nor init:
+	// is not in Tags, so it has no type to write.
+	AllTags bool
+	// ControllerScoped names program variables (VAR) to write as
+	// controller tags instead of program tags
+	// (target.logix.controller-scoped): a block instance the import found
+	// at controller scope goes back there, so a client reading it by name
+	// (AcceptTmr.ACC) still finds it (#371). Each must be a VAR of the
+	// program; its description comes from Descs.
+	ControllerScoped []string
 	// Side is the side code: logic nautilus adds beside the user's
 	// program, in its own Logix program scheduled after it, for testing,
 	// verification and metrics. Nothing of it touches the user's routine.
@@ -316,6 +332,8 @@ func lowerSrc(m *ld.Model, src string, opts Options) *lowered {
 	for _, v := range implicit {
 		lw.declare(v)
 	}
+	lw.declareUnnamed()
+	lw.checkControllerScoped()
 	notes := lw.notesByLine()
 	lw.planClocks(m.Rungs)
 	for _, r := range m.Rungs {
@@ -390,10 +408,16 @@ func (lw *lowered) declare(v ld.VarDecl) {
 	case "VAR_EXTERNAL":
 	case "VAR":
 		scope = lw.opts.Program
+		if lw.controllerScoped(v.Name) {
+			scope = ""
+		}
 	default:
 		lw.diag(ruleVarSection, v.Line, "", "%s %s: only VAR (program tags) and VAR_EXTERNAL (controller tags) have a Logix home; a program takes no parameters", v.Section, v.Name)
 		return
 	}
+	// The manifest seeds a controller tag the program declares
+	// VAR_EXTERNAL, never a program variable written at controller scope.
+	external := strings.EqualFold(v.Section, "VAR_EXTERNAL")
 	if !lw.checkName(v.Name, v.Line, "") {
 		return
 	}
@@ -423,7 +447,7 @@ func (lw *lowered) declare(v ld.VarDecl) {
 		return
 	}
 	init := v.Init
-	if init == "" && scope == "" {
+	if init == "" && external {
 		if iv, _, ok := ir.Lookup(lw.opts.Inits, v.Name); ok && iv != nil {
 			init = fmt.Sprint(iv)
 		}
@@ -484,7 +508,7 @@ func (lw *lowered) declare(v ld.VarDecl) {
 			return
 		}
 		var init any
-		if scope == "" {
+		if external {
 			init, _, _ = ir.Lookup(lw.opts.Inits, v.Name)
 		}
 		lw.addTag(tagDef{Name: v.Name, DataType: udt.Name, Dim: dim, Scope: scope, Line: v.Line, Struct: udt, Init: init})

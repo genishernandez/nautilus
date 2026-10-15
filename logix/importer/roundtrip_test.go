@@ -44,15 +44,25 @@ func TestRoundTripPublicYardstick(t *testing.T) {
 	}
 	libs := libsOf(p)
 	// The manifest says where the program goes back to (the routine, a
-	// CONTINUOUS task), and the timer the program now owns is not also a
+	// CONTINUOUS task), that every controller tag is written back named
+	// or not (#370), and that the timer the program now owns goes back to
+	// controller scope with its description (#371); it is not also a
 	// project tag.
-	for _, want := range []string{"    routine: Receive\n", "    task: MainTask\n", "    continuous: true\n"} {
+	for _, want := range []string{
+		"    routine: Receive\n", "    task: MainTask\n", "    continuous: true\n",
+		"    all-tags: true\n",
+		"    controller-scoped:\n      - { name: AcceptTmr, desc: \"Accept-handshake settling delay\" }\n",
+	} {
 		if !strings.Contains(string(p.Files["nautilus.yaml"]), want) {
 			t.Errorf("nautilus.yaml lacks %q:\n%s", want, p.Files["nautilus.yaml"])
 		}
 	}
 	if strings.Contains(string(p.Files["tags/logix.yaml"]), "AcceptTmr") {
 		t.Errorf("tags/logix.yaml carries the program's timer:\n%s", p.Files["tags/logix.yaml"])
+	}
+	// The DINT no routine names keeps its type: init: 0 alone is a REAL.
+	if !strings.Contains(string(p.Files["tags/logix.yaml"]), "- { name: Line_BatchId, role: input, type: DINT, init: 0,") {
+		t.Errorf("tags/logix.yaml does not type Line_BatchId:\n%s", p.Files["tags/logix.yaml"])
 	}
 
 	var identical, differ []string
@@ -153,5 +163,57 @@ func TestRoundTripArrayPresets(t *testing.T) {
 	a, b := rungTexts(f, "MainProgram", "MainRoutine"), rungTexts(back, "MainProgram", "MainRoutine")
 	if strings.Join(a, "\n") != strings.Join(b, "\n") {
 		t.Errorf("write-back differs:\n first %s\n again %s", strings.Join(a, "\n       "), strings.Join(b, "\n       "))
+	}
+}
+
+// Every controller tag goes back on a write (#370, target.logix.all-tags),
+// so the tag file types each one whose init: does not already say its
+// type — a DINT (init: 0 alone is a REAL), an array, a tag with no value
+// in the export — and reports each it cannot type, which a write-back
+// therefore does not create, as it reports a LINT, which the Logix
+// target's subset lacks. A controller-scoped timer the logic drives
+// is the program's block instance, listed under
+// target.logix.controller-scoped so it goes back to controller scope
+// (#371).
+func TestImportTypesEveryControllerTag(t *testing.T) {
+	doc := miniL5X([]string{"Run:BOOL", "Count:DINT", "Hist:INT[10]", "Grid:DINT[2 3]", "Msg:MESSAGE", "Spare:TIMER=500", "Delay:TIMER=1000", "Big:LINT"},
+		"XIC(Run)TON(Delay,?,?);")
+	p := mustImport(t, doc)
+	tags := string(p.Files["tags/logix.yaml"])
+	for _, want := range []string{
+		"- { name: Run, role: input, type: BOOL }",
+		"- { name: Count, role: input, type: DINT }",
+		"- { name: Hist, role: input, type: ARRAY [0..9] OF INT }",
+		"- { name: Grid, role: input }",
+		"- { name: Msg, role: input }",
+		"- { name: Spare, role: input }",
+		"- { name: Big, role: input, type: LINT }",
+	} {
+		if !strings.Contains(tags, want+"\n") {
+			t.Errorf("tags/logix.yaml lacks %q:\n%s", want, tags)
+		}
+	}
+	if strings.Contains(tags, "Delay") {
+		t.Errorf("the program's timer is also a project tag:\n%s", tags)
+	}
+	var notes []string
+	for _, n := range p.Notes {
+		notes = append(notes, n.String())
+	}
+	want := []string{
+		"tag: Big (LINT): the Logix target's subset has no LINT, so a write-back does not create it",
+		"tag: Grid (DINT[2 3]): no nautilus type, so the tag file documents it untyped and a write-back does not create it",
+		"tag: Msg (MESSAGE): no nautilus type, so the tag file documents it untyped and a write-back does not create it",
+		"tag: Spare (TIMER): no nautilus type, so the tag file documents it untyped and a write-back does not create it",
+	}
+	if strings.Join(notes, "\n") != strings.Join(want, "\n") {
+		t.Errorf("notes:\n  %s\nwant\n  %s", strings.Join(notes, "\n  "), strings.Join(want, "\n  "))
+	}
+	m := string(p.Files["nautilus.yaml"])
+	if !strings.Contains(m, "    all-tags: true\n    controller-scoped:\n      - { name: Delay }\n") {
+		t.Errorf("nautilus.yaml:\n%s", m)
+	}
+	if ld := string(p.Files["Main.ld"]); !strings.Contains(ld, "Delay : TON; (* controller-scoped in the export, and written back there") {
+		t.Errorf("Main.ld:\n%s", ld)
 	}
 }
