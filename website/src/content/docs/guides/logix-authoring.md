@@ -416,18 +416,34 @@ and the `resets`. The answer is a stream of JSON lines (`progress` events, then
 
 ## What it does not do yet
 
-- **One controller family, one revision verified.** Every behaviour test
-  ran on a 5580 at v38 on FactoryTalk Logix Echo. Other revisions and
-  families are expected to work but are not yet in a test matrix. The
-  project's controller module (`Local`) is Logix Designer's own for the
-  ControlLogix 5580 (1756-L8xE), CompactLogix 5370 (1769-L30ER to
-  1769-L36ERM) and CompactLogix 5380 (5069-L306ER to 5069-L3100ERM)
-  processors, and a project written for a 5069-L320ER or a 1769-L33ER
-  imports and builds in Logix Designer v38. For any other processor it is
-  the 1756-L85E's with only the catalog number changed; `naut logix
-  write` and `naut logix deploy` say so, and Logix Designer will likely
-  refuse the project.
-- **One task, one program.** Multi-task projects are not in the subset.
+- **One controller family, one revision verified, no real hardware yet.**
+  Every behaviour test ran on an emulated 5580 at v38 on FactoryTalk Logix
+  Echo. Other revisions and families are expected to work but are not yet
+  in a test matrix. The project's controller module (`Local`) is Logix
+  Designer's own for the ControlLogix 5580 (1756-L8xE), CompactLogix 5370
+  (1769-L30ER to 1769-L36ERM) and CompactLogix 5380 (5069-L306ER to
+  5069-L3100ERM) processors, and a project written for a 5069-L320ER or a
+  1769-L33ER imports and builds in Logix Designer v38. For any other
+  processor (a 5370 L1 or L2, a 5480, a safety controller, a 5570) it is
+  the 1756-L85E's with only the catalog number changed; `naut logix write`
+  and `naut logix deploy` say so, and Logix Designer will likely refuse
+  the project.
+- **One task, one program.** Multi-task projects, FBD and SFC are not in
+  the subset.
+- **Not everything IEC 61131-3 has.** No `STRING`, unsigned, bit-string,
+  `LINT` or `LTIME` types; no `TP`, `CTD`, `CTUD` or edge-trigger
+  instances; no `MIN`, `MAX`, `LIMIT`, `SEL`, `MUX` or `ATAN2` in ST; no
+  user FUNCTIONs; no arrays of your own function blocks (arrays of
+  timers and counters are fine); in ST, an Add-On Instruction's input is
+  a tag or a number, not an expression. A conversion the controller would
+  compute differently, and an integer `/` whose quotient meets a REAL,
+  are refused. Each is a [check-time
+  diagnostic](#rejected-at-check-time-by-name) that names the rule.
+- **The numbers are the controller's.** A REAL is 32 bits on the
+  controller and 64 in nautilus, so compare REALs with `near`. A REAL out
+  of range for the integer it is stored into wraps silently on the
+  controller, where nautilus faults the scan. nautilus does not wrap an
+  integer at its declared width; the controller does.
 - **No hardware configuration.** The writer emits no I/O modules, so
   aliases to rack points need a controller project that already has them.
 - **A download keeps values only for tags it can match.** A renamed or
@@ -435,6 +451,12 @@ and the `resets`. The answer is a stream of JSON lines (`progress` events, then
   uploaded about half a minute before the controller stops. There is no
   warm download: it still stops the controller. An online edit keeps every
   value and does not stop anything, but cannot add tags.
+- **New tags need a serve restart.** `naut logix serve` reads the
+  controller's tags when it starts, so a tag a download adds shows in
+  live values after a restart.
+- **Import is not complete.** A rung with no nautilus form stays a
+  comment and is reported; message instructions (`MSG`) and the buffer
+  copies that feed them are the largest gap.
 - **No runtime parity promise.** The subset is the set of constructs whose
   behaviour on both runtimes has been checked by running the same
   scenarios on each. Anything outside it is refused, not approximated.
@@ -446,3 +468,6 @@ prohibit headless or CI use, but each concurrent user of a logixd agent
 needs their own SDK activation, and the SDK may not be offered as a hosted
 service: run logixd on your own licensed machine for your own team, and
 **do not host a logixd agent for other people.**
+
+The commercial licence terms that bear on building a product on the SDK
+(the automation-interface and pooling clauses) are not settled.

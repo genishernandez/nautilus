@@ -6,6 +6,9 @@ This brief **supersedes the recommendation in [`logix-target.md`](logix-target.m
 §8** for the Allen-Bradley development use case. Everything else in that
 document still stands, and most of what it built is reused here.
 
+The current caveats, the list the video scripts quote, are in
+[§10](#10-caveats-the-videos-quote).
+
 ## 1. The thesis
 
 > **Keep the hardware. Ditch the IDE.**
@@ -1813,3 +1816,47 @@ Z: (client work).
 - Echo: `ssh echo1` (10.154.92.210; CIP on :44818 when Tailscale refuses).
   Fast Startup is off; restart with `incus restart echo-vm --timeout 300`.
   Don't change the controller's mode without asking James.
+
+## 10. Caveats the videos quote
+
+The one list of what the Logix authoring target does not do, for the
+video scripts' caveats beat (#277). A script reads the **Caveat** column
+as written. Keeping it current is standing practice: when a caveat
+closes, move it to *Closed since* with the PR and date; when one opens,
+add it here and to the guide's [What it does not do
+yet](../../website/src/content/docs/guides/logix-authoring.md#what-it-does-not-do-yet).
+Last checked against `main` on 2026-10-14.
+
+**Open**
+
+| # | Caveat | Evidence | Status |
+|---|---|---|---|
+| 1 | Every behaviour test has run on one emulated controller, a ControlLogix 5580 at firmware v38 on FactoryTalk Logix Echo; nothing has run on real hardware yet. | §7b Echo runs (#297, #368, #375, #273); LGA-037 | open, 2026-10-14 |
+| 2 | For a processor nautilus has no Logix Designer export for, such as a CompactLogix 5370 L1 or L2, a CompactLogix 5480, a safety controller or a ControlLogix 5570, the write warns that Logix Designer may refuse the project. | `writer.LocalModuleWarning`; `TestLocalModule`; LGA-046; #373 | open, 2026-10-14 |
+| 3 | A Logix project is one task running one ladder or structured text program; multiple tasks, function block diagrams and SFC are refused. | `TestLogixTargetRefusesSFCAndASecondTask`; LGA-036 | open, 2026-10-14 |
+| 4 | The target has no STRING, unsigned, bit-string, LINT or LTIME types, and refuses a program that uses one. | `logix/type`, `logix/conversion`; `TestRejections` (`type`, `unsigned`) | open, 2026-10-14 |
+| 5 | The IEC TP, CTD and CTUD blocks and edge-trigger instances are refused, because their behaviour differs from the Logix instructions; TON, TOF and CTU are written. | `logix/fb`; `TestRejections` (`TP block`, `CTUD block`) | open, 2026-10-14 |
+| 6 | In structured text, MIN, MAX, LIMIT, SEL, MUX, ATAN2, RETURN and CONTINUE are refused; write the IF or CASE instead. | `logix/st`; `TestStructuredTextRejections` | open, 2026-10-14 |
+| 7 | User functions are refused, since Logix has none; user function blocks become Add-On Instructions. | `logix/function-block`, `logix/fb`; `TestUserFunctionsAndBlockArraysAreRefused` | open, 2026-10-14 |
+| 8 | An array of timers or counters is written as one Logix array, but an array of your own function block is refused; declare one instance per element. | `logix/array-shape`; `TestTimerInstanceArrayOnLogix`, `TestUserFunctionsAndBlockArraysAreRefused` | open, 2026-10-14 |
+| 9 | A type conversion the controller would compute differently is refused, and so is an integer division whose result meets a REAL; compute the quotient into a DINT tag first. | `logix/conversion`; #255, #361, #368; conformance projects `conversions` and `division` (§7b) | open, 2026-10-14 |
+| 10 | In structured text, each input of an Add-On Instruction call must be a tag or a number, because Logix Designer will not build an expression there. | `logix/fb-pin`; #368 | open, 2026-10-14 |
+| 11 | A REAL is 32 bits on the controller and 64 bits in nautilus, so results can differ in the last digits; tests compare REALs with a tolerance. | #297 (8 of 279 results, all float32 rounding) | open, 2026-10-14 |
+| 12 | A REAL too large for the integer it is stored into wraps silently on the controller, where nautilus faults the scan. | #297 out-of-range row (§7b); #361 | open, 2026-10-14 |
+| 13 | nautilus does not wrap an integer at its declared width and the controller does, so an overflowing INT gives a different value on each. | conformance `st-int-width`; #368 note (§7b) | open, 2026-10-14 |
+| 14 | A download still stops the controller; it keeps tag values it can match, but reads them about thirty seconds before the stop, so a value the program changes in that window is not carried. | #273; LGA-047; `deploy.PlanValues` | open, 2026-10-14 |
+| 15 | A tag that a download adds does not appear in live values until `naut logix serve` is restarted. | #375 Echo run (§7b); `logix/facade` browses the controller once at startup | open, 2026-10-14 |
+| 16 | nautilus does not yet write I/O module configuration, so a program that uses rack I/O needs a controller project that already has those modules. | #275 (in progress) | open, 2026-10-14 |
+| 17 | Import keeps a rung it cannot express as a comment and reports it; message instructions and the buffer copies that feed them are the largest gap. | corpus of 52 exports: 97.9% of rungs, 81% of routines whole (guide) | open, 2026-10-14 |
+| 18 | Commercial licence terms (automation interface, pooling) are not settled. | §7b Phase A licence check (§1.4.10, §1.4.7) | open, 2026-10-14 |
+
+**Closed since the issue was filed (2026-10-10)**
+
+| Was | Now | Evidence | Closed |
+|---|---|---|---|
+| a download resets tag values | a download keeps the values of every tag it can match (`--reset-values` to opt out) | #273, #387; LGA-047, LGA-048; `TestHardwareDownloadKeepsValuesUnlessReset` on Echo | 2026-10-14 |
+| the target's rules show only with #239 | they squiggle in the editor as you type | #239 | 2026-10-13 |
+| no deploy from the editor | online edit and download from VS Code, verified on Echo | #375; LGA-041, LGA-042 | 2026-10-14 |
+| the import round trip differs | the public yardstick writes back with no logic differences | #380; LGA-044; `TestLogixRoundTripYardstickCLI` | 2026-10-14 |
+| one processor's `Local` module | Logix Designer's own for ControlLogix 5580, CompactLogix 5370 L3 and 5380; written projects import and build on v38 | #389; LGA-046; `TestLocalModulesMatchExports` | 2026-10-14 |
+| arrays of block instances | arrays of TON, TOF and CTU are one Logix array tag (user blocks: item 8) | Phase E (§7b); `TestTimerInstanceArrayOnLogix` | 2026-10-03 |

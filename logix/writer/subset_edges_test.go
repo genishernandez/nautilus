@@ -160,3 +160,40 @@ func TestLEIsAPlainCompare(t *testing.T) {
 		t.Errorf("rung = %q, want LE(A,B)OTE(Q);", got)
 	}
 }
+
+// The caveats list (docs/design/logix-authoring.md, "Caveats the videos
+// quote") says user FUNCTIONs and arrays of user-block instances are
+// refused; these pin it. Arrays of TON/TOF/CTU instances are written
+// (TestTimerInstanceArrayOnLogix); an array of an Add-On Instruction is not.
+func TestUserFunctionsAndBlockArraysAreRefused(t *testing.T) {
+	const lib = "FUNCTION Twice : REAL\nVAR_INPUT v : REAL; END_VAR\nTwice := v * 2.0;\nEND_FUNCTION\n" +
+		"FUNCTION_BLOCK Motor\nVAR_INPUT Run : BOOL; END_VAR\nEND_FUNCTION_BLOCK\n"
+	cases := []struct{ name, src, rule, mention string }{
+		{"a library FUNCTION called in ST",
+			"PROGRAM P\nVAR\n  X : REAL; Y : REAL;\nEND_VAR\nX := Twice(Y);\nEND_PROGRAM\n",
+			ruleFB, "Twice()"},
+		{"an array of user-block instances",
+			"PROGRAM P\nVAR\n  m : ARRAY [0..1] OF Motor; X : REAL;\nEND_VAR\nX := 1.0;\nEND_PROGRAM\n",
+			ruleArrayShape, "instances is not in the subset"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc, diags, err := WriteST(c.src, Options{Controller: "C", Libs: []string{lib}})
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if doc != nil {
+				t.Error("WriteST emitted a document despite the refusal")
+			}
+			found := false
+			for _, d := range diags {
+				if d.Rule == c.rule && strings.Contains(d.Message, c.mention) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("want %s mentioning %q, got:\n%s", c.rule, c.mention, joinDiags(diags))
+			}
+		})
+	}
+}
