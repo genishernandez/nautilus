@@ -55,6 +55,7 @@ js_str() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
 btn_js() { echo "[...document.querySelectorAll('a.monaco-button, .monaco-button, button')].find(b => b.textContent.trim() === $(js_str "$1") && b.offsetParent)"; }
 
 QI_TITLE='(() => { const w = document.querySelector(".quick-input-widget"); return w && w.style.display !== "none" ? (w.querySelector(".quick-input-title")?.textContent.trim() ?? "") : null; })()'
+QI_PARENT="(($QI_TITLE) || '').includes('parent folder')"
 QI_ROWS='[...document.querySelectorAll(".quick-input-widget .quick-input-list .monaco-list-row")].map(r => r.getAttribute("aria-label") || r.textContent.trim())'
 qi_title() { pg "$QI_TITLE" | python3 -c 'import json,sys; v=json.load(sys.stdin); print("" if v is None else v)' 2>/dev/null || true; }
 qi_rows() { pg "$QI_ROWS" | python3 -c 'import json,sys; print(" | ".join(json.load(sys.stdin)))' 2>/dev/null || true; }
@@ -74,8 +75,16 @@ create_flow() {
     fbd) llabel="Function Block Diagram" ;; sfc) llabel="Sequential Function Chart" ;;
   esac
   png=$(shot "$lbl-1-folder")
-  pass "$lbl: parent-folder picker up (\"Create project here\", on $parent)" "$png"
-  pg_click "$(btn_js 'Create project here')" 1.2 || { fail "$lbl: could not click \"Create project here\"" "$png"; return 1; }
+  pass "$lbl: parent-folder input box up (Enter accepts, #86; folder $parent)" "$png"
+  # #86: the parent-folder step is an input box; Enter accepts the prefilled folder.
+  wait_pg "($QI_TITLE || '').includes('parent folder')" 10 || true
+  [[ $(qi_title) == *"parent folder"* ]] || { fail "$lbl: no parent-folder input box" "$png"; return 1; }
+  # the cold first run leaves focus on the Welcome page: click into the box first
+  pg_click "document.querySelector('.quick-input-widget .quick-input-box input')" 0.5 || true
+  key ctrl+a; xdotool type --delay 20 "$parent"; sleep 0.6; xdotool key Return; sleep 1.2
+  # a cold first run can swallow the first Enter; a second one is the same gesture
+  [[ $(qi_title) == *"parent folder"* ]] \
+    && { info "$lbl: first Enter left the parent-folder box up; pressing it again"; xdotool key Return; sleep 1.2; }
 
   wait_pg "$QI_TITLE === 'nautilus: Create Project'" 10 || true
   png=$(shot "$lbl-2-name")
@@ -133,7 +142,7 @@ create_flow() {
     || fail "$lbl: window never reopened on $name (title: $(title))" "$png"
 }
 
-picker_up() { pg_true "$(btn_js 'Create project here')"; }
+picker_up() { pg_true "$QI_PARENT"; }
 
 # ── from the palette (Structured Text) ─────────────────────────────────────────────────────
 PARENT=$HOME/c25-parent
@@ -144,7 +153,7 @@ key Escape; vs_cmd "Notifications: Clear All Notifications" 1
 up=
 for attempt in 1 2 3; do
   vs_cmd "nautilus: Create Project" 2
-  if wait_pg "$(btn_js 'Create project here')" 10; then up=$attempt; break; fi
+  if wait_pg "$QI_PARENT" 10; then up=$attempt; break; fi
   png=$(shot "palette-attempt$attempt-lost")
   info "palette attempt $attempt: no folder picker (title '$(title)'; quick input '$(qi_title)'; toasts $(pg "$TOASTS")) — retrying" "$png"
   key Escape; vs_cmd "Notifications: Clear All Notifications" 1; vs_cmd "View: Close All Editors" 1
@@ -178,7 +187,7 @@ else
     pass "walkthrough: \"Create a project\" step shows its Create a project link" "$png"
     read -r lx ly lw lh lv <<<"$link"
     g_click $((lx + lw / 2)) $((ly + lh / 2)) 2
-    if wait_pg "$(btn_js 'Create project here')" 10; then
+    if wait_pg "$QI_PARENT" 10; then
       create_flow walkthrough "$HOME/c25-walk" smoke-walk || true
     else
       png=$(shot walkthrough-no-picker)
@@ -354,7 +363,7 @@ key Escape; vs_cmd "Notifications: Clear All Notifications" 1
 up=
 for attempt in 1 2 3; do
   vs_cmd "nautilus: Create Project" 2
-  if wait_pg "$(btn_js 'Create project here')" 10; then up=$attempt; break; fi
+  if wait_pg "$QI_PARENT" 10; then up=$attempt; break; fi
   key Escape; vs_cmd "Notifications: Clear All Notifications" 1; vs_cmd "View: Close All Editors" 1
 done
 if [[ -z $up ]]; then

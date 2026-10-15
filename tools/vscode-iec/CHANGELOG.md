@@ -46,6 +46,15 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   are also easier to hit: a pin takes a press or a dropped wire within
   5 px of its dot. (#79)
 
+### Fixed
+
+- **Create Project…: Enter in the parent-folder step now accepts.** The step
+  was VS Code's open dialog, which with `files.simpleDialog.enable` (VS Code
+  for the web, remote setups) is a plain input where Enter navigates instead
+  of confirming "Create project here". It is now an input box with the
+  workspace folder (or home) prefilled: Enter accepts, a typed or `~` path
+  works, and a folder button still opens the system picker. (#86)
+
 ## [0.19.0] - 2026-10-15
 
 The pre-release line after the stable release 0.18.0. Same contents as
