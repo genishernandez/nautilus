@@ -77,6 +77,11 @@ func TestDeployStreamOnlineEdit(t *testing.T) {
 	if lines[len(lines)-1]["event"] != "done" {
 		t.Error("the report is not the last line")
 	}
+	for _, k := range []string{"valuesKept", "resets"} {
+		if _, has := done[0][k]; has {
+			t.Errorf("an online edit's done carries the download-only field %q: %v", k, done[0])
+		}
+	}
 	if after := getProgram(t, url); after["source"] != ladderB || after["hash"] != done[0]["hash"] {
 		t.Errorf("after = %v", after)
 	}

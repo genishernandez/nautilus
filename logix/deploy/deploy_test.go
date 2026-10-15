@@ -33,6 +33,8 @@ type fakeAgent struct {
 	// startState makes a download refuse unless it switches to Program
 	// mode, as the SDK does with a controller in Run.
 	startState bool
+	// modeFails makes the mode read answer an error.
+	modeFails bool
 }
 
 func newFakeAgent(t *testing.T, running []byte) (*fakeAgent, *logixd.Client) {
@@ -101,6 +103,9 @@ func (f *fakeAgent) serve(w http.ResponseWriter, r *http.Request) {
 		ok(map[string]any{})
 	case strings.HasSuffix(r.URL.Path, "/comm-path"), strings.HasSuffix(r.URL.Path, "/online"), strings.HasSuffix(r.URL.Path, "/offline"):
 		ok(map[string]any{"connected": "Online", "commPath": "x"})
+	case strings.HasSuffix(r.URL.Path, "/mode") && f.modeFails:
+		w.WriteHeader(500)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]any{"kind": "operation_failed", "message": "mode unavailable", "fatal": false}})
 	case strings.HasSuffix(r.URL.Path, "/mode"):
 		ok(map[string]any{"mode": f.mode})
 	case strings.HasSuffix(r.URL.Path, "/partial-import-with-target"):
@@ -587,7 +592,7 @@ func TestDownloadKeepsTheControllersValues(t *testing.T) {
 
 	// --reset-values: the project's values, and no upload before the build.
 	f, c = newFakeAgent(t, running(t))
-	rep, err = Run(context.Background(), src, Options{Client: c, Target: keepTarget(t), Mode: Download, ResetValues: true})
+	rep, err = Run(context.Background(), src, Options{Client: c, Target: keepTarget(t), Mode: Download, ResetValues: true, ProgramMode: true})
 	if err != nil || rep.Values != nil {
 		t.Fatalf("err = %v, values = %+v", err, rep.Values)
 	}
@@ -608,5 +613,81 @@ func TestBuildReportsTheValuePlan(t *testing.T) {
 	rep, err := Run(context.Background(), src, Options{Client: c, Target: o, Mode: BuildOnly})
 	if err != nil || rep.Values == nil || len(rep.Values.Reset) != 1 || rep.Values.Reset[0] != "SpareSP: DINT → REAL" {
 		t.Fatalf("err = %v, values = %+v", err, rep.Values)
+	}
+}
+
+// A plain download to a controller in Run is refused as soon as the mode
+// is read, before the import and build; the same answer as the SDK's
+// late refusal (#391).
+func TestDownloadInRunRefusedBeforeBuild(t *testing.T) {
+	src := demoSource(t)
+	for _, mode := range []string{"Run", "Remote Run"} {
+		f, c := newFakeAgent(t, running(t))
+		f.mode = mode
+		f.startState = true
+		rep, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download})
+		var se *StartStateError
+		if !errors.As(err, &se) || se.Mode != mode {
+			t.Fatalf("%s: err = %v (%T)", mode, err, err)
+		}
+		if rep == nil || rep.ModeBefore != mode {
+			t.Errorf("%s: report = %+v", mode, rep)
+		}
+		for _, call := range f.calls {
+			if strings.HasSuffix(call, "/build") || strings.HasSuffix(call, "/download") || strings.HasSuffix(call, "/save") {
+				t.Errorf("%s: %s ran after the refusal; calls = %v", mode, call, f.calls)
+			}
+		}
+		// Reset-values downloads are refused early too.
+		if _, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download, ResetValues: true}); !errors.As(err, &se) {
+			t.Errorf("%s reset: err = %v", mode, err)
+		}
+	}
+}
+
+// Program mode asked for: no check, the download goes ahead. A mode that
+// is not Run goes ahead too.
+func TestDownloadProgramModeSkipsTheModeCheck(t *testing.T) {
+	src := demoSource(t)
+	f, c := newFakeAgent(t, running(t))
+	f.startState = false
+	rep, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download, ProgramMode: true, ResetValues: true})
+	if err != nil || rep.Applied != Download {
+		t.Fatalf("err = %v, report = %+v", err, rep)
+	}
+	for _, call := range f.calls {
+		if strings.HasSuffix(call, "/mode") && !strings.Contains(strings.Join(f.calls, " "), "/download") {
+			t.Errorf("mode read before the download: %v", f.calls)
+		}
+	}
+	// Program mode on the controller: a plain download proceeds.
+	f2, c2 := newFakeAgent(t, running(t))
+	f2.mode = "Program"
+	if rep, err := Run(context.Background(), src, Options{Client: c2, Target: target(), Mode: Download}); err != nil || rep.Applied != Download {
+		t.Fatalf("program mode: err = %v", err)
+	}
+}
+
+// A mode read that fails falls through to today's behaviour: the download
+// is tried, and the SDK's own late refusal still gets the same answer.
+func TestDownloadModeReadFailureFallsThrough(t *testing.T) {
+	src := demoSource(t)
+	f, c := newFakeAgent(t, running(t))
+	f.modeFails, f.startState = true, true
+	_, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download})
+	var se *StartStateError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v (%T)", err, err)
+	}
+	built := false
+	for _, call := range f.calls {
+		built = built || strings.HasSuffix(call, "/build")
+	}
+	if !built {
+		t.Errorf("the download did not get as far as the build: %v", f.calls)
+	}
+	f.startState = false
+	if rep, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download}); err != nil || rep.Applied != Download {
+		t.Fatalf("download with a failing mode read: err = %v", err)
 	}
 }
