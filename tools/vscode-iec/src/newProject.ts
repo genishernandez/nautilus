@@ -37,17 +37,24 @@ export function registerNewProjectCommand(): vscode.Disposable {
     const parent = await pickParentFolder();
     if (!parent) return;
 
+    // Every step after the first ignores focus-out. When the parent-folder box
+    // closes, VS Code hands focus back to whatever had it before the command
+    // ran; on a fresh window that is the Welcome page, whose step media is a
+    // webview that takes focus a moment later and would close a focus-sensitive
+    // step as soon as it opened (rig smoke 17, palette flow on a cold window).
     const name = await vscode.window.showInputBox({
       title: "nautilus: Create Project",
       prompt: "Directory and program name for the new controller",
       placeHolder: "water-plant",
       validateInput: validateProjectName,
+      ignoreFocusOut: true,
     });
     if (!name) return;
 
     const template = await vscode.window.showQuickPick(NEW_PROJECT_TEMPLATES, {
       title: "nautilus: Create Project — template",
       placeHolder: "Demo is the fastest way to see everything working",
+      ignoreFocusOut: true,
     });
     if (!template) return;
 
@@ -56,6 +63,7 @@ export function registerNewProjectCommand(): vscode.Disposable {
       const picked = await vscode.window.showQuickPick(NEW_PROJECT_LANGUAGES, {
         title: "nautilus: Create Project — program language",
         placeHolder: "The language of the first program (you can add the others later)",
+        ignoreFocusOut: true,
       });
       if (!picked) return;
       language = picked.language;
