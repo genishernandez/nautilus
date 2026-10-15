@@ -208,13 +208,19 @@ claims:
       - go ./logix/writer TestGoldenConversions
       - go ./logix/writer TestNarrowingWrapMatchesNautilus
       - go ./logix/writer TestRealToIntegerStores
+      - naut logix/writer/testdata/conformance/conversions case 1, xd = 70000, xr = 2.5
+      - naut logix/writer/testdata/conformance/conversions case 10, xd = 5, xr = 3.5
+      - naut logix/writer/testdata/conformance/conversions case 11, xd = -5, xr = -3.5
     partial: true
     note: >-
       The tests assert what is written and that the wrap equals nautilus's
-      narrowing under either MOD sign rule. That the controller computes
-      the same was verified once on an Echo v38 controller (#297: 271 of
-      279 results identical over 9 input sets, the rest float32 rounding of
-      a 3.7 input; REAL stores round halves to even), not in CI.
+      narrowing under either MOD sign rule. The conformance project
+      `logix/writer/testdata/conformance/conversions` writes every written
+      class into its own tag (and passes a conversion to a user block's
+      input); its 12 scenarios pass on nautilus here and passed unchanged on
+      an Echo v38 controller with `naut test --target logix` (#255,
+      2026-10-14), exact to the bit with float32-exact REAL inputs. The
+      controller run is not in CI.
 
   - id: LGA-017
     claim: >-
@@ -247,14 +253,39 @@ claims:
       another type, an integer `/` whose quotient meets a REAL (stored into
       a REAL, beside a REAL operand, compared with a REAL), and unsigned,
       bit-string, LINT, LTIME and STRING conversions; an all-integer
-      division is written unchanged.
+      division is written unchanged. On a rung the same integer `/` is
+      refused in a DIV or CPT into a REAL, a CPT beside a REAL and a CMP
+      against a REAL; into an integer it is written as DIV or CPT.
     source: "#rejected-at-check-time-by-name"
     tests:
       - go ./logix/writer TestConversionsRefused
       - go ./logix/writer TestIntegerDivisionUnchanged
+      - go ./logix/writer TestLadderIntegerDivision
+      - naut logix/writer/testdata/conformance/division minus seven by two truncates toward zero
     note: >-
       That Logix divides integers in REAL beside a REAL (7 / 2 = 3.5) was
-      observed on an Echo v38 controller (#361), not in CI.
+      observed on an Echo v38 controller, in ST (#361) and in ladder DIV,
+      CPT and CMP (#368), not in CI. The written forms (`conformance/division`:
+      DIV and CPT into an integer, a CMP against an integer, a quotient
+      through a DINT tag into a REAL) passed 4 of 4 scenarios on the same
+      controller.
+
+  - id: LGA-040
+    claim: >-
+      In an ST call to a user block, each input must be a tag, a member or
+      element of one, or a literal; an expression bound to an input is
+      refused by `logix/fb-pin` at check time. A negative number is written
+      as one (`-5`), and a conversion that is a plain store (`DINT_TO_REAL(a)`
+      into a REAL input) is written as its argument.
+    source: "#rejected-at-check-time-by-name"
+    tests:
+      - go ./logix/writer TestSTBlockCallInputs
+    note: >-
+      That the Logix SDK build refuses any expression as an Add-On
+      Instruction operand in ST (`(a / b)`, `(a)`, `-a`; RxSTX_E_UNEXPECTED_TOKEN)
+      while it takes `a`, `p.y`, `-5` and `2.5` was observed on the v38 SDK
+      (#368), not in CI. An element with a tag index (`arr[k]`) is accepted
+      by the writer but was not built.
 
   - id: LGA-018
     claim: >-

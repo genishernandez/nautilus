@@ -46,7 +46,7 @@ var Rules = []struct{ ID, Description string }{
 	{ruleInit, "an initial value must be a literal the tag can carry"},
 	{ruleName, "tag names: at most 40 characters, no consecutive or trailing underscores"},
 	{ruleFB, "TP, CTD, CTUD and R_TRIG/F_TRIG instances are not in the v1 subset; user blocks are, as AOIs"},
-	{ruleFBPin, "timers bind PT (TONR also Reset), counters PV and R, user blocks their declared parameters; the rung's power drives IN, or a user block's first unbound BOOL input"},
+	{ruleFBPin, "timers bind PT (TONR also Reset), counters PV and R, user blocks their declared parameters, each input of an ST call a tag, a member or element of one, or a literal (an expression fails the Logix build); the rung's power drives IN, or a user block's first unbound BOOL input"},
 	{rulePreset, "a preset is a literal or a declared variable"},
 	{ruleReset, "a counter reset is a plain BOOL reference"},
 	{ruleTOFPosition, "a TOF or CTU sits on the rung itself, not inside a branch: its done bit outlives its rung-in"},
@@ -56,5 +56,5 @@ var Rules = []struct{ ID, Description string }{
 	{ruleMember, "member access is only into timer, counter and user-block instances and declared STRUCT types"},
 	{ruleST, "ST: RETURN, CONTINUE, STRING, MIN/MAX/LIMIT/SEL/MUX, ATAN2 and user calls have no Logix form"},
 	{ruleDataOp, "an assignment is MOVE/ADD/SUB/MUL/DIV/ABS or a CPT expression; no comparisons, booleans, or functions Logix cannot spell"},
-	{ruleConversion, "ST conversions are written so Logix computes nautilus's result: REAL → integer only as the whole right-hand side of an assignment to a tag of that integer type (the store rounds), TRUNC_<int> only as the whole right-hand side of an integer assignment, no integer / whose quotient meets a REAL (Logix divides it in REAL), no unsigned, bit-string, LINT, LTIME or STRING conversions, BOOL → number and int → LREAL only as a whole right-hand side, int → REAL of a tag or literal"},
+	{ruleConversion, "ST conversions are written so Logix computes nautilus's result: REAL → integer only as the whole right-hand side of an assignment to a tag of that integer type (the store rounds), TRUNC_<int> only as the whole right-hand side of an integer assignment, no integer / whose quotient meets a REAL, in ST or on a rung (DIV, CPT, CMP), since Logix divides it in REAL, no unsigned, bit-string, LINT, LTIME or STRING conversions, BOOL → number and int → LREAL only as a whole right-hand side, int → REAL of a tag or literal"},
 }

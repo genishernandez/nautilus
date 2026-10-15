@@ -296,3 +296,131 @@ func writeRoutine(t *testing.T, src string) string {
 	}
 	return f.Controller.Programs[0].Routines[0].Text
 }
+
+// An integer / on a rung whose quotient meets a REAL is refused (#368):
+// the controller's DIV and CPT into a REAL destination, and its CMP
+// against a REAL, divide in REAL (7 / 2 = 3.5, verified on a v38
+// controller) where nautilus truncates. Into an integer, or compared with
+// an integer, the division is written as before.
+func TestLadderIntegerDivision(t *testing.T) {
+	wrap := func(rung string) string {
+		return "PROGRAM P\nVAR\n  a : DINT; d : DINT; i : INT; r : REAL; lr : LREAL; G : BOOL; Y : BOOL; arr : ARRAY [0..3] OF REAL;\nEND_VAR\nLD\n  RUNG x " + rung + "\nEND_LD\nEND_PROGRAM\n"
+	}
+	refused := []struct{ name, rung string }{
+		{"DIV into a REAL", "G { r := a / d }"},
+		{"DIV by a literal into a REAL", "G { r := a / 2 }"},
+		{"DIV into an LREAL", "G { lr := a / 2 }"},
+		{"DIV into a REAL element", "G { arr[1] := a / d }"},
+		{"CPT into a REAL", "G { r := a / d + 1 }"},
+		{"CPT beside a REAL", "G { d := a / d + r }"},
+		{"CPT in a REAL function", "G { r := ABS(a / d) }"},
+		{"the second assignment of a box", "G { d := a / 2; r := a / 2 }"},
+		{"CMP against a REAL", "GT(a / d, r) ( Y )"},
+		{"CMP against a REAL literal", "LE(a / 2, 2.5) ( Y )"},
+	}
+	for _, c := range refused {
+		t.Run(c.name, func(t *testing.T) {
+			diags, err := Check(wrap(c.rung))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			found := false
+			for _, d := range diags {
+				if d.Rule == ruleConversion && strings.Contains(d.Message, "integer division") && strings.Contains(d.Message, "{ q := a / b }") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("want %s for an integer division, got %s", ruleConversion, joinDiags(diags))
+			}
+		})
+	}
+	written := []struct{ name, rung, want string }{
+		{"DIV into a DINT", "G { d := a / d }", "XIC(G)DIV(a,d,d);"},
+		{"DIV into an INT", "G { i := a / 2 }", "XIC(G)DIV(a,2,i);"},
+		{"CPT into a DINT", "G { d := a / d + 1 }", "XIC(G)CPT(d,(a / d) + 1);"},
+		{"DIV of a REAL into a REAL", "G { r := r / d }", "XIC(G)DIV(r,d,r);"},
+		{"DIV by a REAL literal", "G { r := a / 2.0 }", "XIC(G)DIV(a,2.0,r);"},
+		{"CMP against an integer", "GT(a / d, i) ( Y )", "CMP(a / d > i)OTE(Y);"},
+		{"an index is a computation of its own", "G { r := arr[a / 2] }", "XIC(G)MOVE(arr[a / 2],r);"},
+	}
+	for _, c := range written {
+		t.Run(c.name, func(t *testing.T) {
+			doc, diags, err := Write(wrap(c.rung), Options{})
+			if err != nil || len(diags) > 0 {
+				t.Fatalf("%v %s", err, joinDiags(diags))
+			}
+			f, err := l5x.Parse(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := f.Controller.Programs[0].Routines[0].Rungs[0].Text
+			if got != c.want {
+				t.Errorf("rung = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// An input of a user block in an ST call is a tag or a literal: the
+// controller's ST takes nothing else as an Add-On Instruction operand,
+// and an expression (a / b, (a), -a) fails the SDK build with
+// RxSTX_E_UNEXPECTED_TOKEN (verified on v38, #368). So an integer / bound
+// to a REAL input never reaches the controller; logix/fb-pin refuses it at
+// check time.
+func TestSTBlockCallInputs(t *testing.T) {
+	lib := "FUNCTION_BLOCK PassR\nVAR_INPUT x : REAL; END_VAR\nVAR_OUTPUT y : REAL; END_VAR\ny := x;\nEND_FUNCTION_BLOCK\n" +
+		"TYPE Mode : (Idle, Run); END_TYPE\nTYPE Pair : STRUCT v : REAL; END_STRUCT; END_TYPE\n"
+	wrap := func(call string) string {
+		return "PROGRAM P\nVAR\n  a : DINT; d : DINT; r : REAL; k : DINT; pr : Pair; arr : ARRAY [0..3] OF REAL; p : PassR;\nEND_VAR\n" + call + "\nEND_PROGRAM\n"
+	}
+	for _, call := range []string{
+		"p(x := a / d, y => r);",
+		"p(x := a / 2, y => r);",
+		"p(x := a + 1, y => r);",
+		"p(x := -a, y => r);",
+		"p(x := ABS(r), y => r);",
+		"p(x := r * 2.0, y => r);",
+	} {
+		t.Run(call, func(t *testing.T) {
+			diags, err := CheckST(wrap(call), lib)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			found := false
+			for _, d := range diags {
+				if d.Rule == ruleFBPin && strings.Contains(d.Message, "a tag or a literal") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("want %s, got %s", ruleFBPin, joinDiags(diags))
+			}
+		})
+	}
+	for _, c := range []struct{ call, want string }{
+		{"p(x := a, y => r);", "PassR(p, a);"},
+		{"p(x := 2.5, y => r);", "PassR(p, 2.5);"},
+		{"p(x := -5, y => r);", "PassR(p, -5);"},
+		{"p(x := -2.5, y => r);", "PassR(p, -2.5);"},
+		{"p(x := pr.v, y => r);", "PassR(p, pr.v);"},
+		{"p(x := arr[2], y => r);", "PassR(p, arr[2]);"},
+		{"p(x := arr[k], y => r);", "PassR(p, arr[k]);"},
+		{"p(x := DINT_TO_REAL(a), y => r);", "PassR(p, a);"},
+		{"p(x := Run, y => r);", "PassR(p, 1);"},
+	} {
+		t.Run(c.call, func(t *testing.T) {
+			doc, diags, err := WriteST(wrap(c.call), Options{Controller: "C", Libs: []string{lib}})
+			if err != nil || len(diags) > 0 {
+				t.Fatalf("%v %s", err, joinDiags(diags))
+			}
+			f, err := l5x.Parse(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if text := f.Controller.Programs[0].Routines[0].Text; !strings.Contains(text, c.want) {
+				t.Errorf("want %q in:\n%s", c.want, text)
+			}
+		})
+	}
+}

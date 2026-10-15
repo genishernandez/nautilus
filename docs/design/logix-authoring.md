@@ -103,7 +103,7 @@ positions (`logix-target.md` §6.4).
 | global (`VAR_EXTERNAL`) | controller tag | |
 | a manifest tag a program names undeclared (#177/#210) | controller tag, typed from the manifest | ladder and ST (#248); uses resolved on the compiler's AST (`logix/writer/uses.go`) |
 | enumeration type and its members | `DINT`; a member is its value | Logix has no enumerated type; the names do not reach the controller, and an import brings the tag back as `DINT` (`logix/writer/enum.go`) |
-| `X_TO_Y` / `TO_Y` / `TRUNC_<int>` in ST | Logix that computes nautilus's result, or `logix/conversion` | narrowing as an integer-arithmetic wrap, int → REAL as `v` or `(v * 1.0)`, BOOL → number as an `IF`, REAL → integer as a plain store of the whole right-hand side into a tag of that type; REAL → integer inside an expression, an integer `/` whose quotient meets a REAL (#361), unsigned, bit strings, LINT, LTIME and STRING refused (`logix/writer/convert.go`, #255) |
+| `X_TO_Y` / `TO_Y` / `TRUNC_<int>` in ST | Logix that computes nautilus's result, or `logix/conversion` | narrowing as an integer-arithmetic wrap, int → REAL as `v` or `(v * 1.0)`, BOOL → number as an `IF`, REAL → integer as a plain store of the whole right-hand side into a tag of that type; REAL → integer inside an expression, an integer `/` whose quotient meets a REAL (#361; on a rung too, #368), unsigned, bit strings, LINT, LTIME and STRING refused (`logix/writer/convert.go`, #255) |
 | program-local `VAR` | program tag | |
 | one nautilus task + program | one Logix task + program + `MainRoutine` | a stated decision, not a derivation |
 
@@ -1403,6 +1403,60 @@ own operand is REAL is a REAL division in nautilus too and is written as
 before; an all-integer division (an integer destination, an integer
 comparison partner, an array index) is written unchanged. Ladder's `DIV`
 and `CPT` with a REAL destination are not covered here (unverified).
+
+### Follow-up — integer `/` on a rung, expressions as AOI inputs in ST (2026-10-14, #368)
+
+**Verified on Echo** (ws-test, v38, 1756-L85E emulation), DINT `a`, `b`,
+`c`, REAL `x`, results read over EtherNet/IP with `naut test --target
+logix`:
+
+| Rung (as written) | a, b, c, x = 7, 2, 3, 3.25 | −7, 2, 3, −3.25 | 11, 4, 1, 2.5 | nautilus |
+|---|---|---|---|---|
+| `DIV(a,b,rDiv)`, REAL destination | **3.5** | **−3.5** | **2.75** | 3, −3, 2 |
+| `DIV(a,2,rLit)`, REAL destination | **3.5** | **−3.5** | **5.5** | 3, −3, 5 |
+| `CPT(rCpt,(a / b) + c)`, REAL destination | **6.5** | **−0.5** | **3.75** | 6, 0, 3 |
+| `CPT(rCptX,(a / b) + x)` | **6.75** | **−6.75** | **5.25** | 6.25, −6.25, 4.5 |
+| `CMP(a / b > x)` | **TRUE** | **FALSE** | **TRUE** | FALSE, TRUE, FALSE |
+| `DIV` / `CPT` into a DINT, `CMP(a / b > c)` | 3, 6, FALSE | −3, 0, FALSE | 2, 3, TRUE | the same |
+
+So a rung divides integers in REAL in the same places ST does. The writer
+now refuses with `logix/conversion` an integer `/` in a DIV or CPT into a
+REAL or LREAL, in a CPT with a REAL operand, and in a CMP against a REAL
+(`logix/writer/data.go`, typed as ST through `realDivision` in
+`convert.go`); into an integer, or against an integer, it is written as
+before.
+
+**An integer `/` bound to a REAL input of an AOI in an ST call** has no
+run-time divergence to measure: the call does not build. The v38 SDK
+refuses any expression as an Add-On Instruction operand in ST —
+`PassR(p1, (a / b));`, `PassR(p1, a / b);`, `PassR(p1, (a));` and
+`PassR(p1, -a);` all fail the build with `RxSTX_E_UNEXPECTED_TOKEN` —
+while `a`, `p2.y`, `-5`, `2.5` and `3` build. The writer emitted the
+expression form, so a project with one passed `naut check` and failed at
+the SDK build (§7a, "errors surface late"). `logix/fb-pin` now refuses an
+input bound to an operator expression or to anything that is not written
+as a tag path or a number; a negative literal is written `-5` (not
+`- (5)`), and the input counts as a store into the parameter, so
+`DINT_TO_REAL(a)` into a REAL input is written as `a`. Not built: an
+element with a tag index (`arr[k]`), which the writer accepts.
+
+**The conformance set (#255's last item).** Two projects under
+`logix/writer/testdata/conformance/`, run on Echo with `naut test --target
+logix` from a copy whose target block names ws-test:
+
+| project | scenarios | nautilus | Echo |
+|---|---|---|---|
+| `conversions` (ST): every written class into its own tag — the narrowing wraps, widening, TIME as DINT ms, int → REAL / LREAL, BOOL both ways, TRUNC, REAL → DINT / INT / SINT / TIME as a store, a comparison and an index of their own, `xa / 2` into a DINT and through it into a REAL, and three user-block inputs (a DINT tag into a REAL input, `DINT_TO_REAL(xd)`, `REAL_TO_DINT(xr)` into a DINT input) | 12 | pass | **12 of 12 pass**, exact |
+| `division` (ladder): DIV and CPT into a DINT and an INT, a CMP against a DINT, the quotient through a DINT tag into a REAL (MOVE), a REAL divided by a DINT, that tag compared with a REAL | 4 | pass | **4 of 4 pass** |
+
+The REAL inputs are exact in float32 (2.5, 3.75, 100.25, …), so the
+#297 run's 8 float32 differences of a `3.7` input do not recur, and every
+assertion is an exact comparison. The ties 2.5, −2.5, 3.5, −3.5, 1.5,
+0.5 and −0.5 are among the inputs, so the user-block input
+`REAL_TO_DINT(xr)` shows that the copy into an AOI parameter rounds halves
+to even like an assignment. An INT store out of range is not asserted
+(`division`'s large quotient): the controller wraps where nautilus keeps
+the value (`st-int-width`), which is not a conversion question.
 
 ## 8. The demo this enables
 

@@ -83,6 +83,16 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   first; an all-integer division is written unchanged. Needs a `naut`
   newer than 0.17.0. (#361)
 
+- **The same integer division squiggles on a ladder rung, and so does an
+  expression bound to a block input in ST.** On a Logix controller,
+  `{ r := a / 2 }` into a REAL (written as DIV or CPT) and `GT(a / 2, x)`
+  with `x` REAL divide in REAL too (3.5 for `a = 7`; nautilus gives 3).
+  These now squiggle with `logix/conversion`; into an integer they are
+  written as before. In an ST call to a user block, `p(x := a / b)` used to
+  be written as-is, and Logix rejects any expression as a block input at
+  build time. It now squiggles with `logix/fb-pin` and says to compute the
+  value into a tag first. Needs a `naut` newer than 0.17.0. (#368)
+
 ## [0.17.0] - 2026-10-14
 
 The pre-release line after the stable release 0.16.0. Same contents as

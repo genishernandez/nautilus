@@ -1,0 +1,29 @@
+# nautilus truncates an integer / toward zero; so does the controller
+# wherever the quotient meets no REAL.
+tests:
+  - name: seven by two
+    steps:
+      - given: { a: 7, b: 2, c: 3, x: 3.25 }
+        scans: 2
+        expect: { dq: 3, iq: 3, dc: 6, q: 3, rq: 3.0, rr: 1.625, gi: false, gx: false }
+
+  - name: minus seven by two truncates toward zero
+    steps:
+      - given: { a: -7, b: 2, c: -4, x: -3.25 }
+        scans: 2
+        expect: { dq: -3, iq: -3, dc: -7, q: -3, rq: -3.0, rr: -1.625, gi: true, gx: true }
+
+  - name: eleven by four
+    steps:
+      - given: { a: 11, b: 4, c: 1, x: 2.5 }
+        scans: 2
+        expect: { dq: 2, iq: 5, dc: 3, q: 2, rq: 2.0, rr: 0.625, gi: true, gx: false }
+
+  - name: a large quotient
+    # iq is not asserted: 50000 does not fit an INT, and a store wraps on
+    # the controller where nautilus keeps it (st-int-width), which is not a
+    # division question.
+    steps:
+      - given: { a: 100000, b: 3, c: 0, x: 0.75 }
+        scans: 2
+        expect: { dq: 33333, dc: 33333, q: 33333, rq: 33333.0, rr: 0.25, gi: true, gx: true }

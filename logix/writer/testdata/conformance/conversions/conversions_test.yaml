@@ -1,0 +1,62 @@
+# Expected values are nautilus's; the controller must agree exactly.
+tests:
+  - name: case 1, xd = 70000, xr = 2.5
+    steps:
+      - given: { xd: 70000, xa: 0, xi: 32767, xs: 127, xr: 2.5, xb: true, xt: 70000, xk: 0 }
+        scans: 2
+        expect: { rI1: 4464, rS1: 112, rS2: -1, rI2: 4464, rD1: 8928, rD2: 4464, rD3: 4464, rD4: 32767, rD5: 128, rI3: 127, rD6: 32767, rI4: 4464, rD7: 70000, rI5: 4464, rT1: 70000, rR1: 70000, rR2: 32769.5, rR3: 0, rR4: 0, rL1: 70000, rL2: 2.5, rR5: 2.5, rB1: true, rB2: true, rB3: true, rB4: true, rD8: 1, rR6: 1, rD9: 2, rB5: true, rR7: 12.5, rD10: 2, rI6: 2, rS3: 2, rT2: 2, rD11: 0, rR8: 0, rR10: 0, rR11: 70000, rD12: 2 }
+  - name: case 2, xd = -70000, xr = -2.5
+    steps:
+      - given: { xd: -70000, xa: -30000, xi: -32768, xs: -128, xr: -2.5, xb: false, xt: -70000, xk: 259 }
+        scans: 2
+        expect: { rI1: -4464, rS1: -112, rS2: 0, rI2: 4464, rD1: 62144, rD2: -4464, rD3: 31072, rD4: -32768, rD5: -127, rI3: -128, rD6: -32768, rI4: -4464, rD7: -70000, rI5: -4464, rT1: -70000, rR1: -70000, rR2: -32770.5, rR3: -15000, rR4: -15000, rL1: -70000, rL2: -2.5, rR5: -2.5, rB1: false, rB2: true, rB3: true, rB4: true, rD8: 0, rR6: 0, rD9: -2, rB5: false, rR7: 37.5, rD10: -2, rI6: -2, rS3: -2, rT2: -2, rD11: -15000, rR8: -15000, rR10: -30000, rR11: -70000, rD12: -2 }
+  - name: case 3, xd = 32767, xr = 3.75
+    steps:
+      - given: { xd: 32767, xa: 1, xi: 255, xs: 0, xr: 3.75, xb: true, xt: 32767, xk: -253 }
+        scans: 2
+        expect: { rI1: 32767, rS1: -1, rS2: -1, rI2: 4464, rD1: -65536, rD2: 32767, rD3: -32768, rD4: 255, rD5: 1, rI3: 0, rD6: 255, rI4: 32767, rD7: 32767, rI5: 32767, rT1: 32767, rR1: 32767, rR2: 258.75, rR3: 0.5, rR4: 0.5, rL1: 32767, rL2: 3.75, rR5: 3.75, rB1: true, rB2: true, rB3: true, rB4: true, rD8: 1, rR6: 1, rD9: 3, rB5: true, rR7: 43.75, rD10: 4, rI6: 4, rS3: 4, rT2: 4, rD11: 0, rR8: 0, rR10: 1, rR11: 32767, rD12: 4 }
+  - name: case 4, xd = 32768, xr = -3.75
+    steps:
+      - given: { xd: 32768, xa: 32767, xi: 128, xs: 1, xr: -3.75, xb: false, xt: 32768, xk: 1 }
+        scans: 2
+        expect: { rI1: -32768, rS1: 0, rS2: -128, rI2: 4464, rD1: -2, rD2: -32768, rD3: -1, rD4: 128, rD5: 2, rI3: 1, rD6: 128, rI4: -32768, rD7: 32768, rI5: -32768, rT1: 32768, rR1: 32768, rR2: 124.25, rR3: 16383.5, rR4: 16383.5, rL1: 32768, rL2: -3.75, rR5: -3.75, rB1: true, rB2: true, rB3: true, rB4: true, rD8: 0, rR6: 0, rD9: -3, rB5: false, rR7: 16.25, rD10: -4, rI6: -4, rS3: -4, rT2: -4, rD11: 16383, rR8: 16383, rR10: 32767, rR11: 32768, rD12: -4 }
+  - name: case 5, xd = -32769, xr = 0.0
+    steps:
+      - given: { xd: -32769, xa: -1, xi: -129, xs: -1, xr: 0.0, xb: true, xt: -32769, xk: 2 }
+        scans: 2
+        expect: { rI1: 32767, rS1: -1, rS2: 127, rI2: 4464, rD1: 65532, rD2: 32767, rD3: 32766, rD4: -129, rD5: 0, rI3: -1, rD6: -129, rI4: 32767, rD7: -32769, rI5: 32767, rT1: -32769, rR1: -32769, rR2: -129, rR3: -0.5, rR4: -0.5, rL1: -32769, rL2: 0, rR5: 0, rB1: false, rB2: true, rB3: true, rB4: false, rD8: 1, rR6: 1, rD9: 0, rB5: false, rR7: 30, rD10: 0, rI6: 0, rS3: 0, rT2: 0, rD11: 0, rR8: 0, rR10: -1, rR11: -32769, rD12: 0 }
+  - name: case 6, xd = 255, xr = 1.75
+    steps:
+      - given: { xd: 255, xa: 70000, xi: 0, xs: 100, xr: 1.75, xb: false, xt: 255, xk: 3 }
+        scans: 2
+        expect: { rI1: 255, rS1: -1, rS2: 0, rI2: 4464, rD1: 9438, rD2: 255, rD3: 4719, rD4: 0, rD5: 101, rI3: 100, rD6: 0, rI4: 255, rD7: 255, rI5: 255, rT1: 255, rR1: 255, rR2: 1.75, rR3: 35000, rR4: 35000, rL1: 255, rL2: 1.75, rR5: 1.75, rB1: false, rB2: true, rB3: true, rB4: true, rD8: 0, rR6: 0, rD9: 1, rB5: true, rR7: 41.75, rD10: 2, rI6: 2, rS3: 2, rT2: 2, rD11: 35000, rR8: 35000, rR10: 70000, rR11: 255, rD12: 2 }
+  - name: case 7, xd = 128, xr = 1.5
+    steps:
+      - given: { xd: 128, xa: -70000, xi: -1, xs: -100, xr: 1.5, xb: true, xt: 128, xk: 256 }
+        scans: 2
+        expect: { rI1: 128, rS1: -128, rS2: -1, rI2: 4464, rD1: -8672, rD2: 128, rD3: -4336, rD4: -1, rD5: -99, rI3: -100, rD6: -1, rI4: 128, rD7: 128, rI5: 128, rT1: 128, rR1: 128, rR2: 0.5, rR3: -35000, rR4: -35000, rL1: 128, rL2: 1.5, rR5: 1.5, rB1: false, rB2: true, rB3: true, rB4: true, rD8: 1, rR6: 1, rD9: 1, rB5: false, rR7: 11.5, rD10: 2, rI6: 2, rS3: 2, rT2: 2, rD11: -35000, rR8: -35000, rR10: -70000, rR11: 128, rD12: 2 }
+  - name: case 8, xd = -129, xr = 100.25
+    steps:
+      - given: { xd: -129, xa: 65536, xi: 1000, xs: 64, xr: 100.25, xb: false, xt: -129, xk: -256 }
+        scans: 2
+        expect: { rI1: -129, rS1: 127, rS2: -24, rI2: 4464, rD1: -258, rD2: -129, rD3: -129, rD4: 1000, rD5: 65, rI3: 64, rD6: 1000, rI4: -129, rD7: -129, rI5: -129, rT1: -129, rR1: -129, rR2: 1100.25, rR3: 32768, rR4: 32768, rL1: -129, rL2: 100.25, rR5: 100.25, rB1: true, rB2: true, rB3: true, rB4: true, rD8: 0, rR6: 0, rD9: 100, rB5: false, rR7: 110.25, rD10: 100, rI6: 100, rS3: 100, rT2: 100, rD11: 32768, rR8: 32768, rR10: 65536, rR11: -129, rD12: 100 }
+  - name: case 9, xd = 0, xr = -0.5
+    steps:
+      - given: { xd: 0, xa: 7, xi: -1000, xs: -64, xr: -0.5, xb: true, xt: 0, xk: 512 }
+        scans: 2
+        expect: { rI1: 0, rS1: 0, rS2: 24, rI2: 4464, rD1: 14, rD2: 0, rD3: 7, rD4: -1000, rD5: -63, rI3: -64, rD6: -1000, rI4: 0, rD7: 0, rI5: 0, rT1: 0, rR1: 0, rR2: -1000.5, rR3: 3.5, rR4: 3.5, rL1: 0, rL2: -0.5, rR5: -0.5, rB1: false, rB2: false, rB3: false, rB4: true, rD8: 1, rR6: 1, rD9: 0, rB5: false, rR7: 9.5, rD10: 0, rI6: 0, rS3: 0, rT2: 0, rD11: 3, rR8: 3, rR10: 7, rR11: 0, rD12: 0 }
+  - name: case 10, xd = 5, xr = 3.5
+    steps:
+      - given: { xd: 5, xa: -7, xi: 3, xs: 2, xr: 3.5, xb: false, xt: 5, xk: 1 }
+        scans: 2
+        expect: { rI1: 5, rS1: 5, rS2: 3, rI2: 4464, rD1: -4, rD2: 5, rD3: -2, rD4: 3, rD5: 3, rI3: 2, rD6: 3, rI4: 5, rD7: 5, rI5: 5, rT1: 5, rR1: 5, rR2: 6.5, rR3: -3.5, rR4: -3.5, rL1: 5, rL2: 3.5, rR5: 3.5, rB1: false, rB2: true, rB3: true, rB4: true, rD8: 0, rR6: 0, rD9: 3, rB5: false, rR7: 23.5, rD10: 4, rI6: 4, rS3: 4, rT2: 4, rD11: -3, rR8: -3, rR10: -7, rR11: 5, rD12: 4 }
+  - name: case 11, xd = -5, xr = -3.5
+    steps:
+      - given: { xd: -5, xa: 11, xi: -3, xs: -2, xr: -3.5, xb: true, xt: -5, xk: 2 }
+        scans: 2
+        expect: { rI1: -5, rS1: -5, rS2: -3, rI2: 4464, rD1: 12, rD2: -5, rD3: 6, rD4: -3, rD5: -1, rI3: -2, rD6: -3, rI4: -5, rD7: -5, rI5: -5, rT1: -5, rR1: -5, rR2: -6.5, rR3: 5.5, rR4: 5.5, rL1: -5, rL2: -3.5, rR5: -3.5, rB1: true, rB2: true, rB3: true, rB4: true, rD8: 1, rR6: 1, rD9: -3, rB5: false, rR7: 26.5, rD10: -4, rI6: -4, rS3: -4, rT2: -4, rD11: 5, rR8: 5, rR10: 11, rR11: -5, rD12: -4 }
+  - name: case 12, xd = 1, xr = 0.5
+    steps:
+      - given: { xd: 1, xa: 3, xi: 1, xs: 1, xr: 0.5, xb: false, xt: 1, xk: 3 }
+        scans: 2
+        expect: { rI1: 1, rS1: 1, rS2: 1, rI2: 4464, rD1: 8, rD2: 1, rD3: 4, rD4: 1, rD5: 2, rI3: 1, rD6: 1, rI4: 1, rD7: 1, rI5: 1, rT1: 1, rR1: 1, rR2: 1.5, rR3: 1.5, rR4: 1.5, rL1: 1, rL2: 0.5, rR5: 0.5, rB1: true, rB2: true, rB3: true, rB4: true, rD8: 0, rR6: 0, rD9: 0, rB5: false, rR7: 40.5, rD10: 0, rI6: 0, rS3: 0, rT2: 0, rD11: 1, rR8: 1, rR10: 3, rR11: 1, rD12: 0 }
