@@ -3,7 +3,6 @@ package sparkplug
 import (
 	"encoding/json"
 	"strings"
-	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
@@ -45,10 +44,6 @@ const (
 	// NDEATH, disconnect, connect again and birth once the host is back.
 	HostOfflineDisconnect
 )
-
-// hostReconnectInterval is how long a client made by endSession waits
-// between connect attempts while the broker refuses it.
-const hostReconnectInterval = 5 * time.Second
 
 type hostState struct {
 	Online    bool  `json:"online"`
@@ -123,74 +118,18 @@ func (n *Node) handleState(c mqtt.Client, msg mqtt.Message) {
 // (tck-id-payloads-ndeath-will-message-publisher-disconnect-mqtt311). It
 // carries this session's bdSeq, like the will it replaces.
 //
-// Then a new session: bdSeq moves on by one (it increments on every new
-// MQTT CONNECT, tck-id-topics-nbirth-bdseq-increment), so the will needs a
-// new client, which connects with retry. Its onConnect subscribes to the
-// host's STATE and births only once the host is ONLINE again. Meanwhile the
-// node is unborn: with store-and-forward it keeps sampling into the buffer
-// (bufferingLocked), and the first tick after the new birth replays it as
-// historical, exactly as after a broker outage.
-//
-// It holds the wire (pubMu) from the NDEATH until the new client is in
-// place, so no tick or birth publishes in between, and registers as
-// in-flight so Stop waits for it rather than racing the client swap.
+// Then a new session (newSession, as after a lost connection): a new
+// client whose will carries bdSeq+1, connecting with retry. Its onConnect
+// subscribes to the host's STATE and births only once the host is ONLINE
+// again (birth refuses while it is not). Meanwhile the node is unborn: with
+// store-and-forward it keeps sampling into the buffer, and the first tick
+// after the new birth replays it as historical.
 //
 // c is the client the offline STATE arrived on. If it is no longer n.cli,
 // an earlier endSession has already ended that session (offline, online,
 // offline in quick succession), and this one does nothing.
 func (n *Node) endSession(c mqtt.Client) {
-	if !n.beginInflight() {
-		return // Stop is in progress; it sends the NDEATH itself
-	}
-	defer n.inflight.Done()
-
-	n.pubMu.Lock()
-	n.mu.Lock()
-	if n.cli != c {
-		n.mu.Unlock()
-		n.pubMu.Unlock()
-		return
-	}
-	born := n.born
-	n.born = false
-	if n.rebirthTimer != nil {
-		n.rebirthTimer.Stop()
-		n.rebirthTimer = nil
-	}
-	old := n.cli
-	n.mu.Unlock()
-
-	if born && old.IsConnectionOpen() {
-		if p, err := n.deathPayload(); err == nil {
-			if err := n.publish(n.topic("NDEATH"), 1, false, p); err != nil {
-				n.log.Warn("sparkplug: NDEATH not confirmed", "error", err)
-			}
-		}
-	}
-	old.Disconnect(250)
-
-	n.mu.Lock()
-	n.bdSeq = (n.bdSeq + 1) % 256
-	n.mu.Unlock()
-	opts, err := n.clientOptions()
-	if err != nil {
-		n.pubMu.Unlock()
-		n.log.Error("sparkplug: new session", "error", err)
-		return
-	}
-	// Retry the first connect too: the broker may be the reason the host
-	// went offline. Later losses are auto-reconnect's, as for the first
-	// client.
-	opts.SetConnectRetry(true).SetConnectRetryInterval(hostReconnectInterval)
-	cli := mqtt.NewClient(opts)
-	n.mu.Lock()
-	n.cli = cli
-	n.mu.Unlock()
-	n.pubMu.Unlock()
-
-	// Not waited on: with connect retry the token completes only once the
-	// broker accepts, and Stop must not wait that long. onConnect births.
-	cli.Connect()
+	n.newSession(c, true)
 }
 
 // parseState decodes either STATE encoding. Returns online, timestamp (0 if

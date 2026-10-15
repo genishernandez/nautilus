@@ -27,18 +27,21 @@ func (n *Node) birth() error {
 	n.pubMu.Lock()
 	defer n.pubMu.Unlock()
 
-	// HostOfflineDisconnect: a birth belongs to a session with the primary
-	// host online. One asked for across endSession (a rebirth command or
-	// timer from the session it ended) would otherwise go out into the new
-	// client while it is still connecting, before the host is back. The
-	// new session's onConnect or the host's ONLINE STATE births instead.
+	// A birth belongs to an open connection. One asked for across
+	// newSession (a rebirth command or timer from the session it ended)
+	// would otherwise go out into the new client while it is still
+	// connecting — paho queues a publish on a client retrying its connect.
+	// The new session's onConnect births instead, with the bdSeq its will
+	// carries. HostOfflineDisconnect: and with the primary host online; the
+	// host's ONLINE STATE births otherwise.
+	n.mu.Lock()
+	ready := n.cli.IsConnectionOpen()
 	if n.disconnectsOnHostOffline() {
-		n.mu.Lock()
-		ready := n.hostOnline && n.cli.IsConnectionOpen()
-		n.mu.Unlock()
-		if !ready {
-			return nil
-		}
+		ready = ready && n.hostOnline
+	}
+	n.mu.Unlock()
+	if !ready {
+		return nil
 	}
 
 	snap := n.rt.Tags().Snapshot()
