@@ -31,6 +31,46 @@ import (
 
 var catchInterrupts sync.Once
 
+// running is every in-process `naut logix serve` not yet seen to exit. One
+// SIGINT stops all of them, so a cleanup that finds none left must send none:
+// a signal sent to nobody is delivered late, to whichever test's instance
+// started next, and stops it before it answers.
+var (
+	runningMu sync.Mutex
+	running   []chan struct{}
+)
+
+// stopServers sends one SIGINT if any instance is still up and waits for
+// every one that was up to exit.
+func stopServers(t *testing.T) {
+	t.Helper()
+	runningMu.Lock()
+	var live []chan struct{}
+	for _, c := range running {
+		select {
+		case <-c:
+		default:
+			live = append(live, c)
+		}
+	}
+	running = live
+	runningMu.Unlock()
+	if len(live) == 0 {
+		return
+	}
+	// The command's own signal handler takes this; it is registered before
+	// the API can answer, so it is in place by now. The test binary's own
+	// catcher keeps a signal that finds none from killing the run.
+	_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	for _, c := range live {
+		select {
+		case <-c:
+		case <-time.After(10 * time.Second):
+			t.Error("naut logix serve did not stop on SIGINT")
+		}
+	}
+}
+
 // serveLogix runs `naut logix serve` in-process with args (plus --listen on
 // a free loopback port) and returns the API's base URL once it answers.
 func serveLogix(t *testing.T, args ...string) string {
@@ -51,7 +91,11 @@ func serveLogix(t *testing.T, args ...string) string {
 	_ = ln.Close()
 
 	done := make(chan int, 1)
-	go func() { done <- runLogixServe(append(args, "--listen", addr)) }()
+	exited := make(chan struct{})
+	runningMu.Lock()
+	running = append(running, exited)
+	runningMu.Unlock()
+	go func() { done <- runLogixServe(append(args, "--listen", addr)); close(exited) }()
 	base := "http://" + addr
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -70,18 +114,7 @@ func serveLogix(t *testing.T, args ...string) string {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Cleanup(func() {
-		// The command's own signal handler takes this; it is registered
-		// before the API can answer, so it is in place by now. A SIGINT
-		// reaches every running instance, and the test binary's own
-		// catcher keeps a signal that finds none from killing the run.
-		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Error("naut logix serve did not stop on SIGINT")
-		}
-	})
+	t.Cleanup(func() { stopServers(t) })
 	return base
 }
 

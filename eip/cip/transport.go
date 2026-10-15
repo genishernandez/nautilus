@@ -78,31 +78,65 @@ func NewServer(addr string, log *slog.Logger) *Server {
 	}
 }
 
+// Listen binds the TCP and UDP listeners without serving them, so a caller
+// can learn the address before Run starts. With port 0 the kernel picks the
+// TCP port and the UDP listener must land on the same one; if another socket
+// already holds that UDP port the pair is released and a new one is drawn.
+// Run calls Listen itself when the caller has not. Idempotent.
+func (s *Server) Listen() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tcpLn != nil {
+		return nil
+	}
+	_, port, _ := net.SplitHostPort(s.Addr)
+	attempts := 1
+	if port == "0" {
+		attempts = 64
+	}
+	var err error
+	for i := 0; i < attempts; i++ {
+		var tcp net.Listener
+		if tcp, err = net.Listen("tcp", s.Addr); err != nil {
+			return err
+		}
+		var udpAddr *net.UDPAddr
+		if udpAddr, err = net.ResolveUDPAddr("udp", tcp.Addr().String()); err != nil {
+			_ = tcp.Close()
+			return err
+		}
+		var udp *net.UDPConn
+		if udp, err = net.ListenUDP("udp", udpAddr); err != nil {
+			_ = tcp.Close()
+			continue
+		}
+		s.tcpLn, s.udpLn = tcp, udp
+		return nil
+	}
+	return err
+}
+
+// BoundAddr is the TCP listen address once Listen has succeeded (the real
+// port when Addr asked for port 0), or "" before.
+func (s *Server) BoundAddr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tcpLn == nil {
+		return ""
+	}
+	return s.tcpLn.Addr().String()
+}
+
 // Run blocks serving until ctx is cancelled. It starts both the TCP listener
 // (for explicit messaging) and the UDP listener on the same port (for
 // broadcast ListIdentity from RSLinx / Studio 5000 discovery).
 func (s *Server) Run(ctx context.Context) error {
 	ctx, s.cancel = context.WithCancel(ctx)
-
-	tcp, err := net.Listen("tcp", s.Addr)
-	if err != nil {
+	if err := s.Listen(); err != nil {
 		return err
 	}
-	s.tcpLn = tcp
 
-	udpAddr, err := net.ResolveUDPAddr("udp", s.Addr)
-	if err != nil {
-		_ = tcp.Close()
-		return err
-	}
-	udp, err := net.ListenUDP("udp", udpAddr)
-	if err != nil {
-		_ = tcp.Close()
-		return err
-	}
-	s.udpLn = udp
-
-	s.Log.Info("cip server: listening", "addr", s.Addr)
+	s.Log.Info("cip server: listening", "addr", s.BoundAddr())
 
 	s.wg.Add(2)
 	go s.serveTCP(ctx)

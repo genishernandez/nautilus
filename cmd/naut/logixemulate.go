@@ -198,26 +198,18 @@ func startLogixEmulate(surf *logixSurface, listen string, values map[string]any,
 		}
 	}
 
-	// The CIP server binds TCP and UDP to the same address and does not
-	// report what port 0 chose, so choose it here.
-	if _, port, _ := net.SplitHostPort(listen); port == "0" {
-		ln, err := net.Listen("tcp", listen)
-		if err != nil {
-			return nil, err
-		}
-		listen = ln.Addr().String()
-		_ = ln.Close()
-	}
-
 	log := slog.New(slog.NewTextHandler(warn, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	srv := logixserver.NewServer(store, schema, name, listen, log)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx) }()
-	if err := waitListening(listen, done); err != nil {
+	// Bind before serving: a port-0 listen address becomes the real one
+	// (TCP and UDP on the same port), and "address in use" surfaces here.
+	if err := srv.Listen(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("listen %s: %w", listen, err)
 	}
+	listen = srv.Addr()
+	go func() { done <- srv.Run(ctx) }()
 
 	stopRamp := func() {}
 	if ramp {
@@ -248,31 +240,6 @@ func startLogixEmulate(surf *logixSurface, listen string, values map[string]any,
 			<-done
 		},
 	}, nil
-}
-
-// waitListening returns once addr accepts TCP, or with the server's own
-// error if Run failed first (address in use, say).
-func waitListening(addr string, done <-chan error) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		select {
-		case err := <-done:
-			if err == nil {
-				err = errors.New("server stopped")
-			}
-			return err
-		default:
-		}
-		c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err == nil {
-			_ = c.Close()
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("not accepting connections: %w", err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }
 
 // startLogixRamp drifts every numeric leaf around its seeded value, the way

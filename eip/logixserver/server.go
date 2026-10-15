@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/joyautomation/nautilus/eip/cip"
@@ -29,6 +30,7 @@ type Server struct {
 	addr           string
 
 	srv      *cip.Server
+	srvOnce  sync.Once
 	nextConn uint32
 
 	// DenyStructRoots makes whole-struct reads fail with privilege violation
@@ -56,22 +58,33 @@ func NewServer(store *TagStore, schema *Schema, controllerName, addr string, log
 	}
 }
 
-// Run starts the CIP server and blocks until ctx is cancelled.
-func (s *Server) Run(ctx context.Context) error {
-	srv := cip.NewServer(s.addr, s.log)
-	s.srv = srv
-
-	srv.Dispatcher.Register(cip.ClassIdentity, NewIdentityObject())
-	srv.Dispatcher.Register(cip.ClassProgramName, NewProgramNameObject(s.controllerName))
-	srv.Dispatcher.Register(cip.ClassTemplate, NewTemplateObject(s.schema))
-	srv.ListIdentityPayload = func(local net.IP, port uint16) []byte {
-		return ListIdentityPayload(local, port)
-	}
-	srv.HandleForwardOpen = s.handleForwardOpen
-	srv.HandleConnectedMessage = s.handleConnected
-
-	return srv.Run(ctx)
+// build wires the CIP server once; Listen and Run share it.
+func (s *Server) build() *cip.Server {
+	s.srvOnce.Do(func() {
+		srv := cip.NewServer(s.addr, s.log)
+		srv.Dispatcher.Register(cip.ClassIdentity, NewIdentityObject())
+		srv.Dispatcher.Register(cip.ClassProgramName, NewProgramNameObject(s.controllerName))
+		srv.Dispatcher.Register(cip.ClassTemplate, NewTemplateObject(s.schema))
+		srv.ListIdentityPayload = func(local net.IP, port uint16) []byte {
+			return ListIdentityPayload(local, port)
+		}
+		srv.HandleForwardOpen = s.handleForwardOpen
+		srv.HandleConnectedMessage = s.handleConnected
+		s.srv = srv
+	})
+	return s.srv
 }
+
+// Listen binds the TCP and UDP sockets now, so the caller knows the address
+// (and that nothing else took it) before Run serves. An addr of host:0 gets
+// a real port, reported by Addr. Run calls Listen itself if you did not.
+func (s *Server) Listen() error { return s.build().Listen() }
+
+// Addr is the bound listen address after Listen, or "" before.
+func (s *Server) Addr() string { return s.build().BoundAddr() }
+
+// Run starts the CIP server and blocks until ctx is cancelled.
+func (s *Server) Run(ctx context.Context) error { return s.build().Run(ctx) }
 
 // Stop tears the server down.
 func (s *Server) Stop() {

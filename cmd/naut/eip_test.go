@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/joyautomation/nautilus/eip/logixserver"
 )
@@ -46,31 +44,16 @@ func startEIPEmulator(t *testing.T) (host string, port int) {
 	for _, tc := range tags {
 		store.Set(tc.Path, tc.LeafType, tc.Default)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
+	srv := logixserver.NewServer(store, schema, name, "127.0.0.1:0", nil)
+	if err := srv.Listen(); err != nil {
+		t.Fatalf("emulator listen: %v", err)
 	}
-	port = ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-
-	srv := logixserver.NewServer(store, schema, name, addr, nil)
+	_, ps, _ := net.SplitHostPort(srv.Addr())
+	port, _ = strconv.Atoi(ps)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = srv.Run(ctx) }()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err == nil {
-			_ = c.Close()
-			return "127.0.0.1", port
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("emulator never came up on %s", addr)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	return "127.0.0.1", port
 }
 
 func TestEIPImportCreatesOutDir(t *testing.T) {

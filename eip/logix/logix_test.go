@@ -24,33 +24,16 @@ func startEmulator(t *testing.T, spec *logixserver.TagSurfaceSpec) (string, *log
 		store.Set(tc.Path, tc.LeafType, tc.Default)
 	}
 
-	// Reserve a free port, then hand it to the server.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
+	// Bind :0 inside the server and read the real address back: no window
+	// between choosing a port and listening on it for another test to take.
+	srv := logixserver.NewServer(store, schema, name, "127.0.0.1:0", nil)
+	if err := srv.Listen(); err != nil {
+		t.Fatalf("emulator listen: %v", err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-
-	srv := logixserver.NewServer(store, schema, name, addr, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = srv.Run(ctx) }()
-
-	// Wait until the listener answers.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err == nil {
-			_ = c.Close()
-			return addr, store
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("emulator never came up on %s", addr)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	return srv.Addr(), store
 }
 
 func testSpec() *logixserver.TagSurfaceSpec {
