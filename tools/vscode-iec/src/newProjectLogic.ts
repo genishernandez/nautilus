@@ -72,3 +72,34 @@ export function newProjectArgs(name: string, template: string, language?: string
   if (language && templateTakesLanguage(template)) args.push("--language", language);
   return args;
 }
+
+/** The text typed in the parent-folder box → an absolute path: `~` and
+ * `~/x` expand against `home`, a relative path resolves against `base`
+ * (the default folder), surrounding whitespace and quotes (a path pasted
+ * from a file manager) are dropped. Empty input is undefined. */
+export function resolveParentInput(input: string, home: string, base: string): string | undefined {
+  let s = input.trim().replace(/^(["'])(.*)\1$/, "$2").trim();
+  if (!s) return undefined;
+  if (s === "~") s = home;
+  else if (/^~[/\\]/.test(s)) s = pathJoin(home, s.slice(2));
+  else if (!isAbsolute(s)) s = pathJoin(base, s);
+  return s;
+}
+
+function isAbsolute(p: string): boolean {
+  return p.startsWith("/") || /^[A-Za-z]:[/\\]/.test(p) || p.startsWith("\\\\");
+}
+
+function pathJoin(a: string, b: string): string {
+  const sep = a.includes("\\") && !a.includes("/") ? "\\" : "/";
+  return a.replace(/[/\\]+$/, "") + sep + b;
+}
+
+/** Validation message for the parent-folder box given what is on disk at
+ * the resolved path ("dir" | "file" | "missing"). A missing folder is an
+ * error rather than silently created: the box is a picker, not a mkdir. */
+export function parentFolderProblem(kind: "dir" | "file" | "missing"): string | undefined {
+  if (kind === "file") return "that is a file, not a folder";
+  if (kind === "missing") return "no such folder";
+  return undefined;
+}

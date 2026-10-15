@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { NEW_PROJECT_LANGUAGES, NEW_PROJECT_TEMPLATES, templateTakesLanguage, newProjectArgs, validateProjectName } from "./newProjectLogic";
+import { NEW_PROJECT_LANGUAGES, NEW_PROJECT_TEMPLATES, templateTakesLanguage, newProjectArgs, validateProjectName, resolveParentInput, parentFolderProblem } from "./newProjectLogic";
 
 test("validateProjectName: rejects empty/whitespace", () => {
   assert.equal(validateProjectName(""), "a name is required");
@@ -59,4 +59,23 @@ test("templateTakesLanguage / NEW_PROJECT_LANGUAGES: the four languages naut new
   ]);
   assert.equal(templateTakesLanguage("minimal"), true);
   assert.equal(templateTakesLanguage("demo"), false);
+});
+
+test("resolveParentInput: empty is undefined; absolute paths pass through trimmed/unquoted", () => {
+  assert.equal(resolveParentInput("  ", "/h", "/b"), undefined);
+  assert.equal(resolveParentInput(" /srv/plants ", "/h", "/b"), "/srv/plants");
+  assert.equal(resolveParentInput('"/srv/my plants"', "/h", "/b"), "/srv/my plants");
+  assert.equal(resolveParentInput("C:\\work", "/h", "/b"), "C:\\work");
+});
+
+test("resolveParentInput: ~ expands to home, relative resolves against the default folder", () => {
+  assert.equal(resolveParentInput("~", "/home/j", "/b"), "/home/j");
+  assert.equal(resolveParentInput("~/dev", "/home/j", "/b"), "/home/j/dev");
+  assert.equal(resolveParentInput("sub", "/home/j", "/b/"), "/b/sub");
+});
+
+test("parentFolderProblem: only an existing directory is accepted", () => {
+  assert.equal(parentFolderProblem("dir"), undefined);
+  assert.equal(parentFolderProblem("file"), "that is a file, not a folder");
+  assert.equal(parentFolderProblem("missing"), "no such folder");
 });

@@ -15,12 +15,15 @@
 // plain-Node testable.
 
 import { execFile } from "node:child_process";
+import * as os from "node:os";
 import * as vscode from "vscode";
 import { cliCommand, cliExecOptions, cliMissingMessage, isMissing } from "./cli";
 import {
   NEW_PROJECT_LANGUAGES,
   NEW_PROJECT_TEMPLATES,
   newProjectArgs,
+  parentFolderProblem,
+  resolveParentInput,
   templateTakesLanguage,
   validateProjectName,
 } from "./newProjectLogic";
@@ -62,15 +65,76 @@ export function registerNewProjectCommand(): vscode.Disposable {
   });
 }
 
+/** The parent-folder step is an input box (default folder prefilled, Enter
+ * accepts, a folder button opens the system picker), NOT showOpenDialog:
+ * with `files.simpleDialog.enable` (VS Code for the web, serve-web, remote
+ * setups) the open dialog is a plain filter input where Enter navigates
+ * instead of confirming "Create project here" (#86), and the extension has
+ * no hook into that. An input box behaves the same in every dialog mode. */
 async function pickParentFolder(): Promise<vscode.Uri | undefined> {
-  const picked = await vscode.window.showOpenDialog({
-    canSelectFiles: false,
-    canSelectFolders: true,
-    canSelectMany: false,
-    openLabel: "Create project here",
-    title: "nautilus: choose a parent folder for the new project",
+  const home = os.homedir();
+  const base = vscode.workspace.workspaceFolders?.[0]?.uri.scheme === "file"
+    ? vscode.workspace.workspaceFolders[0].uri.fsPath
+    : home;
+  const browse: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon("folder-opened"),
+    tooltip: "Browse for a folder…",
+  };
+  const problemFor = async (text: string): Promise<string | undefined> => {
+    const resolved = resolveParentInput(text, home, base);
+    if (!resolved) return "choose a folder";
+    let kind: "dir" | "file" | "missing";
+    try {
+      const st = await vscode.workspace.fs.stat(vscode.Uri.file(resolved));
+      kind = st.type & vscode.FileType.Directory ? "dir" : "file";
+    } catch {
+      kind = "missing";
+    }
+    return parentFolderProblem(kind);
+  };
+
+  const box = vscode.window.createInputBox();
+  box.title = "nautilus: Create Project — parent folder";
+  box.prompt = "Folder to create the project in (Enter to accept, or browse)";
+  box.value = base;
+  box.buttons = [browse];
+  box.ignoreFocusOut = true;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (uri: vscode.Uri | undefined) => {
+      if (done) return;
+      done = true;
+      box.dispose();
+      resolve(uri);
+    };
+    let seq = 0;
+    box.onDidChangeValue(async (text) => {
+      const mine = ++seq;
+      const problem = await problemFor(text);
+      if (mine === seq) box.validationMessage = problem;
+    });
+    box.onDidAccept(async () => {
+      const problem = await problemFor(box.value);
+      if (problem) {
+        box.validationMessage = problem;
+        return;
+      }
+      finish(vscode.Uri.file(resolveParentInput(box.value, home, base)!));
+    });
+    box.onDidTriggerButton(async () => {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        defaultUri: vscode.Uri.file(resolveParentInput(box.value, home, base) ?? base),
+        openLabel: "Create project here",
+        title: "nautilus: choose a parent folder for the new project",
+      });
+      if (picked?.[0]) finish(picked[0]);
+    });
+    box.onDidHide(() => finish(undefined));
+    box.show();
   });
-  return picked?.[0];
 }
 
 async function createProject(parent: vscode.Uri, name: string, template: string,
