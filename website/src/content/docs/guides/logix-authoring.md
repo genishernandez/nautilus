@@ -275,7 +275,7 @@ naut logix deploy --online    # ...and online-edit the running program
 naut logix deploy --download --yes --program-mode
                               # ...or download: stops the controller
 naut test --target logix      # the same scenarios on the controller, real time
-naut logix serve --project .  # live values, set-value and Download in VS Code
+naut logix serve --project .  # live values, set-value, online edit and download in VS Code
 ```
 
 **`naut logix deploy`** writes the project as an L5X, has logixd import
@@ -307,6 +307,54 @@ assertion is only as sharp as one poll plus one scan, so give a timer's
 `near` that much tolerance. REAL on the controller is 32-bit; compare with
 `near`. A one-scan pulse can fall between polls, so latch it if a test
 needs to see it.
+
+## From the editor
+
+With `naut logix serve --project .` running and `nautilus.runtimeUrl`
+pointing at it, the loop never leaves VS Code. The server serves the
+controller's live values (hover, the Live Values panel, the rung overlay)
+and takes deploys from the editor through the same logixd agent the CLI
+uses; the editor only asks it.
+
+In a project whose `nautilus.yaml` has a `target: logix` section, a ladder
+or ST program shows two commands, in the editor title bar and the command
+palette:
+
+- **nautilus: Push Online Edit to Logix Controller** (the cloud-upload
+  button). The same as `naut logix deploy --online`: the routine's rungs
+  are replaced and finalized in the running controller, which keeps its
+  mode. It sends the open buffer, unsaved edits included. The first edit
+  after the server starts opens an online session (upload, open, go
+  online: about a minute); every edit after that is a rung import and a
+  verification, about two seconds. **nautilus: Download Program to
+  Controller** does the same thing on a Logix server.
+- **nautilus: Download Project to Logix Controller** (in the title bar's
+  `…` menu). The same as `naut logix deploy --download --yes`. A modal
+  says first that the download **stops the controller**, resets its tags
+  to the project's values and leaves it in Program mode; choose
+  **Download** if it is in Program mode already, or **Switch to Program
+  Mode and Download**. The server re-reads `nautilus.yaml` for the
+  download, so new tags go with it, and it opens the online session again
+  afterwards, so the next online edit is warm.
+
+Both show the deploy's progress in a notification and in the **nautilus
+Logix** output channel, and end with what happened: verified or not, rungs
+replaced, the controller's mode. A refusal is shown as the server words it.
+A change an online edit cannot carry (new tags, a routine the controller
+does not have) offers **Download Project…**.
+
+Live values keep streaming through both: they are polled over
+EtherNet/IP, separately from the deploy. If nothing answers at
+`nautilus.runtimeUrl`, the commands offer to start `naut logix serve
+--project` in a terminal. That terminal needs `NAUTILUS_LOGIXD_URL` (or
+`target.logix.agent`) and `NAUTILUS_LOGIXD_TOKEN`, as the CLI does.
+
+The server answers these commands on `POST /api/logix/deploy`:
+`{"mode": "online" | "download", "source", "baseHash", "programMode",
+"yes"}`. The answer is a stream of JSON lines (`progress` events, then
+`done` or `error`). A download is refused unless the body says
+`"yes": true`, and only one deploy runs at a time. The server needs
+`--project`; without it, it serves live values only.
 
 ## What it does not do yet
 
