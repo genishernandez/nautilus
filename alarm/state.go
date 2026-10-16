@@ -92,6 +92,10 @@ func (s State) Unacked() bool { return s == UnackActive || s == UnackRTN }
 // over a slice with no allocation.
 type instance struct {
 	def Def
+	// lent is the name Rename gave the alarm, read in place of the
+	// definition's own wherever the alarm is shown (displayName); "" while
+	// it has none. The definition itself is never changed.
+	lent string
 
 	state State
 	// prior is the state a shelve interrupted, restored when the shelf
@@ -248,4 +252,13 @@ func (in *instance) ack(now time.Time, by string) bool {
 	}
 	in.ackAt, in.ackBy = now, by
 	return true
+}
+
+// displayName is what the alarm reads as: the name Rename lent it, else
+// its definition's.
+func (in *instance) displayName() string {
+	if in.lent != "" {
+		return in.lent
+	}
+	return in.def.Name
 }

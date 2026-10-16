@@ -595,3 +595,38 @@ func TestRecordJSONShape(t *testing.T) {
 		}
 	}
 }
+
+// TestRenameNamesWhatFollows: a name set before the evaluation that
+// activates an alarm is the one its activation is journalled under, its
+// record and the banner read it, a change bumps Rev, and "" returns to the
+// definition's own.
+func TestRenameNamesWhatFollows(t *testing.T) {
+	r := newRig(t, def("W", "NODE1_Alerts.AnyWarning"))
+	r.tags["NODE1_Alerts.AnyWarning"] = false
+	r.Evaluate()
+
+	rev := r.Rev()
+	if err := r.Rename("W", "node1: DefenderSignaturesStale"); err != nil {
+		t.Fatal(err)
+	}
+	if r.Rev() == rev {
+		t.Error("a rename did not bump Rev")
+	}
+	rev = r.Rev()
+	_ = r.Rename("W", "node1: DefenderSignaturesStale")
+	eq(t, "rev after renaming to the same", r.Rev(), rev)
+
+	r.tags["NODE1_Alerts.AnyWarning"] = true
+	r.Evaluate()
+	evs, _ := r.Journal(time.Time{}, time.Time{}, Filter{})
+	eq(t, "journalled as", evs[0].Name, "node1: DefenderSignaturesStale")
+	eq(t, "record", r.Records()[0].Name, "node1: DefenderSignaturesStale")
+	eq(t, "banner", r.Summary().Newest.Name, "node1: DefenderSignaturesStale")
+
+	eq(t, "the definition itself", r.inst[0].def.Name, "W")
+	_ = r.Rename("W", "")
+	eq(t, "restored", r.Records()[0].Name, "W")
+	if err := r.Rename("nope", "x"); err == nil {
+		t.Error("renamed an alarm that does not exist")
+	}
+}
