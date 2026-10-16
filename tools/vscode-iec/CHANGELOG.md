@@ -54,6 +54,12 @@ here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.
   of confirming "Create project here". It is now an input box with the
   workspace folder (or home) prefilled: Enter accepts, a typed or `~` path
   works, and a folder button still opens the system picker. (#86)
+- **Create Project…: the name, template and language steps no longer vanish
+  on a fresh window.** After the parent-folder step closed, VS Code returned
+  focus to the Welcome page, whose step media is a webview that takes focus
+  a moment later; the next step closed on that focus loss before anything
+  could be typed. Those steps now ignore focus-out (Escape still cancels).
+  (#405)
 
 ## [0.19.0] - 2026-10-15
 
