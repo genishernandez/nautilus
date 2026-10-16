@@ -266,13 +266,14 @@ func (e *Engine) unsuppress(in *instance, now time.Time) {
 }
 
 // emit journals one state change and hands it to the notifiers. Rev bumps
-// here and only here, so "Rev changed" means exactly "an alarm moved".
+// here and in Rename, so "Rev changed" means exactly "an alarm moved or
+// now reads differently".
 func (e *Engine) emit(in *instance, now time.Time, kind, by string) {
 	e.rev++
 	ev := Event{
 		TS:       now.UnixMilli(),
 		ID:       in.def.ID,
-		Name:     in.def.Name,
+		Name:     in.displayName(),
 		Kind:     kind,
 		Priority: in.def.Priority,
 		Site:     in.def.Site,
@@ -337,6 +338,7 @@ func (in *instance) record() Record {
 		Count:  in.count,
 		Reason: in.reason,
 	}
+	r.Name = in.displayName() // the record is a view: the lent name, if any
 	if !in.activeAt.IsZero() {
 		r.ActiveMs = in.activeAt.UnixMilli()
 	}
@@ -461,7 +463,7 @@ func (e *Engine) Summary() Summary {
 	}
 	if newest != nil {
 		s.Newest = &Brief{
-			ID: newest.def.ID, Name: newest.def.Name,
+			ID: newest.def.ID, Name: newest.displayName(),
 			Priority: newest.def.Priority, Ms: newest.activeAt.UnixMilli(),
 		}
 	}
@@ -571,6 +573,32 @@ func (e *Engine) Unshelve(id string, by string) error {
 	}
 	in.shelfUntil, in.shelfBy = time.Time{}, ""
 	e.emit(in, e.now(), KindUnshelve, by)
+	return nil
+}
+
+// Rename gives an alarm the name it reads by from now on: on its record,
+// the banner's newest line, and every journal row and notification after
+// this. It is for an alarm whose condition is fixed but whose meaning is
+// not: one alarm for "any of the site's Prometheus rules is firing on this
+// host" reads as the rule that is, set by whoever knows, before the
+// evaluation that activates it. "" returns to the definition's own name.
+// A change bumps Rev, so an HMI refetches the list and shows it; renaming
+// to the current name is free.
+func (e *Engine) Rename(id, name string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	i, ok := e.byID[id]
+	if !ok {
+		return fmt.Errorf("no alarm %q", id)
+	}
+	in := &e.inst[i]
+	if name == in.def.Name {
+		name = "" // its own name is no loan
+	}
+	if in.lent != name {
+		in.lent = name
+		e.rev++
+	}
 	return nil
 }
 
