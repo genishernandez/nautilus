@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/joyautomation/nautilus/lang/ir"
 )
 
 func mustGraph(t *testing.T, src string) *Model {
@@ -96,6 +98,19 @@ END_PROGRAM`
 		if got := m.node(t, id).Layer; got != want {
 			t.Errorf("layer(%s) = %d, want %d", id, got, want)
 		}
+	}
+
+	// The feedback edge the model draws is what runs: the same source, one
+	// program and tag store across scans, holds Run on after Start drops.
+	sc := newScanner(t, src)
+	sc.scan(0, map[string]ir.Value{"Start": ir.BoolVal(true)})
+	sc.scan(0, map[string]ir.Value{"Start": ir.BoolVal(false)})
+	if !sc.h.vals["Run"].B {
+		t.Error("the drawn feedback edge must hold Run on once Start is released")
+	}
+	sc.scan(0, map[string]ir.Value{"Stop": ir.BoolVal(true)})
+	if sc.h.vals["Run"].B {
+		t.Error("NOT Stop must drop Run")
 	}
 }
 
@@ -234,6 +249,12 @@ END_PROGRAM`
 	m.edge(t, "b:c.Doubled", "c:Doubled")
 	if m.node(t, "b:c.Big").Label != "GT" {
 		t.Errorf("GT block wrong: %s", mustJSON(m.node(t, "b:c.Big")))
+	}
+
+	// All three fan-out edges carry the same value when the source runs.
+	h := run(t, src, map[string]ir.Value{"A": ir.RealVal(60), "B": ir.RealVal(50)})
+	if h.vals["Sum"].F != 110 || h.vals["Doubled"].F != 220 || !h.vals["Big"].B {
+		t.Errorf("Sum=%v Doubled=%v Big=%v, want 110 220 true", h.vals["Sum"].F, h.vals["Doubled"].F, h.vals["Big"].B)
 	}
 }
 

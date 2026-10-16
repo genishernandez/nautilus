@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -79,6 +80,10 @@ func ResolveTagType(name string, types map[string]*ir.Type) (*ir.Type, error) {
 	if err == nil {
 		return t, nil
 	}
+	if errors.Is(err, st.ErrFunctionBlockType) {
+		// The name is known, as a block: say that, not "unknown type".
+		return nil, err
+	}
 	return nil, fmt.Errorf("type %s is neither an IEC elementary type (BOOL, INT, DINT, REAL, "+
 		"TIME, STRING, …) nor a TYPE this project's ST declares (known: %s) — %v", name, knownTypes(types), err)
 }
@@ -129,14 +134,22 @@ type binding struct {
 // checkBindings reports a tag that two programs bind with different types
 // — one declaring `Count : DINT` while another reads Count implicitly as
 // the REAL its `init: 0` implies, say. The tag store holds one value, so
-// one of them would read it wrong.
+// one of them would read it wrong. It also refuses a manifest tag a
+// program declares (VAR_EXTERNAL, VAR_GLOBAL) as a function block or a
+// type holding one, as the tag model refuses that type: — a GVL's own
+// global (TagDef.GVL) is not held to it.
 func checkBindings(main *Program, tasks []*taskRun, tags []TagDef) error {
 	tagged := make(map[string]string, len(tags))
+	gvl := map[string]bool{}
 	for _, d := range tags {
 		tagged[ir.NameKey(d.Name)] = d.Name
+		if d.GVL {
+			gvl[ir.NameKey(d.Name)] = true
+		}
 	}
 	seen := map[string]binding{}
-	check := func(task string, globals map[string]*ir.Type) error {
+	check := func(task string, prog *Program) error {
+		globals := prog.Globals()
 		names := make([]string, 0, len(globals))
 		for n := range globals {
 			names = append(names, n)
@@ -148,6 +161,14 @@ func checkBindings(main *Program, tasks []*taskRun, tags []TagDef) error {
 			tag, isTag := tagged[k]
 			if !isTag || t == nil {
 				continue
+			}
+			// The tag model refuses `type: TON` and `type: ARRAY OF TON`;
+			// an untyped manifest tag a program declares as one is the
+			// same tag, and is refused the same way.
+			if !gvl[k] {
+				if err := st.FunctionBlockIn(t); err != nil {
+					return fmt.Errorf("tag %s: program %s declares it %s — %w", tag, prog.POU(), st.TypeSpelling(t), err)
+				}
 			}
 			prev, ok := seen[k]
 			if !ok {
@@ -162,11 +183,11 @@ func checkBindings(main *Program, tasks []*taskRun, tags []TagDef) error {
 		}
 		return nil
 	}
-	if err := check(MainTaskName, main.Globals()); err != nil {
+	if err := check(MainTaskName, main); err != nil {
 		return err
 	}
 	for _, tr := range tasks {
-		if err := check(tr.name, tr.prog.Globals()); err != nil {
+		if err := check(tr.name, tr.prog); err != nil {
 			return err
 		}
 	}

@@ -15,7 +15,8 @@
 //     client's will timestamp goes stale and diverges from a fresh birth. We
 //     rebuild the client — and the will timestamp — per attempt, and the STATE
 //     birth reuses that same ts byte-identically (TCK
-//     host-topic-phid-birth-payload-timestamp compares ==).
+//     host-topic-phid-birth-payload-timestamp compares ==). (The edge node
+//     now does the same, for its NDEATH will's bdSeq: node.go newSession.)
 //
 // OWNED BY B3.
 
@@ -25,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -93,13 +95,49 @@ func (d *Driver) setErr(err error) {
 	d.mu.Unlock()
 }
 
-// isLeader reports whether this replica may publish. nil Leader means "always"
-// — a single-instance project is always its own leader.
+// isLeader reports whether this replica may publish: Config.Leader AND the
+// write gate SetWriteGate installed. Either one nil means "always" — a
+// single-instance project (no redundancy:, so no gate) is always its own
+// leader.
 func (d *Driver) isLeader() bool {
-	if d.cfg.Leader == nil {
+	if d.cfg.Leader != nil && !d.cfg.Leader() {
+		return false
+	}
+	d.gateMu.Lock()
+	g := d.writeGate
+	d.gateMu.Unlock()
+	return g == nil || g()
+}
+
+// replicated reports whether this host is one replica of a redundant set —
+// whether anything can ever take leadership away from it. A single host is
+// not, and none of the hand-over behaviour (demotion death, re-asserting a
+// STATE another replica's late certificate overwrote) applies to it.
+func (d *Driver) replicated() bool {
+	if d.cfg.Leader != nil {
 		return true
 	}
-	return d.cfg.Leader()
+	d.gateMu.Lock()
+	defer d.gateMu.Unlock()
+	return d.writeGate != nil
+}
+
+// clientID is the MQTT client ID for the next CONNECT: the configured one,
+// plus the replica identity when SetWriteGate made this a replica (so two
+// replicas of one manifest never take each other's session over).
+func (d *Driver) clientID() string {
+	d.gateMu.Lock()
+	defer d.gateMu.Unlock()
+	if d.replicaID == "" {
+		return d.cfg.ClientID
+	}
+	return d.cfg.ClientID + "-" + d.replicaID
+}
+
+func (d *Driver) isStopping() bool {
+	d.gateMu.Lock()
+	defer d.gateMu.Unlock()
+	return d.stopping
 }
 
 // mayPublish gates the STATE certificate and every outbound NCMD/DCMD. A
@@ -161,8 +199,19 @@ func (d *Driver) run(ctx context.Context) {
 // serve holds a live session open until the connection drops, the context
 // ends, or leadership changes (which needs a new CONNECT to install — or
 // remove — the will).
+//
+// A host that LOSES leadership publishes its STATE death certificate before
+// it leaves: it is disconnecting on purpose, and Sparkplug 3.0 requires a
+// Host Application to publish {"online":false} before an intentional
+// disconnect — a clean DISCONNECT discards the will, so without it the
+// retained STATE would keep naming this replica's session online. See
+// publishDemotionDeath for why it carries the session timestamp.
 func (d *Driver) serve(ctx context.Context, lost <-chan struct{}) {
-	wasLeader := d.mayPublish()
+	// What the session was opened as (will or no will), not a fresh sample:
+	// leadership that moved between CONNECT and here is a change too.
+	d.mu.Lock()
+	wasLeader := d.sessionPrimary
+	d.mu.Unlock()
 	t := time.NewTicker(leaderPoll)
 	defer t.Stop()
 	for {
@@ -176,6 +225,9 @@ func (d *Driver) serve(ctx context.Context, lost <-chan struct{}) {
 			if d.mayPublish() != wasLeader {
 				d.log.Info("host: leadership changed; reconnecting to refresh STATE",
 					"leader", !wasLeader)
+				if wasLeader {
+					d.publishDemotionDeath()
+				}
 				return
 			}
 		}
@@ -200,20 +252,24 @@ func (d *Driver) connect(ctx context.Context) (mqtt.Client, <-chan struct{}, err
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(d.cfg.BrokerURL).
-		SetClientID(d.cfg.ClientID).
+		SetClientID(d.clientID()).
 		SetKeepAlive(d.cfg.Keepalive).
 		SetCleanSession(true).
 		SetAutoReconnect(false).
 		SetConnectTimeout(connectTimeout).
 		SetOrderMatters(true).
 		SetDefaultPublishHandler(func(_ mqtt.Client, m mqtt.Message) {
+			if m.Topic() == stateTopic(d.cfg.HostID) && !m.Retained() {
+				d.ownStateSeen(m.Payload())
+			}
 			d.handleMessage(m.Topic(), m.Payload())
 		}).
 		SetConnectionLostHandler(func(_ mqtt.Client, e error) {
 			d.setErr(e)
 			lostOnce.Do(func() { close(lost) })
 		})
-	if d.mayPublish() {
+	primary := d.mayPublish()
+	if primary {
 		opts.SetBinaryWill(stateTopic(d.cfg.HostID), will, 1, true)
 	}
 	if d.cfg.Username != "" {
@@ -244,6 +300,7 @@ func (d *Driver) connect(ctx context.Context) (mqtt.Client, <-chan struct{}, err
 	d.connected = true
 	d.lastErr = nil
 	d.sessionTS = ts
+	d.sessionPrimary = primary
 	d.mu.Unlock()
 
 	d.log.Info("host: connected", "broker", d.cfg.BrokerURL, "hostID", d.cfg.HostID,
@@ -327,7 +384,82 @@ func (d *Driver) publishStateDeath() {
 	if p == nil || !d.mayPublish() {
 		return
 	}
-	body, err := json.Marshal(stateBody{Online: false, Timestamp: time.Now().UnixMilli()})
+	d.publishStateOffline(p, time.Now().UnixMilli())
+}
+
+// publishDemotionDeath is the death certificate of a leader that has just
+// lost leadership (serve, before it drops the session to reconnect as a
+// standby). It is not gated on mayPublish — that is already false, which is
+// the point.
+//
+// It carries the SESSION timestamp, byte-identical to this session's will:
+// it says exactly what the broker would have said had this replica died,
+// and nothing newer. The successor shares our host-id and may already have
+// published its STATE birth; its timestamp is later than ours, so an edge
+// node's monotonic STATE guard (Sparkplug 3.0; sparkplug/primaryhost.go)
+// ignores this certificate rather than dropping the new leader into
+// store-and-forward. The retained copy it may overwrite on the broker is
+// put right by the new leader (ownStateSeen).
+func (d *Driver) publishDemotionDeath() {
+	p := d.publisher()
+	if p == nil {
+		return
+	}
+	d.mu.Lock()
+	ts := d.sessionTS
+	d.mu.Unlock()
+	d.publishStateOffline(p, ts)
+}
+
+// ownStateSeen watches the live (non-retained) traffic on our own STATE
+// topic. In a redundant pair both replicas share it, so the outgoing
+// leader's demotion death — or its will, fired late by a broker that took a
+// keepalive to notice a hard-killed pod — can land AFTER the new leader's
+// birth and leave the retained STATE saying offline. Edge nodes already
+// connected ignore it (older timestamp), but an edge that connects later
+// reads the retained copy and would wait for a primary host forever. The
+// leader therefore re-asserts its birth when it sees an offline certificate
+// it did not publish.
+//
+// Only a replica does this: a single host's behaviour is unchanged. Retained
+// deliveries (the copy handed over on SUBSCRIBE) are skipped; the birth that
+// follows the subscription already supersedes them.
+func (d *Driver) ownStateSeen(payload []byte) {
+	var s stateBody
+	if err := json.Unmarshal(payload, &s); err != nil || s.Online {
+		return
+	}
+	if !d.replicated() || !d.mayPublish() || d.isStopping() {
+		return
+	}
+	// paho's ordered handler must not block on a publish token.
+	go d.reassertState()
+}
+
+// reassertState republishes this session's STATE birth (same bytes, same
+// session timestamp) so the retained certificate names the live leader.
+func (d *Driver) reassertState() {
+	p := d.publisher()
+	if p == nil || !d.mayPublish() || d.isStopping() {
+		return
+	}
+	d.mu.Lock()
+	ts, primary := d.sessionTS, d.sessionPrimary
+	d.mu.Unlock()
+	if !primary {
+		return // promoted mid-session: the reconnect publishes our birth
+	}
+	d.log.Warn("host: another replica's STATE death overwrote ours; re-asserting STATE online",
+		"hostID", d.cfg.HostID)
+	if err := d.publishStateBirth(p, ts); err != nil {
+		d.log.Error("host: re-assert STATE", "error", err)
+	}
+}
+
+// publishStateOffline publishes {"online":false,"timestamp":ts} (and the
+// legacy OFFLINE when asked for), retained at QoS 1.
+func (d *Driver) publishStateOffline(p publisher, ts int64) {
+	body, err := json.Marshal(stateBody{Online: false, Timestamp: ts})
 	if err != nil {
 		d.log.Error("host: encode STATE death", "error", err)
 		return
@@ -622,6 +754,19 @@ func (d *Driver) flushWrites() {
 		if err != nil {
 			d.log.Warn("host: encode write failed", "tag", name, "metric", b.Metric, "error", err)
 			continue
+		}
+		// A struct output whose type has array members goes out WITHOUT
+		// them: array writes are not supported, and a partial template is
+		// legal — the edge keeps the arrays it has. Each stripped member is
+		// counted and logged once, never sent mangled or dropped unsaid.
+		if pruned, arrays := sparkplug.WithoutArrays(b.Metric, m); len(arrays) > 0 {
+			m = pruned
+			d.mu.Lock()
+			d.stats.WritesRefused += uint64(len(arrays))
+			d.warnOnceLocked("arraywrite:"+name,
+				"host: struct write sent without its array members — array writes are not supported",
+				"tag", name, "metric", b.Metric, "members", strings.Join(arrays, ", "))
+			d.mu.Unlock()
 		}
 		m.Timestamp = uint64(time.Now().UnixMilli())
 		at[topic][b.Metric] = len(byTopic[topic])

@@ -595,6 +595,26 @@ func TestStateGroupFilter(t *testing.T) {
 		t.Fatalf("msgs=%d nodes=%d, want 0/0", msgs, nodes)
 	}
 
+	// The configured group IS consumed — a filter that drops everything
+	// would pass the rejection above.
+	d.handleMessage("spBv1.0/G/NBIRTH/W6", enc(t, nbirth(1, dbl("Well/Level", 42))))
+	if d.snapshot()["W6_Well_Level"] != 42.0 {
+		t.Fatal("the configured group's birth was not consumed")
+	}
+	d.mu.Lock()
+	msgs, nodes = d.stats.Msgs, len(d.nodes)
+	d.mu.Unlock()
+	if msgs != 1 || nodes != 1 {
+		t.Fatalf("after an in-group birth msgs=%d nodes=%d, want 1/1", msgs, nodes)
+	}
+
+	// More than one group may be configured, and any of them is consumed.
+	two, _ := newTestDriver(t, testManifest(), Config{GroupIDs: []string{"X", "G"}})
+	two.handleMessage("spBv1.0/G/NBIRTH/W6", enc(t, nbirth(1, dbl("Well/Level", 7))))
+	if two.snapshot()["W6_Well_Level"] != 7.0 {
+		t.Fatal("the second of two configured groups was not consumed")
+	}
+
 	// Empty GroupIDs means every group on the broker.
 	all, _ := newTestDriver(t, testManifest(), Config{})
 	all.handleMessage("spBv1.0/OTHER/NBIRTH/W6", enc(t, nbirth(1, dbl("Well/Level", 99))))

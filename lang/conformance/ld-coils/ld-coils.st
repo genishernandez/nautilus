@@ -3,7 +3,7 @@ PROGRAM CoilsSt
 VAR_EXTERNAL
     A, B, SetIn, RstIn, CLK : BOOL;
     N : INT;
-    st_Latch, st_P, st_N, st_RiseC, st_FallC, st_CntDone, st_NotZero, st_Br : BOOL;
+    st_Latch, st_P, st_N, st_RiseC, st_FallC, st_CntDone, st_NotZero, st_Br, st_Mid : BOOL;
     st_Cnt : INT;
 END_VAR
 VAR
@@ -14,6 +14,7 @@ VAR
     ftc : F_TRIG;
     cnt : CTU;
     brt : TON;
+    mdt : TON;
 END_VAR
 
 (* S then R coil: R is later in the scan, so it wins a tie *)
@@ -39,4 +40,8 @@ st_NotZero := NOT (N = 0);
 (* nested branch with a function block in a leg *)
 brt(IN := B OR CLK, PT := T#3ms);
 st_Br := A OR brt.Q;
+
+(* a function block mid-rung, a contact after it *)
+mdt(IN := A, PT := T#3ms);
+st_Mid := mdt.Q AND B;
 END_PROGRAM

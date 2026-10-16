@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	nio "github.com/joyautomation/nautilus/io"
@@ -185,10 +186,57 @@ func (d *Driver) Stop() {
 	if d.cancel == nil {
 		return
 	}
+	d.gateMu.Lock()
+	d.stopping = true
+	d.gateMu.Unlock()
 	d.publishStateDeath()
 	d.cancel()
 	<-d.done
 }
+
+// SetWriteGate installs the redundancy leadership gate (#325). `naut run`
+// calls it with the elector's IsLeader when — and only when — the manifest
+// has a `redundancy:` section, directly or through io.Multi. A single host
+// never gets one and stays its own leader, exactly as before.
+//
+// The gate means what it means for every other driver (modbus, the hw
+// command queues): while it is false no command leaves the driver, and
+// queued commands stay queued. For a Sparkplug host it also decides who is
+// the Primary Host Application, because that is what STATE declares:
+//
+//   - a standby connects WITHOUT a STATE will and never publishes STATE, so
+//     it consumes the group without claiming to be its primary host;
+//   - on promotion the session is rebuilt with the will and the new leader
+//     publishes STATE online (serve notices within leaderPoll);
+//   - on demotion the outgoing leader stops commanding at once (every
+//     NCMD/DCMD is gated live), publishes its STATE death certificate as
+//     Sparkplug requires of a host that disconnects on purpose, and
+//     reconnects as a standby.
+//
+// The replicas share a host-id (one manifest) but must not share an MQTT
+// client ID, so a gated driver suffixes its client ID with the replica's
+// identity: POD_NAME, the identity the elector writes into the lease, or
+// the hostname outside a cluster.
+func (d *Driver) SetWriteGate(gate func() bool) {
+	d.gateMu.Lock()
+	defer d.gateMu.Unlock()
+	d.writeGate = gate
+	if gate != nil && d.replicaID == "" {
+		d.replicaID = replicaIdentity()
+	}
+}
+
+// replicaIdentity is this replica's name among its peers: POD_NAME (what
+// `naut run` hands the elector), else the hostname.
+func replicaIdentity() string {
+	if id := os.Getenv("POD_NAME"); id != "" {
+		return id
+	}
+	h, _ := os.Hostname()
+	return h
+}
+
+var _ interface{ SetWriteGate(func() bool) } = (*Driver)(nil)
 
 // ── io.Driver ────────────────────────────────────────────────────────────
 
@@ -286,9 +334,10 @@ func (d *Driver) ReadInputsInto(dst nio.Values) error {
 // Anything else is ignored — the runtime hands us exactly the Outputs list it
 // was configured with, but a hand-wired driver may not.
 //
-// __Rebirth is deliberately unaffected by the baseline: its baseline value is
-// false, and only a rising edge (false → true) is a command, so the rule
-// already reads it correctly.
+// __Rebirth follows the baseline rule like any output: only a rising edge
+// (false → true) is a command, and a value already TRUE on the first scan
+// is baseline, not an edge, so a __Rebirth held TRUE (or retained) across a
+// restart does not rebirth every site each time the controller starts.
 func (d *Driver) WriteOutputs(vals nio.Values) error {
 	d.wmu.Lock()
 	d.initWriteMapsLocked()

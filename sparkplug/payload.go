@@ -3,7 +3,8 @@
 // with a SCADA consumer) and accepts commands back. The runtime is the edge
 // node; each io.Driver is a Sparkplug device whose birth/death tracks its
 // connection health. MQTT and protobuf live only in this package — the
-// runtime core stays stdlib-only.
+// runtime core's one dependency outside the standard library is
+// gopkg.in/yaml.v3.
 package sparkplug
 
 import (
@@ -24,12 +25,21 @@ type Metric struct {
 	Datatype     spb.DataType
 	IsNull       bool
 	IsHistorical bool // replayed store-and-forward data
-	Value        any  // bool | int64 | float64 | string | *Template
+	// Value is bool | int64 | float64 | string | *Template for a scalar or
+	// template, and []bool | []int64 | []float64 | []string for an array
+	// datatype (see arrays.go).
+	Value any
 	// Properties are the metric's Sparkplug properties (a PropertySet), in
 	// wire order. A birth carries the tag's documentation here under the
 	// keys hosts look for (PropEngUnit, PropDocumentation); data messages
 	// carry none.
 	Properties []Property
+
+	// decodeErr is why a received array's bytes_value could not be unpacked
+	// (a length that is not a whole number of elements, a BooleanArray count
+	// longer than its bits). The metric decodes with a nil Value instead of
+	// failing the whole payload, and ValueFromMetricInto reports this.
+	decodeErr error
 }
 
 // Property is one entry of a metric's PropertySet: a key and a scalar value
@@ -195,7 +205,14 @@ func setMetricValue(em *spb.Payload_Metric, dt spb.DataType, v any) error {
 		}
 		em.Value = &spb.Payload_Metric_TemplateValue{TemplateValue: et}
 	default:
-		return fmt.Errorf("unsupported datatype %v", dt)
+		if !isArrayType(dt) {
+			return fmt.Errorf("unsupported datatype %v", dt)
+		}
+		b, err := encodeArray(dt, v)
+		if err != nil {
+			return err
+		}
+		em.Value = &spb.Payload_Metric_BytesValue{BytesValue: b}
 	}
 	return nil
 }
@@ -309,6 +326,16 @@ func decodeMetric(m *spb.Payload_Metric) Metric {
 		out.Value = v.StringValue
 	case *spb.Payload_Metric_TemplateValue:
 		out.Value = decodeTemplate(v.TemplateValue)
+	case *spb.Payload_Metric_BytesValue:
+		if isArrayType(out.Datatype) {
+			out.Value, out.decodeErr = decodeArray(out.Datatype, v.BytesValue)
+		}
+	case nil:
+		// An array with no bytes_value at all, and not null, is an empty
+		// array — what Tahu's decoder reads from it.
+		if isArrayType(out.Datatype) && !out.IsNull {
+			out.Value, out.decodeErr = decodeArray(out.Datatype, nil)
+		}
 	}
 	return out
 }
@@ -329,10 +356,24 @@ func decodeTemplate(t *spb.Payload_Template) *Template {
 
 // MetricFromValue builds a metric for a tag from its ir.Value, mapping types
 // faithfully: BOOL→Boolean, integer→Int64, REAL→Double, STRING→String,
-// STRUCT→Template. Nautilus's IR collapses integer widths to int64 and reals
-// to float64, so Int64/Double are the honest targets. name and timestamp are
-// applied by the caller as appropriate for birth vs data.
+// STRUCT→Template, and an ARRAY of one of those scalars to the matching
+// Sparkplug array (BooleanArray, Int64Array, DoubleArray, StringArray).
+// Nautilus's IR collapses integer widths to int64 and reals to float64, so
+// Int64/Double are the honest targets, for an array's elements as for a
+// scalar. name and timestamp are applied by the caller as appropriate for
+// birth vs data.
+//
+// An array's element kind is read from its elements, so an empty array has
+// none: MetricFromTypedValue takes the declared type that settles it.
 func MetricFromValue(name string, v ir.Value, tmplRef string) (Metric, error) {
+	return MetricFromTypedValue(name, v, nil, tmplRef)
+}
+
+// MetricFromTypedValue is MetricFromValue with the tag's declared type, when
+// the caller has one. It is consulted only where a value cannot say for
+// itself — an array's element kind, and the members of a struct whose value
+// carries no StructDef — and may be nil.
+func MetricFromTypedValue(name string, v ir.Value, t *ir.Type, tmplRef string) (Metric, error) {
 	switch v.Kind {
 	case ir.TypeBool:
 		return Metric{Name: name, Datatype: spb.DataType_Boolean, Value: v.B}, nil
@@ -348,25 +389,159 @@ func MetricFromValue(name string, v ir.Value, tmplRef string) (Metric, error) {
 			return Metric{}, err
 		}
 		return Metric{Name: name, Datatype: spb.DataType_Template, Value: tmpl}, nil
+	case ir.TypeArray:
+		dt, val, err := arrayMetricValue(v, t)
+		if err != nil {
+			return Metric{}, fmt.Errorf("sparkplug: tag %q: %w", name, err)
+		}
+		return Metric{Name: name, Datatype: dt, Value: val}, nil
 	default:
 		return Metric{}, fmt.Errorf("sparkplug: tag %q has unpublishable kind %v", name, v.Kind)
 	}
 }
 
+// arrayDatatype is the Sparkplug array datatype for an array whose elements
+// are of kind elem — the scalar mapping, element-wise. ok is false for an
+// element kind Sparkplug has no array of: a struct (there is no array of
+// templates), a nested array (multi-dimensional), a function block.
+func arrayDatatype(elem ir.TypeKind) (spb.DataType, bool) {
+	switch elem {
+	case ir.TypeBool:
+		return spb.DataType_BooleanArray, true
+	case ir.TypeInt, ir.TypeTime:
+		return spb.DataType_Int64Array, true
+	case ir.TypeReal:
+		return spb.DataType_DoubleArray, true
+	case ir.TypeString:
+		return spb.DataType_StringArray, true
+	}
+	return spb.DataType_Unknown, false
+}
+
+// arrayMetricValue converts an ir array to its Sparkplug datatype and slice.
+// t, when it is an array type, names the element kind; otherwise the first
+// element does, and an empty array with no declared type is an error — its
+// datatype would be a guess.
+func arrayMetricValue(v ir.Value, t *ir.Type) (spb.DataType, any, error) {
+	var elem ir.TypeKind
+	switch {
+	case t != nil && t.Kind == ir.TypeArray && t.Elem != nil:
+		elem = t.Elem.Kind
+	case len(v.Arr) > 0:
+		elem = v.Arr[0].Kind
+	default:
+		return spb.DataType_Unknown, nil, fmt.Errorf("empty array with no declared element type")
+	}
+	dt, ok := arrayDatatype(elem)
+	if !ok {
+		return spb.DataType_Unknown, nil, fmt.Errorf("an array of %v has no Sparkplug array datatype", elem)
+	}
+	mismatch := func(i int, e ir.Value) error {
+		return fmt.Errorf("array element %d is %v in an array of %v", i, e.Kind, elem)
+	}
+	switch dt {
+	case spb.DataType_BooleanArray:
+		out := make([]bool, len(v.Arr))
+		for i, e := range v.Arr {
+			if e.Kind != ir.TypeBool {
+				return dt, nil, mismatch(i, e)
+			}
+			out[i] = e.B
+		}
+		return dt, out, nil
+	case spb.DataType_Int64Array:
+		out := make([]int64, len(v.Arr))
+		for i, e := range v.Arr {
+			if e.Kind != ir.TypeInt && e.Kind != ir.TypeTime {
+				return dt, nil, mismatch(i, e)
+			}
+			out[i] = e.I
+		}
+		return dt, out, nil
+	case spb.DataType_DoubleArray:
+		out := make([]float64, len(v.Arr))
+		for i, e := range v.Arr {
+			switch e.Kind {
+			case ir.TypeReal:
+				out[i] = e.F
+			case ir.TypeInt:
+				out[i] = float64(e.I) // an integer literal in a REAL array
+			default:
+				return dt, nil, mismatch(i, e)
+			}
+		}
+		return dt, out, nil
+	default: // StringArray
+		out := make([]string, len(v.Arr))
+		for i, e := range v.Arr {
+			if e.Kind != ir.TypeString {
+				return dt, nil, mismatch(i, e)
+			}
+			out[i] = e.S
+		}
+		return dt, out, nil
+	}
+}
+
+// publishable reports whether a value of type t can be a Sparkplug metric (or
+// template member): a scalar, a struct, or an array of scalars. An array of
+// structs, a multi-dimensional array and a function block cannot — Sparkplug
+// has no datatype for them — and are left out of births, definitions and
+// instances alike, so the three always agree.
+func publishable(t *ir.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Kind {
+	case ir.TypeBool, ir.TypeInt, ir.TypeTime, ir.TypeReal, ir.TypeString, ir.TypeStruct:
+		return true
+	case ir.TypeArray:
+		if t.Elem == nil {
+			return false
+		}
+		_, ok := arrayDatatype(t.Elem.Kind)
+		return ok
+	}
+	return false
+}
+
+// publishableValue is publishable for a value with no declared type: what
+// the value itself shows.
+func publishableValue(v ir.Value) bool {
+	switch v.Kind {
+	case ir.TypeBool, ir.TypeInt, ir.TypeTime, ir.TypeReal, ir.TypeString, ir.TypeStruct:
+		return true
+	case ir.TypeArray:
+		if len(v.Arr) == 0 {
+			return false
+		}
+		_, ok := arrayDatatype(v.Arr[0].Kind)
+		return ok
+	}
+	return false
+}
+
 // templateInstance builds a Template instance metric tree from a struct value,
 // recursing into nested structs. Field names come from the value's StructDef.
+// A member Sparkplug cannot carry (see publishable) is left out, exactly as
+// definitionTemplate leaves it out of the type's definition.
 func templateInstance(v ir.Value, ref string) (*Template, error) {
 	t := &Template{TemplateRef: ref}
 	for i, fv := range v.Fld {
 		name := fmt.Sprintf("m%d", i)
+		var ft *ir.Type
 		if v.Struct != nil && i < len(v.Struct.Fields) {
 			name = v.Struct.Fields[i].Name
+			ft = v.Struct.Fields[i].Type
+		}
+		if ft != nil && !publishable(ft) || ft == nil && !publishableValue(fv) {
+			continue
 		}
 		nestedRef := ""
 		if fv.Kind == ir.TypeStruct && fv.Struct != nil {
 			nestedRef = fv.Struct.Name
 		}
-		m, err := MetricFromValue(name, fv, nestedRef)
+		m, err := MetricFromTypedValue(name, fv, ft, nestedRef)
 		if err != nil {
 			return nil, err
 		}

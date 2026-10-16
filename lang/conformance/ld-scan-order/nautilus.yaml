@@ -1,0 +1,36 @@
+# ld-scan-order — statements and rungs evaluate top to bottom within a
+# scan: a value written by one is visible to the ones below it in the same
+# scan, and to the ones above it on the next scan. The same four
+# assignments in ST, LD (coils read as contacts) and FBD.
+#
+#   go test ./lang/conformance/ -run 'TestConformance/ld-scan-order'
+name: ld-scan-order
+
+tasks:
+  - program: ld-scan-order.st
+    scan: 10ms
+  - name: ld
+    program: ld-scan-order.ld
+    scan: 10ms
+  - name: fbd
+    program: ld-scan-order.fbd
+    scan: 10ms
+
+tags:
+  - { name: A, role: state, init: false, desc: "The input every program copies" }
+
+  - { name: st_X,  role: state, init: false }
+  - { name: st_Y,  role: state, init: false }
+  - { name: st_V,  role: state, init: false }
+  - { name: st_W,  role: state, init: false }
+  - { name: ld_X,  role: state, init: false }
+  - { name: ld_Y,  role: state, init: false }
+  - { name: ld_V,  role: state, init: false }
+  - { name: ld_W,  role: state, init: false }
+  - { name: fbd_X, role: state, init: false }
+  - { name: fbd_Y, role: state, init: false }
+  - { name: fbd_V, role: state, init: false }
+  - { name: fbd_W, role: state, init: false }
+
+driver:
+  type: memory

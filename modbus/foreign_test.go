@@ -283,23 +283,39 @@ func TestForeignWriteRoundTrip(t *testing.T) {
 		})
 	}
 
-	// Round 1 on the wire, per unit: 200..213 is one FC16 of 14 registers,
-	// the two bit:N writes are two FC6 read-modify-writes of 214, coils
-	// 100+101 one FC15 of 2, coil 105 one FC5. Round 2 adds the same again
-	// except the unchanged W_BIT9 (change-only), so totals are checked as
-	// "round 1 exactly, then no more than round 2 could add".
+	// The wire shapes, per unit. Round 1: 200..213 is one FC16 of 14
+	// registers, the two bit:N writes are two FC6 read-modify-writes of 214,
+	// coils 100+101 one FC15 of 2, coil 105 one FC5. Round 2 adds the same
+	// again except the unchanged W_BIT9 (change-only).
+	//
+	// What is asserted is the SHAPE of each frame (never split, never
+	// merged) and that every unit sent at least one, not an exact count of
+	// rounds: the driver queues last-value-wins and re-sends a write whose
+	// connection broke mid-flight, so how many frames carried the two rounds
+	// depends on timing (a loaded runner has seen both more and fewer than
+	// rounds*units). The read-back above already proves every value landed.
 	n := len(simUnits)
-	if got := rec.writes(FCWriteMultipleRegisters, 200); len(got) != 2*n || got[0].count != 14 {
-		t.Errorf("contiguous holding writes must be one FC16 of 14 registers per unit per round, got %v", got)
+	atLeast := func(what string, got []frameRec, perUnit int, count uint16) {
+		t.Helper()
+		if len(got) < perUnit*n {
+			t.Errorf("%s: want at least %d frames (%d per unit), got %d: %v", what, perUnit*n, perUnit, len(got), got)
+		}
+		for _, f := range got {
+			if count != 0 && f.count != count {
+				t.Errorf("%s: a frame carried %d, want %d (split or merged): %v", what, f.count, count, got)
+				break
+			}
+		}
 	}
-	if got := rec.writes(FCWriteSingleRegister, 214); len(got) != 3*n {
-		t.Errorf("bit:N writes must be read-modify-write FC6 (2 per unit round 1, 1 in round 2), got %d frames", len(got))
-	}
-	if got := rec.writes(FCWriteMultipleCoils, 100); len(got) != 2*n || got[0].count != 2 {
-		t.Errorf("adjacent coils must be one FC15 of 2 per unit per round, got %v", got)
-	}
-	if got := rec.writes(FCWriteSingleCoil, 105); len(got) != 2*n {
-		t.Errorf("a lone coil must be FC5, got %v", got)
+	atLeast("contiguous holding writes must be one FC16 of 14 registers",
+		rec.writes(FCWriteMultipleRegisters, 200), 1, 14)
+	atLeast("bit:N writes must be read-modify-write FC6",
+		rec.writes(FCWriteSingleRegister, 214), 1, 0)
+	atLeast("adjacent coils must be one FC15 of 2",
+		rec.writes(FCWriteMultipleCoils, 100), 1, 2)
+	atLeast("a lone coil must be FC5", rec.writes(FCWriteSingleCoil, 105), 1, 0)
+	if got := rec.writes(FCWriteMultipleRegisters, -1); len(got) != len(rec.writes(FCWriteMultipleRegisters, 200)) {
+		t.Errorf("an FC16 started somewhere other than 200: %v", got)
 	}
 	for _, row := range d.Health().Sources {
 		if row.Exceptions != 0 || row.QueuedWrites != 0 {
@@ -404,8 +420,11 @@ func TestForeignLatencyAboveTimeoutReconnects(t *testing.T) {
 			}
 			return d.Health().Sources[0].Retries >= 3
 		})
-		if q := d.Quality()["PV"]; q == nio.Stale || q == nio.Bad {
-			t.Errorf("PV quality = %v; a never-delivered tag is Good-or-NotConnected, never Stale/Bad", q)
+		// Never delivered means NotConnected whichever phase of the
+		// reconnect oscillation this lands in (socket up but unheard-from,
+		// or down) — never Good, Stale or Bad.
+		if q, ok := d.Quality()["PV"]; !ok || q != nio.NotConnected {
+			t.Errorf("PV quality = %v (reported=%v); a never-delivered tag must be NotConnected", q, ok)
 		}
 		h := d.Health()
 		row := h.Sources[0]

@@ -81,6 +81,57 @@ three edge sites (`examples/remote-fleet/sites/*`) — its README ("Proof:
 offline and live agree") walks both generation paths side by side, and
 `docs/design/examples-dogfood.md` has the walkthrough as actually run.
 
+## Types
+
+`types:` and `tags:` name Sparkplug datatypes. A metric lands in the tag
+store as the IEC type of the same width, and `sparkplug_types.st` declares
+it that way:
+
+| Sparkplug datatype | ST type |
+|---|---|
+| Boolean | `BOOL` |
+| Int8, Int16, Int32, Int64 | `SINT`, `INT`, `DINT`, `LINT` |
+| UInt8, UInt16, UInt32, UInt64 | `USINT`, `UINT`, `UDINT`, `ULINT` |
+| DateTime | `LINT`, epoch milliseconds |
+| Float, Double | `REAL`, `LREAL` |
+| String, Text, UUID | `STRING` |
+| Template | the generated `TYPE` |
+| an array (Int32Array, BooleanArray, …) | `ARRAY [0..n-1] OF` its element |
+
+The width is documentation: every integer is held as 64 bits and every
+real as a double. An array is written as its element plus a length, the
+way `eip_manifest.yaml` writes one:
+
+```yaml
+types:
+  - name: Get_TOD
+    fields:
+      - { name: EnableIn, type: Boolean }
+      - { name: gettime,  type: Int64, arraylen: 7 }    # ARRAY [0..6] OF LINT
+tags:
+  - { name: W6_Levels, node: W6, metric: Levels, type: Double, arraylen: 3 }
+```
+
+The length is the contract. An array metric or template member of any
+other length does not fit its binding: it is logged once and refused,
+and the tag keeps its last value. It is never truncated or resized. A
+template definition does not say how long its array members are, so
+`naut sparkplug import` reads the length from an instance in the same
+births. If two instances disagree, the import fails. An array member
+with no instance in the births, and an empty array, are reported and
+left out.
+
+Sparkplug has no array of Templates, and no array of Text or UUID. The
+manifest refuses those, along with `type: Int32Array` (write
+`type: Int32, arraylen: N`).
+
+Array writes are not supported yet, so an array binding cannot be
+`writable:`. The manifest refuses it, and the import binds an array a
+`--writable` glob matches as read-only and says so. A writable struct
+binding whose type has array members sends its commands without them.
+Each array member left out is logged once and counted under
+`writes refused` on `/api/drivers`.
+
 ## The `__Online`/`__Rebirth` companions
 
 The driver never invents or zeroes a value on death: **Sparkplug's own
@@ -161,7 +212,7 @@ is full.
 ## Writing template members
 
 Most of the controls on a water-utility HMI live *inside* a UDT —
-`Motor1.START`, `AnalogInput.HSP`, `LevelControl.CTL1HSP`. A Template
+`Motor1.START`, `AnalogInput.HSP`, `LevelControl.LSP`. A Template
 metric binds to one struct tag, and writing that struct back as a whole
 would clobber every member the site's own logic is driving. So a UDT is
 **never writable as a whole** — a `--writable` glob that matches a
@@ -202,7 +253,7 @@ naut sparkplug import --broker tcp://mqtt:1883 --group Plant \
 Each match generates its own tag, named `<prefix>_<metric>_<member path>`
 — `Motor1.START` at site `W6` becomes `W6_Motor1_START : BOOL`. Offline,
 a `--sites` file says the same thing with a list instead of `true`:
-`{name: Motor1, type: Motor, writable: [START, LVL.CTL1HSP]}`.
+`{name: Motor1, type: Motor, writable: [START, LVL.HSP]}`.
 
 ### Outputs are commands: the baseline rule
 
@@ -237,8 +288,10 @@ So the driver reads its output set as follows.
   output tags, not the broker session, so it survives a dropped
   connection intact. Commands genuinely raised while the broker was away
   are still queued and go out on reconnect.
-- **`__Rebirth` is unaffected**: its baseline is `false` and only a
-  rising edge is a command, which is what it always meant.
+- **`__Rebirth` follows the same rule.** Only a rising edge is a command,
+  and a `__Rebirth` that is already TRUE on the first scan is baseline,
+  not an edge: a value held TRUE (or retained) across a restart does not
+  ask every site to rebirth each time the controller starts.
 
 None of this depends on how often the runtime calls the driver. The scan
 loop hands the driver *every* output on the calls it makes, but it only
@@ -265,11 +318,31 @@ needs zero HMI changes.
 ## Redundancy
 
 With a `redundancy:` section (lease-elected standby pair), only the
-**leader** may claim to be online: the driver gates its STATE publish —
-and every outbound NCMD/DCMD — on `runtime.Coordinator`'s leadership, not
-just on `primary: true`. A standby that published STATE online anyway
-would flap its LWT across every site in the fleet on every failover; this
-is designed in, not bolted on afterward.
+**leader** may claim to be online: `naut run` hands the elector to the
+driver as its write gate, and the driver gates its STATE publish — and
+every outbound NCMD/DCMD — on that leadership, not just on
+`primary: true`. A standby that published STATE online anyway would flap
+its LWT across every site in the fleet on every failover.
+
+- **The standby** connects and consumes the group like the leader, but
+  with no STATE will and no STATE birth, and its commands stay queued.
+- **On promotion** the new leader reconnects with the will and publishes
+  STATE online.
+- **On demotion** the old leader stops commanding at once and publishes
+  its STATE death before it reconnects as a standby. The death carries its
+  own session timestamp, never a newer one, so an edge node that has
+  already seen the new leader's birth ignores it. If it lands on the broker
+  after that birth anyway, the new leader publishes its birth again, so an
+  edge node that connects later still reads STATE online.
+
+Both replicas share the `host-id` (the STATE topic) but not an MQTT
+client ID. Under `redundancy:` each replica appends its identity
+(`POD_NAME`, or the hostname off-cluster) to `client-id`, so a pair never
+takes over each other's broker session. A broker ACL keyed on the client
+ID has to allow both.
+
+A project without `redundancy:` has no gate. It is always the leader and
+publishes STATE online from its first connect.
 
 ## Conformance
 

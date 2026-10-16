@@ -451,6 +451,9 @@ func (b *modelBuilder) buildGhosts() {
 
 // ghostConsumed converts a used ghost's layout entry onto the real node id
 // it just became (so the chip keeps its position), returning layout edits.
+// An input chip's entry is dropped instead: its placeholder spot was only a
+// place to start the wire from, and auto-layout now puts the chip with its
+// network (several ghosts would otherwise sit wherever they were dropped).
 func (b *modelBuilder) ghostConsumed(id string) []TextEdit {
 	name, isOut, ok := ghostName(id)
 	if !ok {
@@ -462,7 +465,7 @@ func (b *modelBuilder) ghostConsumed(id string) []TextEdit {
 	}
 	return b.remapLayout(func(entryID string) (string, bool) {
 		if entryID == id {
-			return real, true
+			return real, isOut
 		}
 		return entryID, true
 	})

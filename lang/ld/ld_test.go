@@ -110,6 +110,8 @@ func TestRungErrors(t *testing.T) {
 		{"one-leg branch", "[ Start ] ( Run )", "two legs"},
 		{"unclosed branch", "[ Start | Run ( Run )", "']'"},
 		{"power pin passed", "Cold t1:TON(IN := Start) ( Alm )", "power drives IN"},
+		{"contact after the last block, no coil", "Start t1:TON(PT := T#5S) Stop", "drive nothing"},
+		{"branch after the last block, no coil", "Start t1:TON(PT := T#5S) [ Stop | Run ]", "drive nothing"},
 		{"elements before rung", "", "before any RUNG"},
 	}
 	for _, tc := range cases {
@@ -635,8 +637,36 @@ END_PROGRAM`
 	if !strings.Contains(out, "ET => Elapsed") {
 		t.Fatalf("binding must pass through:\n%s", out)
 	}
-	if _, err := fbd.Compile(out); err != nil {
+	prog, err := fbd.Compile(out)
+	if err != nil {
 		t.Fatalf("does not compile: %v", err)
+	}
+	// The binding runs: the variable holds the timer's ET, which a
+	// contact downstream reads.
+	frame := ir.NewFrame(prog)
+	h := &ldHost{vals: map[string]ir.Value{"Run": ir.BoolVal(true)}, now: 1_700_000_000_000}
+	scan := func() {
+		t.Helper()
+		if err := ir.Run(prog, frame, h); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	}
+	scan()
+	if h.vals["Warm"].B {
+		t.Fatal("Warm must be off at 0 s")
+	}
+	h.now += 3000
+	scan()
+	if got := h.vals["Elapsed"]; got.I != 3000 {
+		t.Fatalf("Elapsed = %+v, want 3000 (ET bound to the variable)", got)
+	}
+	if !h.vals["Warm"].B || h.vals["Done"].B {
+		t.Fatalf("at 3 s Warm=%v Done=%v, want true false", h.vals["Warm"].B, h.vals["Done"].B)
+	}
+	h.now += 3000
+	scan()
+	if got := h.vals["Elapsed"]; got.I != 5000 || !h.vals["Done"].B {
+		t.Fatalf("at 6 s Elapsed=%+v Done=%v, want 5000 true", got, h.vals["Done"].B)
 	}
 }
 
@@ -712,6 +742,23 @@ END_PROGRAM`
 
 	// A rung with neither a coil nor a function block anywhere is still an
 	// error — TestRungErrors' "no coil" case covers the exact message.
+
+	// A block may sit mid-rung: power continues from its output pin to the
+	// contacts and coils after it.
+	mid := `PROGRAM p
+VAR_EXTERNAL A : BOOL; B : BOOL; Lamp : BOOL; END_VAR
+LD
+  RUNG r
+    A t1:TON(PT := T#5S) B ( Lamp )
+END_LD
+END_PROGRAM`
+	out, err = Transpile(mid)
+	if err != nil {
+		t.Fatalf("a block mid-rung must compile: %v", err)
+	}
+	if !strings.Contains(out, "t1 : TON(IN := A, PT := T#5S)") || !strings.Contains(out, "Lamp := AND(t1.Q, B)") {
+		t.Errorf("mid-rung block wrong:\n%s", out)
+	}
 }
 
 // ── edge contacts (+Name rising, -Name falling; ( P x ) / ( N x ) coils) ────
@@ -776,7 +823,10 @@ END_PROGRAM`
 
 // ldHost is a minimal ir.Host that lets a test drive several scans and
 // watch retained state (here, an edge trigger's one-shot pulse) evolve.
-type ldHost struct{ vals map[string]ir.Value }
+type ldHost struct {
+	vals map[string]ir.Value
+	now  int64
+}
 
 func (h *ldHost) ReadGlobal(name string) (ir.Value, error) {
 	if v, ok := h.vals[name]; ok {
@@ -785,7 +835,7 @@ func (h *ldHost) ReadGlobal(name string) (ir.Value, error) {
 	return ir.Value{}, nil
 }
 func (h *ldHost) WriteGlobal(name string, v ir.Value) error { h.vals[name] = v; return nil }
-func (h *ldHost) NowMs() int64                              { return 0 }
+func (h *ldHost) NowMs() int64                              { return h.now }
 
 // A rising-edge contact fires for exactly one scan on 0->1, a falling-edge
 // contact for exactly one scan on 1->0, and holding the input steady fires
@@ -1139,5 +1189,106 @@ END_PROGRAM
 	}
 	if e := m.Rungs[0].Elements[1]; e.Kind != "fb" || e.Inst != "Timers[1]" || e.Type != "TON" {
 		t.Errorf("element = %+v", e)
+	}
+}
+
+// A rung whose coil writes a tag its own condition reads stores the
+// condition in a BOOL variable: FBD inlines a wire at every read, so a
+// wire would let the second coil see the first coil's write (#258). The
+// runtime behaviour is pinned by lang/conformance/ld-coil-fanout; this
+// pins the shape, the line map, and that the netlist still compiles and
+// graphs. A rung without the hazard keeps its wire (TestTranspileRungs).
+func TestRungPowerVariable(t *testing.T) {
+	src := `PROGRAM Main
+VAR_EXTERNAL Lamp, Horn : BOOL; END_VAR
+LD
+  RUNG blink
+    /lamp ( Lamp ) ( Horn )
+END_LD
+END_PROGRAM
+`
+	out, lineOf, err := TranspileWithLines(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"VAR blink__power : BOOL; END_VAR",
+		"blink__power := NOT lamp",
+		"Lamp := blink__power",
+		"Horn := blink__power",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "w_blink = ") {
+		t.Errorf("the condition is still a wire:\n%s", out)
+	}
+	lines := strings.Split(out, "\n")
+	if len(lineOf) != len(lines) {
+		t.Fatalf("line map has %d entries for %d lines", len(lineOf), len(lines))
+	}
+	for i, l := range lines {
+		if strings.HasPrefix(l, "VAR blink__power") && lineOf[i] != 3 {
+			t.Errorf("the power declaration maps to line %d, want 3 (LD)", lineOf[i])
+		}
+	}
+	if _, err := fbd.Compile(out); err != nil {
+		t.Fatalf("emitted FBD does not compile: %v\n%s", err, out)
+	}
+	if _, err := fbd.Graph(out); err != nil {
+		t.Fatalf("emitted FBD does not graph: %v", err)
+	}
+}
+
+func TestLadderWrapOr(t *testing.T) {
+	src := `PROGRAM p
+VAR_EXTERNAL A : BOOL; B : BOOL; C : BOOL; D : BOOL; Out : BOOL; END_VAR
+LD
+  RUNG r
+    A B C D ( Out )
+END_LD
+END_PROGRAM`
+	// Three selected elements → ONE branch of three legs, in series order,
+	// in place of the first; the paths' order doesn't matter.
+	edits, err := ApplyEdit(src, EditOp{Type: "wrapOr", Rung: "r", Paths: [][]int{{3}, {1}, {2}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := applyTextEdits(src, edits)
+	if !strings.Contains(out, "A [ B | C | D ] ( Out )") {
+		t.Fatalf("wrapOr:\n%s", out)
+	}
+	// A gap closes up: the unselected element stays in series after it.
+	edits, err = ApplyEdit(src, EditOp{Type: "wrapOr", Rung: "r", Paths: [][]int{{0}, {2}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applyTextEdits(src, edits); !strings.Contains(got, "[ A | C ] B D ( Out )") {
+		t.Fatalf("wrapOr with a gap:\n%s", got)
+	}
+	// Elements of two different legs are not one series.
+	edits, err = ApplyEdit(out, EditOp{Type: "wrapOr", Rung: "r", Paths: [][]int{{1, 0, 0}, {1, 1, 0}}})
+	if err == nil {
+		t.Fatalf("elements of DIFFERENT legs must be refused, got %v", edits)
+	}
+	for _, bad := range []EditOp{
+		{Type: "wrapOr", Rung: "r", Paths: [][]int{{1}}},
+		{Type: "wrapOr", Rung: "r", Paths: [][]int{{1}, {1}}},
+		{Type: "wrapOr", Rung: "r", Paths: [][]int{{1}, {9}}},
+		{Type: "wrapOr", Rung: "r", Paths: [][]int{{1}, {2}}, Coil: coilIdx(0)},
+	} {
+		if _, err := ApplyEdit(src, bad); err == nil {
+			t.Fatalf("%+v must be refused", bad)
+		}
+	}
+	// Nested: two contacts in one leg of an existing branch.
+	nested := strings.Replace(src, "A B C D ( Out )", "[ A B | C ] D ( Out )", 1)
+	edits, err = ApplyEdit(nested, EditOp{Type: "wrapOr", Rung: "r", Paths: [][]int{{0, 0, 0}, {0, 0, 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applyTextEdits(nested, edits); !strings.Contains(got, "[ [ A | B ] | C ] D ( Out )") {
+		t.Fatalf("wrapOr in a leg:\n%s", got)
 	}
 }

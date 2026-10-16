@@ -28,7 +28,9 @@ there are exactly four writers:
 
 1. a **seed** in the Go composition (initial value, exists from scan one),
 2. a **driver** delivering it as an input each scan,
-3. an **operator** writing it through the HMI or `POST /api/tags`,
+3. an **operator** writing a tag the project declares through the HMI or
+   `POST /api/tags` (a name nothing declares, a CONSTANT's included, is
+   refused with a 400 naming it, never created),
 4. the **program itself** assigning it (a coil write creates the tag).
 
 The one rule that bites: **writes create, reads fault.** Reading a tag
@@ -50,7 +52,12 @@ so you see this before the download, not after.)
   in the manifest, or declare it in VAR_EXTERNAL`.
 - **`VAR_EXTERNAL` stays legal** and wins for that program. When the tag
   states a `type:`, the declaration must agree with it — `VAR_EXTERNAL Speed
-  : BOOL` against `type: REAL` is an error at the declaration. Programs that
+  : BOOL` against `type: REAL` is an error at the declaration. When the tag
+  has only an `init:`, the declaration sets its type (`VAR_EXTERNAL Count :
+  DINT` with `init: 0` seeds a DINT), and the `init:` must be a value of
+  that type: `init: TRUE` against `VAR_EXTERNAL Speed : REAL` is an error
+  (`tag Speed (declared REAL by a program): init: want REAL, got a
+  boolean`), as is `init: 2.5` against a DINT. Programs that
   bind one untyped tag with different types (one declares `Count : DINT`,
   another reads `Count` implicitly as the REAL its `init: 0` implies) are an
   error naming both tasks; a `type:` on the tag settles it.
@@ -134,7 +141,17 @@ number`). A typed `setpoint` or `state` tag with no `init:` starts at the
 zero of its type. A type that is none of the above names what the project
 does declare (`type Widget is neither an IEC elementary type … nor a TYPE
 this project's ST declares (known: DoseRecipe, Motor)`); a function-block
-type is refused, since an instance is program state, not a tag.
+type is refused, since an instance is program state, not a tag. So is a
+type that holds one: an array of a block, standard or the project's own,
+at any nesting (`tag Timers: ARRAY[1..2] OF TON — TON is a function block;
+an instance is program state, not a tag`), and a TYPE whose STRUCT has a
+block member (`tag Line1: Station — member Delay is a TON, a function
+block; …`). A tag with no `type:` is held to the same rule through the
+type a program declares for it: `VAR_EXTERNAL Timers : ARRAY[1..2] OF
+TON;` naming a manifest tag is refused at load (`tag Timers: program Main
+declares it ARRAY[1..2] OF TON — TON is a function block; …`). An array of
+timers belongs in the program's `VAR`; publish the values it produces as
+tags.
 
 `GET /api/meta` reports each tag's declared type beside its `desc` and
 `unit`, and an enumeration's members, so a client can tell an enumerated
@@ -175,7 +192,7 @@ name to value, nested for a member that is itself a struct:
 
 ```yaml
 tags:
-  - name: WEL15_FIT_001
+  - name: ZONE15_FIT_001
     role: state
     type: AnalogInput
     init:
@@ -183,12 +200,12 @@ tags:
       RAWMAX: 32767.0
       HHSP: 2800.0
       ALMDLY: 5
-  - name: WEL15_SUP_015
+  - name: ZONE15_PMP_015
     role: state
     type: Motor1Speed
     init:
       STRTTMRSP: 30
-      LVL: { CTL1HSP: 60.0, CTL1LSP: 40.0 } # nested struct member
+      LVL: { HSP: 60.0, LSP: 40.0 } # nested struct member
 ```
 
 A `TIME` member (a recipe's step times) seeds from the ST literal
@@ -211,7 +228,7 @@ plain field assignments: the same setpoints, declared once where the tag
 already is, instead of duplicated as ST in every program that uses the type.
 
 An unknown member name is a load error naming the tag and the member path
-(`tag WEL15_FIT_001: init: unknown member RAWMN (did you mean RAWMIN?)`), and
+(`tag ZONE15_FIT_001: init: unknown member RAWMN (did you mean RAWMIN?)`), and
 a struct-typed tag given a scalar `init:` — rather than a mapping — is an
 error too. A generator (`naut eip tags`, `naut tags import-csv`)
 round-trips the same nested shape through a `tag-files:` entry.
@@ -224,15 +241,15 @@ you — `name` takes a dotted member path, to any depth:
 
 ```sh
 curl -X POST localhost:8080/api/tags \
-  -d '{"name": "WEL15_SUP_015.START", "value": true}'
+  -d '{"name": "ZONE15_PMP_015.START", "value": true}'
 curl -X POST localhost:8080/api/tags \
-  -d '{"name": "WEL15_SUP_015.LVL.CTL1HSP", "value": 60}'
+  -d '{"name": "ZONE15_PMP_015.LVL.HSP", "value": 60}'
 ```
 
 `value` may also be an object, to set several members of one tag at once:
 
 ```json
-{ "name": "WEL15_SUP_015", "value": { "START": true, "LVL": { "CTL1HSP": 60 } } }
+{ "name": "ZONE15_PMP_015", "value": { "START": true, "LVL": { "HSP": 60 } } }
 ```
 
 That is a **merge**: members the object doesn't name keep their **current**
@@ -242,12 +259,12 @@ plant is already running on.
 
 - **Nothing is created.** An unknown tag, a misspelled member, or a member
   path into a scalar tag is a `400` carrying the reason
-  (`tag WEL15_SUP_015: unknown member STRAT (did you mean START?)`), never a
-  new top-level tag literally named `WEL15_SUP_015.STRAT` — which no program
+  (`tag ZONE15_PMP_015: unknown member STRAT (did you mean START?)`), never a
+  new top-level tag literally named `ZONE15_PMP_015.STRAT` — which no program
   reads and a Sparkplug edge would publish as a bogus metric.
 - **The leaf keeps its type.** A number lands on a `REAL` member as a REAL
   and on a `DINT` member as an integer; a mismatch is
-  `tag WEL15_SUP_015.START: want BOOL, got a number`, not a silent retype.
+  `tag ZONE15_PMP_015.START: want BOOL, got a number`, not a silent retype.
 - **An enumerated member takes its name** — `{"name": "Recipe.Mode",
   "value": "Run"}`, any case, `Mode#Run` qualified, or the member's integer —
   and stores the named value, exactly as a write of a whole enumerated tag
@@ -270,7 +287,7 @@ The same dotted (and indexed) paths work everywhere else a tag is
 addressed: a test manifest's `given:`/`expect:`, a force, the built-in
 dashboard's tag table (expand a
 writable struct tag and each leaf is editable), and the HMI kit's
-`rt.writeTag('WEL15_SUP_015.START', true)`, which resolves to `null` on
+`rt.writeTag('ZONE15_PMP_015.START', true)`, which resolves to `null` on
 success or the controller's reason when it refuses.
 
 ## Observing scans: `Runtime.OnScan`

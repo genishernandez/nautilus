@@ -247,7 +247,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Latency > 0 {
 		time.Sleep(s.opts.Latency)
 	}
-	uri := Normalize(r.URL.Path)
+	// The tree is keyed by @odata.id, which is percent-encoded: match the
+	// request's escaped path, not the decoded one.
+	uri := Normalize(r.URL.EscapedPath())
 	switch {
 	case uri == "/redfish" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"v1": Root + "/"})

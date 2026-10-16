@@ -13,8 +13,11 @@
 //     retyped needs a download, because an online edit cannot create tags.
 //  3. Do the one asked for. An online edit replaces the routine's rungs in
 //     the running program with FinalizeEdits and leaves the controller's
-//     mode alone. A download stops the controller and resets its tags; the
-//     caller confirms it, never this package.
+//     mode alone. A download stops the controller and replaces its
+//     project; the caller confirms it, never this package. Unless asked to
+//     reset them, a download keeps the controller's tag values (values.go):
+//     the upload of step 2 comes first, and its values go into the project
+//     before the build.
 //  4. Upload again and compare with what was sent. A deploy that cannot
 //     prove it landed is reported as failed.
 package deploy
@@ -72,8 +75,16 @@ type Target struct {
 	// Tags are the manifest's tags and their IEC types (writer.Options.Tags):
 	// a rung naming one without VAR_EXTERNAL still gets its controller tag.
 	Tags map[string]string
+	// AllTags writes every manifest tag, named by the program or not
+	// (writer.Options.AllTags); ControllerScoped the program variables
+	// written at controller scope (writer.Options.ControllerScoped).
+	AllTags          bool
+	ControllerScoped []string
 	// Side is the side code to emit (writer.Side).
 	Side writer.Side
+	// Hardware is the project's I/O configuration (writer.Options.Hardware);
+	// nil writes the controller's Local module only.
+	Hardware *writer.Hardware
 	// Language is the program's language, "ld" (default) or "st".
 	Language string
 }
@@ -94,6 +105,10 @@ type Options struct {
 	// ProgramMode asks the SDK to put the controller in Program mode
 	// before a download; the SDK will not do it on its own.
 	ProgramMode bool
+	// ResetValues makes a download start every tag at the project's
+	// value. By default a download keeps the controller's values of the
+	// tags that survive it unchanged (PlanValues has the rule).
+	ResetValues bool
 	// Keep, when set, receives every artifact: the generated L5X files,
 	// the built ACD, the controller's before/after exports.
 	Keep func(name string, raw []byte)
@@ -120,6 +135,10 @@ type Report struct {
 	Replaced              uint32
 	Verified              bool
 	Elapsed               time.Duration
+	// Values is what a download did with the controller's tag values (for
+	// a build, what one would do); nil when they were not looked at — an
+	// online edit, a reset, or a controller with nothing to upload.
+	Values *ValuePlan
 }
 
 // DiagError carries the writer's rule diagnostics: the program is outside
@@ -155,6 +174,60 @@ func (e *VerifyError) Error() string {
 	return fmt.Sprintf("verification failed: the controller does not run what was sent (%d difference(s))", len(e.Diffs))
 }
 
+// StartStateError says the controller refused a download because of the
+// mode it is in: the SDK's RxE_INVALID_START_STATE ("Invalid start
+// state. Internal error."), which is what a download to a controller in
+// Run answers when it was not asked to switch to Program mode first. Raw
+// is the SDK's own error with its status lines, for the record.
+type StartStateError struct {
+	// Mode is the controller's mode before the download, when it was read.
+	Mode string
+	Raw  error
+}
+
+func (e *StartStateError) Error() string {
+	mode := "is not in Program mode"
+	if e.Mode != "" {
+		mode = "is in " + e.Mode + " mode"
+	}
+	return "the controller " + mode + ", and a download needs it in Program mode: download again with " +
+		"\"Switch to Program Mode and Download\" (naut logix deploy --download --program-mode), " +
+		"or put the controller in Program mode first"
+}
+
+func (e *StartStateError) Unwrap() error { return e.Raw }
+
+// controllerMode reads the controller's mode through a session on its
+// uploaded project, "" when it cannot be read: a failed read must not
+// block a download.
+func controllerMode(ctx context.Context, c *logixd.Client, acdRel, commPath string) string {
+	s, err := c.Open(ctx, acdRel)
+	if err != nil {
+		return ""
+	}
+	defer s.Close(context.Background())
+	if _, err := s.SetCommPath(ctx, commPath); err != nil {
+		return ""
+	}
+	mode, err := s.Mode(ctx)
+	if err != nil {
+		return ""
+	}
+	return string(mode)
+}
+
+// inRun says a controller mode is Run or Remote Run.
+func inRun(mode string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	return m == "run" || m == "remote run"
+}
+
+// invalidStartState recognizes the SDK's refusal to download to a
+// controller in the wrong mode.
+func invalidStartState(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "RxE_INVALID_START_STATE")
+}
+
 // Run deploys one ladder program. The Report is returned with whatever
 // was measured even when err is set.
 func Run(ctx context.Context, src string, o Options) (*Report, error) {
@@ -181,6 +254,7 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 		Controller: t.Controller, Program: t.Program, Routine: t.Routine, Task: t.Task,
 		PeriodMs: t.PeriodMs, ProcessorType: t.Processor, MajorRev: major, MinorRev: minor, Libs: t.Libs,
 		Inits: t.Inits, Descs: t.Descs, Aliases: t.Aliases, Tags: t.Tags, Side: t.Side,
+		AllTags: t.AllTags, ControllerScoped: t.ControllerScoped, Hardware: t.Hardware,
 	}
 	full, diags, err := t.write(src, wopts)
 	if err != nil {
@@ -202,7 +276,6 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	rep.Routine = gen.Controller.Programs[0].Routines[0].Name
 	routine := gen.Controller.Programs[0].Routines[0]
 	rep.Rungs = len(routine.Rungs)
-	keep(rep.Controller+".L5X", full)
 	if t.Language == "st" {
 		rungs, _, _ = writer.WriteRoutine("program.st", src, wopts)
 		keep(rep.Controller+".routine.L5X", rungs)
@@ -221,6 +294,73 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	}
 	fullRel, rungsRel, acdRel := rel(rep.Controller+".L5X"), rel(partialName), rel(rep.Controller+".ACD")
 
+	upload := func(name string) (*l5x.File, []byte, error) {
+		acd, lx := rel(name+".ACD"), rel(name+".L5X")
+		if evs, err := c.UploadToNew(ctx, t.CommPath, acd); err != nil {
+			return nil, nil, withEvents("upload "+name, err, evs)
+		}
+		if _, evs, err := c.Convert(ctx, acd, lx, false); err != nil {
+			return nil, nil, withEvents("convert "+name, err, evs)
+		}
+		raw, err := c.GetFile(ctx, lx)
+		if err != nil {
+			return nil, nil, err
+		}
+		keep(name+".L5X", raw)
+		f, err := l5x.Parse(raw)
+		return f, raw, err
+	}
+	var before *l5x.File
+	var beforeRaw []byte
+	uploadBefore := func() error {
+		var err error
+		before, beforeRaw, err = upload("before")
+		if err != nil {
+			if !controllerEmpty(err) {
+				return err
+			}
+			// A controller with no project in it cannot be uploaded from
+			// (RxE_NOT_FOUND). That is not a failure: it is the first
+			// download, and the comparison below is against nothing.
+			logf("the controller at %s has no project in it", t.CommPath)
+			before, beforeRaw = &l5x.File{Controller: &l5x.Controller{}}, nil
+		}
+		return nil
+	}
+
+	// 0. A download keeps the controller's values: upload what runs
+	// first and write its values into the project before the build, so
+	// the download carries them. (The values are the upload's: a value
+	// the program changes between the upload and the download, about
+	// the import + build's time, is not carried.)
+	var plan *ValuePlan
+	if o.Mode == Download && t.CommPath != "" && (!o.ResetValues || !o.ProgramMode) {
+		if err := uploadBefore(); err != nil {
+			return done(err)
+		}
+		// A plain download to a controller in Run is refused by the SDK
+		// only after the whole import and build (~76 s on a real
+		// controller): read the mode now and refuse in seconds (#391).
+		if !o.ProgramMode && beforeRaw != nil {
+			if mode := controllerMode(ctx, c, rel("before.ACD"), t.CommPath); inRun(mode) {
+				rep.ModeBefore = mode
+				logf("the controller at %s is in %s mode; a download needs Program mode", t.CommPath, mode)
+				return done(&StartStateError{Mode: mode})
+			}
+		}
+		if beforeRaw != nil && !o.ResetValues {
+			if plan, err = PlanValues(gen, beforeRaw); err != nil {
+				return done(err)
+			}
+			if full, err = plan.Apply(full); err != nil {
+				return done(fmt.Errorf("keeping tag values: %w", err))
+			}
+			rep.Values = plan
+			logf("%s", plan.Summary())
+		}
+	}
+	keep(rep.Controller+".L5X", full)
+
 	// 1. Import + build.
 	if err := c.PutFile(ctx, fullRel, full); err != nil {
 		return done(err)
@@ -236,6 +376,14 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 		// project with the program emptied, then the program over it.
 		skeleton, _, _ := writer.WriteSkeleton("program."+langOf(t), src, wopts)
 		program, _, _ := writer.WriteProgramPartial("program."+langOf(t), src, wopts)
+		if plan != nil {
+			if skeleton, err = plan.Apply(skeleton); err != nil {
+				return done(fmt.Errorf("keeping tag values: %w", err))
+			}
+			if program, err = plan.Apply(program); err != nil {
+				return done(fmt.Errorf("keeping tag values: %w", err))
+			}
+		}
 		skelRel, progRel := rel(rep.Controller+".skeleton.L5X"), rel(rep.Controller+".program.L5X")
 		keep(rep.Controller+".skeleton.L5X", skeleton)
 		keep(rep.Controller+".program.L5X", program)
@@ -290,31 +438,17 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	}
 
 	// 2. What is running.
-	upload := func(name string) (*l5x.File, error) {
-		acd, lx := rel(name+".ACD"), rel(name+".L5X")
-		if evs, err := c.UploadToNew(ctx, t.CommPath, acd); err != nil {
-			return nil, withEvents("upload "+name, err, evs)
-		}
-		if _, evs, err := c.Convert(ctx, acd, lx, false); err != nil {
-			return nil, withEvents("convert "+name, err, evs)
-		}
-		raw, err := c.GetFile(ctx, lx)
-		if err != nil {
-			return nil, err
-		}
-		keep(name+".L5X", raw)
-		return l5x.Parse(raw)
-	}
-	before, err := upload("before")
-	if err != nil {
-		if !controllerEmpty(err) {
+	if before == nil {
+		if err := uploadBefore(); err != nil {
 			return done(err)
 		}
-		// A controller with no project in it cannot be uploaded from
-		// (RxE_NOT_FOUND). That is not a failure: it is the first
-		// download, and the comparison below is against nothing.
-		logf("the controller at %s has no project in it", t.CommPath)
-		before = &l5x.File{Controller: &l5x.Controller{}}
+		if o.Mode == BuildOnly && beforeRaw != nil {
+			// What a download would do with the values, for the report.
+			if p, err := PlanValues(gen, beforeRaw); err == nil {
+				rep.Values = p
+				logf("on a download, %s", p.Summary())
+			}
+		}
 	}
 	want := l5x.LogicOf(gen)
 	have := l5x.LogicOf(before)
@@ -397,7 +531,14 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 		}
 		evs, err := s.Download(ctx, o.ProgramMode)
 		if err != nil {
-			return done(withEvents("download", err, evs))
+			err = withEvents("download", err, evs)
+			// Asked for Program mode and still refused (a keyswitch in
+			// RUN, a fault): the hint would be wrong, so the SDK's
+			// answer goes as it is.
+			if !o.ProgramMode && invalidStartState(err) {
+				err = &StartStateError{Mode: rep.ModeBefore, Raw: err}
+			}
+			return done(err)
 		}
 		mode, _ := s.Mode(ctx)
 		_, _ = s.GoOffline(context.Background())
@@ -406,7 +547,7 @@ func Run(ctx context.Context, src string, o Options) (*Report, error) {
 	}
 
 	// 4. Verify.
-	after, err := upload("after")
+	after, _, err := upload("after")
 	if err != nil {
 		return done(fmt.Errorf("verify: %w", err))
 	}

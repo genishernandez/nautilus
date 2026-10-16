@@ -2,12 +2,13 @@ PROGRAM CoilsLd
 VAR_EXTERNAL
     A, B, SetIn, RstIn, CLK : BOOL;
     N : INT;
-    ld_Latch, ld_P, ld_N, ld_RiseC, ld_FallC, ld_CntDone, ld_NotZero, ld_Br : BOOL;
+    ld_Latch, ld_P, ld_N, ld_RiseC, ld_FallC, ld_CntDone, ld_NotZero, ld_Br, ld_Mid : BOOL;
     ld_Cnt : INT;
 END_VAR
 VAR
     cnt : CTU;
     brt : TON;
+    mdt : TON;
 END_VAR
 LD
   RUNG set
@@ -30,5 +31,7 @@ LD
     /EQ(N, 0) ( ld_NotZero )
   RUNG branch
     [ A | [ B | CLK ] brt:TON(PT := T#3ms) ] ( ld_Br )
+  RUNG mid (* a block mid-rung: its Q carries power on to B and the coil *)
+    A mdt:TON(PT := T#3ms) B ( ld_Mid )
 END_LD
 END_PROGRAM

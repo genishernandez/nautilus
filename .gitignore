@@ -16,6 +16,10 @@ tools/vscode-iec/.vscode-test/
 # Local QA scaffolds from `naut new`
 /demo/
 
+# Local live-site test project (real site hostnames and tag names); never commit
+/examples/client60/
+
 # Locally built binaries
 /nautilus
 /naut
+*.exe

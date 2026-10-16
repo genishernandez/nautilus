@@ -98,8 +98,8 @@ naut modbus import --map devices.yaml
   `Well2_Pump1`, `Booster1_Pump1`, `Booster1_Pump2`), each guarded on its
   own site's `__Online`.
 - **`SystemDemandLps`** — Booster 1's discharge flow meter
-  (`Booster1_plc1_FM1_FlowLps`), guarded on the *device's own*
-  `Booster1_plc1__Online` — a Modbus device attached to a Sparkplug node
+  (`Booster1_FM1_FM1_FlowLps`), guarded on the *device's own*
+  `Booster1_FM1__Online` — a Modbus device attached to a Sparkplug node
   has its own online companion, distinct from the node's.
 - **`TankLevelPct`** — the distribution tank level, read at Booster 1;
   guarded the same way, reading 0 (not the last-known level) once

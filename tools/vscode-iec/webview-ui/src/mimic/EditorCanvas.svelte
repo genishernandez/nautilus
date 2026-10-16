@@ -33,7 +33,7 @@
 	import { DEMO_PROPS, registry } from './registry';
 	import { resolvePorts, type Port } from './ports';
 	import { fmtFraction, newPortAtFreeSlot, newPortAtPoint, nudgePort, roundPort, toFraction } from './portsGestures';
-	import { minInteriorPoints, resolveDraftFinish, type NamedPort } from './pipeDraft';
+	import { minInteriorPoints, nearestPort, resolveDraftFinish, type NamedPort } from './pipeDraft';
 	import { suggestRoute, type ObstacleRect } from './autoroute';
 	import { canvasBox, ed, GRID, postManifestOp, postOp, snap, type MimicOp } from './mimicState.svelte';
 	import { clipEquipment, pasteOps, type MimicClip } from './mimicClip';
@@ -191,14 +191,11 @@
 	 * (NamedPort's shape is imported from pipeDraft.ts — the one other place
 	 * that needs to reason about a "point that might be a port".) */
 	function portSnapNamed(p: [number, number]): NamedPort | null {
+		const all: NamedPort[] = [];
 		for (const eq of doc?.equipment ?? []) {
-			for (const port of eqPorts(eq)) {
-				if (Math.hypot(port.x - p[0], port.y - p[1]) <= PORT_SNAP) {
-					return { equip: eq.id, port: port.name, x: port.x, y: port.y };
-				}
-			}
+			for (const port of eqPorts(eq)) all.push({ equip: eq.id, port: port.name, x: port.x, y: port.y });
 		}
-		return null;
+		return nearestPort(p, all, PORT_SNAP);
 	}
 	function portSnap(p: [number, number]): [number, number] | null {
 		const n = portSnapNamed(p);

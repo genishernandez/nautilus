@@ -3,6 +3,7 @@ package project
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -205,8 +206,9 @@ func TestSparkplugConfig(t *testing.T) {
 sparkplug:
   broker: "tcp://localhost:1883"
   group-id: Joy
-  device: plc
+  writable: ["Setpoint"]
   store-forward: 5000
+  flatten-udts: true
   default-class: { deadband: 0.5, max-interval: 30s }
   classes:
     fast: { deadband: 0.1, max-interval: 5s }
@@ -227,6 +229,9 @@ sparkplug:
 	if err != nil || node == nil {
 		t.Fatalf("node: %v, %v", node, err)
 	}
+	if !p.sparkplug.FlattenUDTs {
+		t.Error("flatten-udts: true did not parse")
+	}
 
 	// No section → no node; missing group-id → a readable error.
 	p2, _ := Load(fsys(manifest), "")
@@ -239,6 +244,68 @@ sparkplug:
 	}
 	if _, err := p3.Sparkplug(rt); err == nil {
 		t.Fatal("missing group-id must error")
+	}
+}
+
+// primary-host-offline: buffer (the default) or disconnect, the latter only
+// with a primary host to watch.
+func TestSparkplugPrimaryHostOffline(t *testing.T) {
+	section := func(extra string) string {
+		return manifest + "\nsparkplug:\n  broker: tcp://x:1883\n  group-id: Joy\n" + extra
+	}
+	for _, ok := range []string{
+		"",
+		"  primary-host: ScadaHost\n",
+		"  primary-host: ScadaHost\n  primary-host-offline: buffer\n",
+		"  primary-host: ScadaHost\n  primary-host-offline: disconnect\n",
+	} {
+		p, err := Load(fsys(section(ok)), "")
+		if err != nil {
+			t.Fatalf("%q: %v", ok, err)
+		}
+		rt, err := runtime.New(p.Runtime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := p.Sparkplug(rt); err != nil || n == nil {
+			t.Fatalf("%q: node %v, %v", ok, n, err)
+		}
+	}
+	for extra, want := range map[string]string{
+		"  primary-host-offline: disconnect\n":                        "needs primary-host",
+		"  primary-host: ScadaHost\n  primary-host-offline: ndeath\n": `"ndeath" is not buffer or disconnect`,
+	} {
+		_, err := Load(fsys(section(extra)), "")
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: error %v, want one containing %q", extra, err, want)
+		}
+	}
+}
+
+// store-forward-file journals the store-forward buffer; it needs that
+// buffer, and the node it builds starts with the file.
+func TestSparkplugStoreForwardFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "sf.log")
+	section := func(extra string) string {
+		return manifest + "\nsparkplug:\n  broker: tcp://x:1883\n  group-id: Joy\n" + extra
+	}
+	p, err := Load(fsys(section("  store-forward: 50\n  store-forward-file: "+file+"\n")), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.sparkplug.StoreForwardFile; got != file {
+		t.Fatalf("store-forward-file = %q, want %q", got, file)
+	}
+	rt, err := runtime.New(p.Runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := p.Sparkplug(rt); err != nil || n == nil {
+		t.Fatalf("node %v, %v", n, err)
+	}
+	_, err = Load(fsys(section("  store-forward-file: sf.log\n")), "")
+	if err == nil || !strings.Contains(err.Error(), "store-forward-file needs store-forward") {
+		t.Fatalf("store-forward-file without store-forward: %v", err)
 	}
 }
 
@@ -413,6 +480,7 @@ func TestHostStatusHoldsStillWhileOnlyTrafficMoves(t *testing.T) {
 		{"a sequence gap", func(st *sphost.Status) { st.SeqGaps++ }},
 		{"an unmanifested metric", func(st *sphost.Status) { st.Unknown++ }},
 		{"a write dropped", func(st *sphost.Status) { st.WriteDrops++ }},
+		{"an array write refused", func(st *sphost.Status) { st.WritesRefused++ }},
 		{"a command parked for a dark site", func(st *sphost.Status) { st.QueuedWrites++ }},
 		{"a rebirth stamp", func(st *sphost.Status) { st.Nodes[1].BirthMs += 1000 }},
 		{"the broker dropping", func(st *sphost.Status) { st.Connected = false }},

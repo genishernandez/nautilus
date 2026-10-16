@@ -22,6 +22,7 @@ import {
 	siteVlans,
 	vlanColors,
 	vlanDomains,
+	ringsOf,
 	vlanFloors,
 	islandsOf,
 	DEFAULT_VLAN_COLOR
@@ -217,6 +218,40 @@ describe('VLAN domains', () => {
 		expect(plugged[i].check.verdict).toBe('contradicted');
 		const lit = vlanDomains(p2, checkAllVlans(p2, tags), tags, plugged).find((d) => d.id === 21)!;
 		expect(lit.devices.includes('site')).toBe(true);
+	});
+	it('keeps each ERPS ring’s protection state to its own ring', () => {
+		// Two rings of three switches, no shared switch: a failed link in ring
+		// B opens B's protection link; A's stays blocked.
+		const sws = ['a1', 'a2', 'a3', 'b1', 'b2', 'b3'];
+		const ring = (p: string, extra: Record<string, unknown> = {}) => [
+			{ kind: 'ring', a: `${p}1/x`, b: `${p}2/x`, ...extra },
+			{ kind: 'ring', a: `${p}2/x`, b: `${p}3/x`, ...extra },
+			{ kind: 'ring', a: `${p}3/x`, b: `${p}1/x`, rpl: true, ...extra }
+		];
+		const two = (links: Topology['links']): Topology => ({
+			site: 'test',
+			vlans: [{ id: 10, name: 'data' }],
+			devices: sws.map((id) => ({ id, kind: 'switch', tag: id.toUpperCase() })),
+			links
+		}) as unknown as Topology;
+		const domains = (t: Topology, down: number) => {
+			const checks = t.links.map(() => ({ carries: [10] })) as unknown as ReturnType<typeof checkAllVlans>;
+			const cables = t.links.map((_, i) => ({ check: { verdict: i === down ? 'down' : 'consistent' } as LinkCheck }));
+			return vlanDomains({ topology: t, profileOf: () => undefined }, checks, {}, cables).find((d) => d.id === 10)!;
+		};
+		const t = two([...ring('a'), ...ring('b')]);
+		expect([...new Set(ringsOf(t).values())].length).toBe(2);
+		const v = domains(t, 3); // b1 ↔ b2
+		expect(v.links.find((l) => l.index === 2)?.blocked).toBe(true);
+		expect(v.links.find((l) => l.index === 5)?.blocked).toBe(false);
+		// Rings sharing a switch join into one run unless the plan names them.
+		const shared = (named: boolean) =>
+			two([...ring('a', named ? { ring: 'A' } : {}), ...ring('a', named ? { ring: 'B' } : {}).map((l) => ({ ...l, a: l.a.replace('a2', 'b2').replace('a3', 'b3'), b: l.b.replace('a2', 'b2').replace('a3', 'b3') }))]);
+		expect([...new Set(ringsOf(shared(false)).values())].length).toBe(1);
+		expect([...new Set(ringsOf(shared(true)).values())].length).toBe(2);
+		const n = domains(shared(true), 3); // a1 ↔ b2, ring B
+		expect(n.links.find((l) => l.index === 2)?.blocked).toBe(true);
+		expect(n.links.find((l) => l.index === 5)?.blocked).toBe(false);
 	});
 	it('lays the VLANs out as floors, each device where the mesh puts it', () => {
 		const tags = planned();

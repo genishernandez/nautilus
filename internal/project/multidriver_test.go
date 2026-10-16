@@ -6,12 +6,22 @@ package project
 // refuses to load naming both; and each child keeps its own status row.
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
+
+	mqttsrv "github.com/mochi-mqtt/server/v2"
+	"github.com/mochi-mqtt/server/v2/hooks/auth"
+	"github.com/mochi-mqtt/server/v2/listeners"
+	"github.com/mochi-mqtt/server/v2/packets"
 
 	nio "github.com/joyautomation/nautilus/io"
+	sphost "github.com/joyautomation/nautilus/sparkplug/host"
 )
 
 // multiBase is a manifest with the shared driver: block stripped, ready for
@@ -24,9 +34,14 @@ func multiBase() string {
 // current driver that builds fully offline, which is what makes multi-driver
 // projects checkable in CI with no hardware anywhere.
 func hostDriverYAML(indent, hostID, group, manifestFile string) string {
+	return hostDriverYAMLAt(indent, "tcp://mqtt.invalid:1883", hostID, group, manifestFile)
+}
+
+// hostDriverYAMLAt is hostDriverYAML against a broker of the caller's.
+func hostDriverYAMLAt(indent, broker, hostID, group, manifestFile string) string {
 	i := indent
 	return i + "- type: sparkplug-host\n" +
-		i + "  broker: tcp://mqtt.invalid:1883\n" +
+		i + "  broker: " + broker + "\n" +
 		i + "  host-id: " + hostID + "\n" +
 		i + "  group-id: " + group + "\n" +
 		i + "  manifest: " + manifestFile + "\n"
@@ -60,9 +75,48 @@ func TestDriversOneEntryIsSugarForDriver(t *testing.T) {
 	}
 }
 
+// startBroker brings up an in-process MQTT broker on a free loopback port
+// and returns its URL; it is closed when the test ends. The close goes
+// round mochi-mqtt/server#488 the way sparkplug/host's closeBroker does
+// (see there): the listener is closed with a no-op client sweep, and
+// clients are disconnected from a copy while srv.Close waits.
+func startBroker(t *testing.T) string {
+	t.Helper()
+	srv := mqttsrv.New(&mqttsrv.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err := srv.AddHook(new(auth.AllowHook), nil); err != nil {
+		t.Fatal(err)
+	}
+	tcp := listeners.NewTCP(listeners.Config{ID: "t", Address: "127.0.0.1:0"})
+	if err := srv.AddListener(tcp); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(func() {
+		srv.Listeners.Close("t", func(string) {})
+		done := make(chan error, 1)
+		go func() { done <- srv.Close() }()
+		for {
+			for _, cl := range srv.Clients.GetAll() {
+				if !cl.Closed() {
+					_ = srv.DisconnectClient(cl, packets.ErrServerShuttingDown)
+				}
+			}
+			select {
+			case <-done:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	})
+	return "tcp://" + tcp.Address()
+}
+
 func TestDriversBuildAMultiWithStatusRows(t *testing.T) {
+	// central-a's broker is real (and comes up below); central-b's does
+	// not exist.
+	broker := startBroker(t)
 	files := fsys(multiBase() + "drivers:\n" +
-		hostDriverYAML("  ", "central-a", "GA", "a.yaml") +
+		hostDriverYAMLAt("  ", broker, "central-a", "GA", "a.yaml") +
 		hostDriverYAML("  ", "central-b", "GB", "b.yaml"))
 	files["a.yaml"] = &fstest.MapFile{Data: []byte(hostManifestYAML("GA", "W1", "W1_Level"))}
 	files["b.yaml"] = &fstest.MapFile{Data: []byte(hostManifestYAML("GB", "W9", "W9_Level"))}
@@ -108,15 +162,41 @@ func TestDriversBuildAMultiWithStatusRows(t *testing.T) {
 		t.Fatalf("row names: %q %q", rows[0].Name, rows[1].Name)
 	}
 
-	// And the Sparkplug device: health gate is ALL children healthy — with
-	// neither broker connected it must read unhealthy, never nil (nil would
-	// birth the device unconditionally).
-	health := driverHealth(p.Runtime.Driver)
-	if health == nil {
-		t.Fatal("driverHealth(multi of hosts) = nil, want a real gate")
+	// And each child is its own Sparkplug device with its own health gate —
+	// with neither broker connected both must read unhealthy, never nil
+	// (nil would birth the device unconditionally).
+	devs, err := sparkplugDevices(p.drivers)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if health() {
-		t.Fatal("both brokers are unreachable; the device must not read healthy")
+	if len(devs) != 2 || devs[0].ID != "sparkplug-host" || devs[1].ID != "sparkplug-host-2" {
+		t.Fatalf("devices = %+v, want one per child, named after it", devs)
+	}
+	for _, d := range devs {
+		if d.Health == nil || d.Health() {
+			t.Errorf("device %s: its broker is not connected; it must not read healthy", d.ID)
+		}
+	}
+
+	// One bus up and one down: the connected child's device reads healthy
+	// and the other's does not — one dead bus takes only its own device
+	// offline. Both-down alone cannot tell a per-child gate from one
+	// shared by every child (all-up or any-up).
+	up, ok := multi.Children()[0].Driver.(*sphost.Driver)
+	if !ok {
+		t.Fatalf("child 0 = %T, want *host.Driver", multi.Children()[0].Driver)
+	}
+	up.Start(context.Background())
+	defer up.Stop()
+	deadline := time.Now().Add(10 * time.Second) // bounds a broken gate, not a working one
+	for !devs[0].Health() {
+		if time.Now().After(deadline) {
+			t.Fatalf("device %s: connected to its broker (%+v) but never read healthy", devs[0].ID, up.Status())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if devs[1].Health() {
+		t.Errorf("device %s: its broker is down; it read healthy because %s's is up", devs[1].ID, devs[0].ID)
 	}
 	if h := driverHealth(nio.NewMemory()); h != nil {
 		t.Fatal("memory has no connection to be down; its health gate must stay nil")

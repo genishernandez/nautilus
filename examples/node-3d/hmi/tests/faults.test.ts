@@ -62,6 +62,34 @@ describe('faultsFor: what a part offers', () => {
 	});
 });
 
+describe("faultsFor: a switch port's VLAN faults", () => {
+	const port = { AdminDown: false, Down: false, ErrorRate: 0, SpeedMbps: 0, Pvid: 0, Prune: 0, Access: 0 };
+	const site = [20, 21, 22, 251];
+	const vlanItems = (fs: { member: string; label: string; set: boolean | number; clear: boolean | number; on: boolean }[]) =>
+		fs.filter((f) => ['Pvid', 'Prune', 'Access'].includes(f.member)).map((f) => [f.label, f.set, f.clear, f.on]);
+	it('never offers VLAN 1 (the default) blind: without the port’s VLANs, nothing to set', () =>
+		assert.deepEqual(vlanItems(faultsFor({ Sim_SW1_Port27: port }, ['Sim_SW1_Port27'])), []));
+	it('a trunk: a native and an access VLAN it is not in, a VLAN it carries to prune', () =>
+		assert.deepEqual(vlanItems(faultsFor({ Sim_SW1_Port27: port }, ['Sim_SW1_Port27'], { site, native: 1, tagged: [20, 21, 22, 251] })), [
+			['native 20', 20, 0, false],
+			['prune 20', 20, 0, false],
+			['access 20', 20, 0, false]
+		]));
+	it('an access port in 22: moved elsewhere, nothing tagged to prune', () =>
+		assert.deepEqual(vlanItems(faultsFor({ Sim_SW3_Port24: port }, ['Sim_SW3_Port24'], { site, native: 22, tagged: [] })), [
+			['native 20', 20, 0, false],
+			['access 20', 20, 0, false]
+		]));
+	it('one that is set shows its VLAN, and clears with 0, with or without the context', () => {
+		const set = { Sim_SW2_Port28: { ...port, Prune: 21 } };
+		assert.deepEqual(vlanItems(faultsFor(set, ['Sim_SW2_Port28'])), [['prune 21', 21, 0, true]]);
+		assert.deepEqual(
+			activeFaults(set).map((f) => [f.who, f.label, f.value]),
+			[['SW2 Port28', 'prune 21', 21]]
+		);
+	});
+});
+
 describe('simTagsFor: the structs a right-click reads', () => {
 	it('a port: its own, its cable by either end, then its device', () =>
 		assert.deepEqual(simTagsFor('NODE3_Nic_Slot3_P2', ['SW3_Port25', 'NODE3_Nic_Slot3_P2'], 'NODE3'), [

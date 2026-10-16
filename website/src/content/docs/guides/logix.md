@@ -13,7 +13,97 @@ program of record; nautilus supplies the software engineering around it.
 Logix project from it, is [Authoring for Logix](/guides/logix-authoring/),
 which is experimental.)
 
-There are two halves, and the first needs nothing from Rockwell at all.
+## From an `.ACD` to live rungs, in three steps
+
+The whole path, start to finish. Each step names the release it needs;
+[install the latest `naut`](/getting-started/#1-install-the-cli) and every
+step works.
+
+### 1. Convert the project to text: `naut logix convert`
+
+**Needs:** `naut` v0.11.0 or later, and a [`logixd`
+agent](#half-two-driving-a-project--the-logixd-agent) on a Windows machine
+with a licensed Studio 5000 and the Logix Designer SDK.
+
+An `.ACD` is a binary database only Logix Designer can open. `logixd` asks
+the SDK to save it as L5X: the file goes up, the L5X comes back, and
+`naut` runs on any OS.
+
+```bash
+export NAUTILUS_LOGIXD_URL=http://plc-box:8188    # where logixd listens
+export NAUTILUS_LOGIXD_TOKEN=...                  # %ProgramData%\logixd\logixd.token on that machine
+
+naut logix convert DemoLine.ACD DemoLine.L5X
+
+# A whole folder of projects:
+for f in projects/*.ACD; do naut logix convert "$f" "${f%.*}.L5X"; done
+```
+
+`--agent` and `--token` set the same two things per command. With neither,
+`naut` tries `http://127.0.0.1:8188`, so if `logixd` stays on loopback
+(the installer's default) reach it through an SSH tunnel instead of opening
+a port:
+
+```bash
+ssh -N -L 8188:127.0.0.1:8188 you@plc-box &       # Windows OpenSSH Server
+naut logix convert DemoLine.ACD DemoLine.L5X      # token still required
+```
+
+`logixd` installs with one command on that machine; see [Install
+it](#install-it).
+
+### 2. Import it as a nautilus project: `naut logix import --project`
+
+**Needs:** `naut` v0.16.0 or later. No Rockwell software.
+
+```bash
+naut logix import --project demoline DemoLine.L5X
+```
+
+```
+wrote demoline/MainProgram.ld
+wrote demoline/nautilus.yaml
+wrote demoline/tags/logix.yaml
+1 ladder routine, 1 complete; 2 rungs, 2 carried
+```
+
+Every ladder routine becomes a nautilus PROGRAM in ladder source, with its
+rung comments, its tags' descriptions and their initial values
+(`HiLevelSP : REAL := 85.0`). The manifest gets `target: logix`, so
+`naut check --target logix demoline` passes on what came across. A rung
+with no nautilus form is kept as a comment and counted under *not
+carried*, never guessed at. What the import covers, and what you do with
+the project afterwards, is in [Authoring for Logix → Bringing an existing
+program in](/guides/logix-authoring/#bringing-an-existing-program-in).
+
+### 3. Watch it run: `naut logix serve` and the editor
+
+**Needs:** `naut` v0.16.1 or later, and the VS Code extension 0.14.0 or
+later (stable channel; on the pre-release channel, 0.13.1 or later). An
+older extension draws the rungs but shows no values on program-scope tags.
+An older `naut` (from v0.14.0) serves values, but the first write after
+half a minute without one is refused with `EOF`.
+
+```bash
+naut logix serve --host 10.0.0.20 --l5x DemoLine.L5X
+```
+
+Set `nautilus.runtimeUrl` to `http://localhost:8080` and open
+`DemoLine.L5X`. The rungs light up with the controller's values. Program
+tags are served as `<Program>_<Tag>` (`MainProgram_StartPB`), and the
+ladder view finds them from the rung's own `StartPB`. To write a setpoint,
+click the pencil on a tag in the **Live Values** panel (or right-click it,
+*Set Live Value…*); the write goes to the controller. [Live values from a running
+controller](#live-values-from-a-running-controller) has the details.
+
+No controller to hand? `naut logix emulate --l5x DemoLine.L5X` serves the
+export's tags as a ControlLogix on `127.0.0.1:44818`; point `serve` at it
+with `--host 127.0.0.1`.
+
+---
+
+The rest of this page is the reference behind those steps. There are two
+halves, and the first needs nothing from Rockwell at all.
 
 ## Half one: reading L5X — no Rockwell software
 
@@ -148,11 +238,32 @@ your laptop / CI  ──HTTPS+token──▶  logixd (Windows)  ──gRPC──
 |---|---|
 | Studio 5000 Logix Designer | **v31+**; **v37+** for `build`. Projects older than v31 are not supported. |
 | Logix Designer SDK | 2.02.00 or later (installs `LdSdkService`). |
-| .NET SDK | 10.x, to build `logixd`. |
+| .NET SDK | 10.x, to build `logixd`. The one-line install adds a private one if there is none. |
 | FactoryTalk Linx | The SDK supports **only** FactoryTalk Linx — RSLinx is not supported. Your controller must be visible in the FT Linx Network Browser. |
 | OS | 64-bit only. |
 
 ### Install it
+
+In an **elevated** PowerShell on the licensed machine:
+
+```powershell
+irm https://github.com/joyautomation/nautilus/releases/latest/download/install-logixd.ps1 | iex
+```
+
+To pass options (any of `install.ps1`'s; `-Version 0.16.2` pins a release):
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/joyautomation/nautilus/releases/latest/download/install-logixd.ps1))) -Listen 0.0.0.0 -Port 8188
+```
+
+`logixd` is published as source, not as a binary. It links the SDK's .NET
+client, which is Rockwell's and comes only with the SDK install, so it is
+built on the machine that has it and nothing of Rockwell's is ever
+redistributed. The script downloads `logixd.zip` from the release (v0.16.2
+and later carry it), installs a private .NET 10 SDK under
+`C:\Program Files\logixd-dotnet` if the machine has none (not on `PATH`,
+used only by `logixd`), and runs `install.ps1` from the zip. From a clone,
+run that directly:
 
 ```powershell
 cd tools\logixd
@@ -204,7 +315,7 @@ the symptom is in a verb rather than a gate, find it here.
 | What you see | What it is | What to do |
 |---|---|---|
 | `logixd: unreachable ... connection refused` | The agent is not running. After a reboot this is almost always it. | Log in at the machine's console, then `Start-ScheduledTask -TaskName logixd`. The agent is an interactive task, not a service — see above. |
-| `logixd: unauthorized` / HTTP 401 | Wrong bearer token. Re-installing mints a new one. | Re-read `%ProgramData%\logixd\logixd.token`. |
+| `logixd: unauthorized: http://plc-box:8188 refused the token; check --token or NAUTILUS_LOGIXD_TOKEN against %ProgramData%\logixd\logixd.token on the agent's machine` | The agent answered HTTP 401: wrong bearer token. Re-installing mints a new one. With no token set at all the message reads `... wants a token and none was sent; set --token or NAUTILUS_LOGIXD_TOKEN from ...`. | Re-read `%ProgramData%\logixd\logixd.token` and pass it as `--token` or `NAUTILUS_LOGIXD_TOKEN`. |
 | A bare `System.TimeoutException` from any SDK call, nothing in any log | `DOTNET_ROOT` is set to an x64 .NET. | Unset it, set `DOTNET_ROOT_X64` instead, restart the agent. The installer refuses to proceed while it is set. |
 | `RxCMP_E_AUDIT_INVALIDOPTYPE - Invalid type.` on `build` or `download` | An instruction the project uses does not exist under that name. The L5X importer does **not** validate instruction names, so a bad one imports cleanly and only fails at verify. | Check the mnemonic. Neutral text uses the short spellings: `GE` `GT` `LE` `LT` `EQ` `NE` `MOVE` `LIMIT` — **not** the `GEQ`/`GRT`/`MOV`/`LIM` captions the ladder editor shows. Opening the project in Logix Designer and verifying names the rung and the fix; the SDK does not pass that detail through. |
 | `RxCL_E_CANNOT_UPLOAD_PHYS_ADDR` going online | You passed a project file to an online edit. | Don't — an online edit takes no project file. See [Online edits](#online-edits). |

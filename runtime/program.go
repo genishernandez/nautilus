@@ -28,6 +28,11 @@ type Program struct {
 	compiledAt time.Time
 	scans      uint64
 	lastErr    string
+	// ran: the program has scanned since its last cold start (Compile or
+	// Swap, which reset its state). FIRST_SCAN() is its negation. A warm
+	// swap and a rollback keep it, as Logix's S:FS does across an online
+	// edit: the state carried over is not a start.
+	ran bool
 
 	// bootSource is what Compile was first given — the program the deployed
 	// binary embeds. A running source that differs is an online edit in
@@ -119,6 +124,28 @@ func parseSource(src string) (*st.Program, error) {
 	return st.Parse(src)
 }
 
+// PeerOf describes program source in any of the four languages as an
+// st.PeerProgram run by task — what another program's undeclared
+// identifier is checked against (#327). libs are the project's library
+// sources, which a ladder rung needs for a user block's pins; ok is false
+// for a library or a source that does not parse.
+func PeerOf(src, task string, libs ...string) (st.PeerProgram, bool) {
+	if Language(src) == "ld" {
+		fbdSrc, err := ld.Transpile(src, libs...)
+		if err != nil {
+			return st.PeerProgram{}, false
+		}
+		src = fbdSrc
+	}
+	ast, err := parseSource(src)
+	if err != nil {
+		return st.PeerProgram{}, false
+	}
+	p, ok := st.PeerOf(ast)
+	p.Task = task
+	return p, ok
+}
+
 // Compile parses and lowers program source (ST or FBD) into a runnable
 // program.
 func Compile(src string) (*Program, error) {
@@ -155,6 +182,7 @@ func (p *Program) Swap(src string) error {
 		p.mu.Lock()
 		p.prog, p.frame = prog, ir.NewFrame(prog)
 		p.source, p.compiledAt, p.scans, p.lastErr = src, time.Now(), 0, ""
+		p.ran = false
 		p.mu.Unlock()
 		return nil
 	}
@@ -196,7 +224,9 @@ func (p *Program) Run(tags *Tags) error {
 		p.extsFor = p.prog
 	}
 	p.view.snapshot(p.exts)
+	p.view.firstScan = !p.ran
 	err := ir.Run(p.prog, p.frame, p.view)
+	p.ran = true
 	p.view.commit()
 	if err != nil {
 		p.lastErr = err.Error()
@@ -264,6 +294,16 @@ func (p *Program) Dirty() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.source != p.bootSource
+}
+
+// BootHash identifies the source the deployed binary embeds — the program
+// an online edit was made against. The retain store keeps it beside an
+// edited source, so a restart can tell a restart of the same build (swap
+// the edit back in) from a deploy of a different one (the deploy wins).
+func (p *Program) BootHash() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return sourceHash(p.bootSource)
 }
 
 // CanRollback reports whether a previous program is available.

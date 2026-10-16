@@ -86,7 +86,13 @@ tags, with their initial values and descriptions. The `VAR_EXTERNAL` block
 is optional: every program sees the project's tags without declaring them
 ([the tag model](/guides/tag-model/)), and a ladder or ST program that names
 one undeclared gets its controller tag all the same, typed from the
-manifest. A tag no program names is not written. A program's `VAR` become
+manifest. A tag no program names is not written, unless `target.logix`
+sets `all-tags: true` (an imported project does): then every manifest
+tag with a type (its `type:`, or the one its `init:` implies) is a
+controller tag, named or not, except one whose type the target does not
+carry (a `STRING`), which is left out. A manifest tag with no
+`role:` stops `naut logix deploy` and `naut logix write` with an error
+naming the tag, as it stops the runtime. A program's `VAR` become
 program tags. The task
 becomes a periodic Logix task at the task's scan rate, the program a Logix
 program, and the rungs its `MainRoutine`. `program`, `routine` and `task`
@@ -113,9 +119,11 @@ programs are not in the subset.
 | coils `( X )` `( S X )` `( R X )` | `OTE` `OTL` `OTU` |
 | edges `+X` `-X`, edge coils `( P X )` `( N X )` | `ONS` `OSF` with generated storage bits |
 | compares `GT GE LT LE EQ NE` | the compare instructions; an expression operand becomes `CMP` |
-| `{ y := expr }` | `MOVE`, `ADD`, `SUB`, `MUL`, `DIV`, `MOD`, `NEG`, `ABS`, `SQR`, `XPY`, or `CPT` |
-| `t:TON` `t:TOF`, `c:CTU` | `TON` `TOF` `CTU` on `TIMER` / `COUNTER` tags; `t.Q`→`t.DN`, `t.ET`→`t.ACC` |
-| `t:TONR` (with `dialect: logix`) | a `TON` with a `RES(t)` rung ahead of it |
+| `{ y := expr }` | `MOVE`, `ADD`, `SUB`, `MUL` or `DIV` for one operation on plain operands, `ABS` for `ABS(x)`, and `CPT` for anything else: `MOD`, unary `-`, `SQRT` (as `SQR`), `**` or `EXPT`, and nested expressions |
+| `t:TON` `t:TOF`, `c:CTU` | ladder: `TON` `TOF` `CTU` on `TIMER` / `COUNTER` tags. ST: `TONR(t)` (with `t.Reset := NOT IN`, so it clears when `IN` drops, as a TON does), `TOFR(t)` and `CTUD(c)` on `FBD_TIMER` / `FBD_COUNTER` tags. Both: `t.Q`→`t.DN`, `t.ET`→`t.ACC`, `c.CV`→`c.ACC` |
+| `t:TONR` (with `dialect: logix`) | ladder: a `TON` with a `RES(t)` rung ahead of it; ST: `TONR(t);` on an `FBD_TIMER` |
+| `FIRST_SCAN()`, `/FIRST_SCAN()` | `XIC(S:FS)`, `XIO(S:FS)`; `S:FS` in ST |
+| `clk:LOCAL_TIME()`, `clk.SECOND` | `GSV(WallClockTime,,LocalDateTime,clk[0])` into a `DINT[7]`, `clk[5]` |
 | `Word.3` | bit 3 of the word, as Logix spells it |
 | `Timers : ARRAY [0..3] OF TON` | one `TIMER[4]` tag |
 | BOOL, SINT, INT, DINT, REAL, LREAL | the same types |
@@ -124,6 +132,7 @@ programs are not in the subset.
 | enumerations (`TYPE Mode : (Idle := 1, Run := 10);`) | `DINT` tags; a member (`Run`, `Mode#Run`) is its value, `10` — Logix has no enumerated type |
 | user FUNCTION_BLOCKs (ladder or ST) | Add-On Instructions |
 | ST: assignments, IF, CASE, FOR, WHILE, REPEAT, EXIT, operators, maths | Logix ST, close to as written |
+| ST conversions (`DINT_TO_INT`, `INT_TO_REAL`, `BOOL_TO_DINT`, `TRUNC_DINT`, …) | Logix that computes the same result: a narrowing wraps in integer arithmetic, an integer meets REAL as `(v * 1.0)` where it would otherwise divide as integers, a BOOL becomes a number through an `IF`, `REAL_TO_DINT(r)` as the whole right-hand side into a DINT is a plain store (the controller rounds halves to even, as nautilus does) |
 
 The language features in that table are documented with the rest of the
 language: [the assignment element, bit access, arrays of instances and
@@ -132,8 +141,10 @@ dialects](https://github.com/joyautomation/nautilus/blob/main/docs/functions.md)
 ### Rejected at check time, by name
 
 What the target cannot express is a `naut check` diagnostic that names the
-construct and the alternative, before anything is written, never a
-surprise at download:
+construct and, where Logix has one, the alternative, before anything is
+written, never a surprise at download. A few constructs have no Logix
+alternative to name (`STRING`, a type that contains itself), and a
+binding the compiler cannot read is reported as the compiler reports it:
 
 ```text
 MainProgram.ld:11:1: logix target: pulse: type TP is not in the Logix v1 subset;
@@ -142,16 +153,17 @@ MainProgram.ld:18:1: logix target: pulse:TP: not in the Logix v1 subset; ...
   the v1 blocks are TON, TOF and CTU (and TONR with dialect: logix) [logix/fb]
 ```
 
-A project with a `target: logix` section gets these from `naut check`
-without asking; `naut check --target logix` asks for them on any project.
-(The editor's live diagnostics do not run them yet.) Each carries a stable
-rule ID:
+A project with a `target: logix` section gets these without asking: in
+the editor as you type, once the file compiles, and from `naut check`;
+`naut check --target logix` asks for them on any project. Each carries a
+stable rule ID, which the editor's Problems panel shows beside the
+message:
 
 | Rule | What it enforces |
 |---|---|
 | `logix/type` | the types in the table above; an AOI takes structures and arrays only as `VAR_IN_OUT` |
 | `logix/fb` | no `TP`, `CTD`, `CTUD`, `R_TRIG`/`F_TRIG` instances (IEC and Logix semantics differ) |
-| `logix/fb-pin` | timers bind `PT` (TONR also `Reset`), counters `PV` and `R`; the rung's power drives `IN` |
+| `logix/fb-pin` | timers bind `PT` (TONR also `Reset`), counters `PV` and `R`; the rung's power drives `IN`; in an ST call to a user block each input is a tag, a member or element of one, or a literal (`p(x := a / b)` does not build on Logix; compute it into a tag first) |
 | `logix/function-block` | user FUNCTIONs have no Logix form (inline them); an AOI cannot reach a controller tag |
 | `logix/var-section` | a program takes no parameters: only `VAR` and `VAR_EXTERNAL` |
 | `logix/time` | `TIME` only where it feeds a preset |
@@ -168,6 +180,9 @@ rule ID:
 | `logix/member` | member access only into timers, counters, user blocks and STRUCTs |
 | `logix/st` | no `RETURN`, `CONTINUE`, `STRING`, `MIN`/`MAX`/`LIMIT`/`SEL`/`MUX`, `ATAN2`, user calls |
 | `logix/data-op` | an assignment Logix has a data instruction or a `CPT` for |
+| `logix/conversion` | a conversion the controller would compute differently: REAL to an integer inside an expression or into a tag of another type (as the whole right-hand side into a tag of its own type it is written as a store), an integer `/` whose quotient meets a REAL, in ST or on a rung (`r := a / 2`, `a / 2 > x` with `x` REAL, `{ r := a / 2 }`, `GT(a / 2, x)`: the controller divides in REAL, 3.5 where nautilus gives 3; compute it into a DINT tag first), unsigned, bit-string, `LINT`, `LTIME` and `STRING` conversions, a BOOL or `LREAL` conversion inside an expression, an integer *expression* converted to REAL |
+| `logix/io-module` | an alias of a rack point whose module the hardware configuration has (`naut logix write` and deploy only; see [I/O](#io-tag-aliases)) |
+| `logix/hardware` | a hardware configuration whose `Local` module is the target's processor at its revision (`naut logix write` and deploy only) |
 
 ## Vendor idioms: `dialect: logix`
 
@@ -183,10 +198,14 @@ dialect: logix
 
 | Block | Semantics | On the controller |
 |---|---|---|
-| `TONR` (`IN`, `PT`, `Reset` → `Q`, `ET`) | a TON whose `Reset` clears it while TRUE; `t:TONR(PT := T#1S, Reset := t.Q)` is a free-running pulse | a `TON` with a `RES(t)` rung ahead of the timer's rung |
+| `TONR` (`IN`, `PT`, `Reset` → `Q`, `ET`) | a TON whose `Reset` clears it while TRUE; `t:TONR(PT := T#1S, Reset := t.Q)` is a free-running pulse | in ladder, a `TON` with a `RES(t)` rung ahead of the timer's rung; in ST, an `FBD_TIMER` run by `TONR(t);`, its `.Reset` TRUE while `Reset` is TRUE or `IN` is FALSE |
 
-More will follow (first scan, wall clock and scan time, `COP`). The
-default dialect is `nautilus`, which adds nothing.
+The default dialect is `nautilus`, which adds nothing. An idiom with a
+standard equivalent needs no dialect: the first-scan flag `S:FS` is
+`FIRST_SCAN()` and the controller's calendar, `GSV(WallClockTime,,
+LocalDateTime,…)`, is the `LOCAL_TIME` block, both standard in every
+project. `LOCAL_TIME`'s millisecond is Logix's microsecond element divided
+by 1000, so a ladder program reads it in an ST routine.
 
 ## I/O: tag aliases
 
@@ -203,9 +222,49 @@ The program uses `StartPB`. The writer emits an alias tag
 so the same source runs in simulation. It is the one place a hardware
 address lives in the project.
 
-The writer does not create I/O modules, so an alias to a rack point only
-builds against a controller project that already has the module. See
-[What it does not do yet](#what-it-does-not-do-yet).
+The modules those points live on are the project's **hardware
+configuration**: an L5X whose `<Modules>` section holds the controller's
+chassis, its I/O modules, and any adapters and the modules under them.
+`target.logix.hardware` names it:
+
+```yaml
+target:
+  logix:
+    controller: IOLine
+    processor: 1756-L85E
+    revision: "38.11"
+    hardware: hardware.L5X
+```
+
+The writer copies that section into every project it writes, unchanged,
+in place of the controller module it would otherwise generate. Nothing in
+it is nautilus's: each module's identity, configuration and connections
+are what Logix Designer exported. `naut logix import --project` writes
+`hardware.L5X` from an export with I/O modules (below); a Logix Designer
+export of the whole project works as it is, so changing the hardware is
+changing it in Logix Designer and exporting over the file.
+
+An alias of a rack point needs its module in the configuration, and
+`naut logix write` and `naut logix deploy` check that before anything
+reaches Logix Designer (`logix/io-module`; `naut check` does not read the
+hardware configuration): `Local:1:I.Data.3` needs a module in slot 1 of the
+controller's chassis, `Remote1:1:I.Data.0` one in slot 1 under the
+adapter `Remote1`, `Drive1:I.Speed` a module named `Drive1`. The error
+names the alias, the module it needs and the modules the configuration
+has; without a hardware configuration it says to add one. (Unchecked,
+Logix Designer imports the project and then fails its build with
+`RxTAG_ALIAS_TARGET_NOT_FOUND`, naming no tag.) The configuration's
+`Local` module must be the target's `processor` at its `revision`
+(`logix/hardware`). The check is whether the module is there, not
+whether the point exists on it.
+
+Verified on Logix Designer v38 and a 5580 on Logix Echo: a project
+imported from an export with two 1756 modules in the controller's chassis
+and a 1734 POINT I/O adapter with a module under it wrote back, imported
+and built with no errors, downloaded, and ran in Run with its alias tags
+driving the module points (Echo emulates no I/O, so nothing answers on
+the modules' connections). Exported again from Logix Designer, the
+`<Modules>` section was byte for byte the one imported.
 
 ## Bringing an existing program in
 
@@ -216,16 +275,59 @@ naut logix import --project ./line Line.L5X
 writes a nautilus project from a full L5X export: the manifest (with
 `target: logix` filled from the controller, and `dialect: logix` when the
 export uses its idioms), the tags with their descriptions, UDTs as IEC
-types, every ladder routine as a PROGRAM, and every Add-On Instruction as a
+types (a type's and each member's description as the declaration's
+trailing comment, `LineStatus : STRUCT (* … *)`), every ladder routine as a PROGRAM, and every Add-On Instruction as a
 FUNCTION_BLOCK in `lib/`. Alias tags, and rack points the logic names
-directly, become tags with `alias:`. A rung with no nautilus form is kept
+directly, become tags with `alias:`. A rung that names an alias tag comes
+in like any other: the tag takes its target's type, whether the target is
+a tag, a member of a UDT or Add-On Instruction instance, an array element,
+a bit (`Status.5`) or a rack point's bit (`Local:1:I.Data.3`). An alias the
+import cannot type, such as one of a whole rack word, is refused by name.
+An export with I/O modules also gives the project its hardware
+configuration: `hardware.L5X`, holding the export's `<Modules>` section
+unchanged, and `hardware: hardware.L5X` in the manifest, so the write-back
+carries the same modules and the alias tags land on them. (An export whose
+only module is the controller's own gets none: the writer generates that
+module from the processor.) A rung with no nautilus form is kept
 as a comment and reported, never guessed at. `--comm-path` and `--host`
 fill in how to reach the controller.
 
-On a corpus of 52 real production exports, 97.2% of rungs import, and most
-complete routines write back identically or equivalently. The largest
-remaining gaps are `MSG` instructions, status flags (`S:FS`), `GSV`, and
-`COP`.
+To check what came in, write it back and compare the logic with the
+export:
+
+```bash
+naut logix write -o back.L5X line/MainProgram.ld
+naut logix normalize --logic --check back.L5X Line.L5X
+```
+
+The write takes the controller, processor, revision, program, routine and
+task (`continuous: true` for a continuous one) from the imported
+`target: logix`, and each tag's initial value and description from the
+tag file; the file claims the Logix Designer release of that revision, as
+an export does (`SoftwareRevision="36.00"` for a v36 controller), and each
+UDT carries its descriptions back. `--logic` compares programs, routines, rung text and comments,
+and each tag's name, scope and type, and lists every difference; the two
+files' envelopes always differ (the writer emits a whole project). The
+import keeps two things a nautilus project would otherwise change. A
+controller-scoped timer, counter or Add-On Instruction instance is a block
+instance in nautilus, so it is declared in its program; the manifest lists
+it under `target.logix.controller-scoped`, with its description, and the
+write puts it back at controller scope, where a client reading
+`AcceptTmr.ACC` finds it. And the manifest sets `all-tags: true`, so a
+controller tag no imported routine names, such as one only an
+EtherNet/IP client writes, is written back too; the tag file types each
+tag (`type: DINT`, where `init: 0` alone would be a REAL). A tag with no
+nautilus type (a `MESSAGE`, a multi-dimensional array), or with one the
+target does not carry (a `STRING`, a `LINT`), stays in the tag file and is
+reported, because the write cannot create it.
+On the public yardstick, `examples/batch-skid/line/Line.L5X`, the
+comparison finds no differences.
+
+On a corpus of 52 real production exports, 97.9% of rungs import, 81% of
+ladder routines import whole, and most complete routines write back
+identically or equivalently. The largest remaining gap is messaging:
+`MSG` instructions and the byte-buffer copies (`COP`) that build their
+payloads.
 
 ## The loop
 
@@ -237,7 +339,7 @@ naut logix deploy --online    # ...and online-edit the running program
 naut logix deploy --download --yes --program-mode
                               # ...or download: stops the controller
 naut test --target logix      # the same scenarios on the controller, real time
-naut logix serve --project .  # live values, set-value and Download in VS Code
+naut logix serve --project .  # live values, set-value, online edit and download in VS Code
 ```
 
 **`naut logix deploy`** writes the project as an L5X, has logixd import
@@ -249,16 +351,47 @@ and build it, and then:
   finalizes them, leaving the controller in its mode. It is refused when
   the tag set changed, because an online edit cannot create tags;
 - with `--download --yes`, downloads the project. **That stops the
-  controller and resets its tags to the project's values.** The controller
-  must be in Program mode already, or pass `--program-mode`.
+  controller.** The controller must be in Program mode already, or pass
+  `--program-mode`. Tag values are kept (below); `--reset-values` starts
+  every tag at the project's value instead.
 
 Every path ends by uploading the controller's program again and comparing
 its logic with what was sent (`naut logix drift --logic`). `--keep DIR`
 keeps the generated L5X, the built ACD and the before/after uploads.
 
+### What a download does with tag values
+
+A download replaces the controller's whole project, its tag data with it.
+So before the build, `naut logix deploy --download` uploads the running
+controller and writes its current values into the project, and the
+download carries them: setpoints, counts and recipe data the plant has
+changed survive. Tag by tag:
+
+| the tag | after the download |
+|---|---|
+| on both sides, same name and scope (controller, or the same program), same type and dimensions | **the controller's value** |
+| a structure (UDT) or Add-On Instruction instance whose type is defined the same on both sides | **the controller's value**, every member |
+| a `TIMER` or `COUNTER` | the controller's accumulator and status bits; **the preset is the project's**, because a literal `PT := T#30S` is code and a changed one must take effect |
+| type, dimensions or the type's definition changed | the project's initial value, reported (`SpareSP: DINT → REAL`) |
+| a constant in the project | the project's value |
+| only in the project | the project's initial value, reported as new |
+| only on the controller | gone (the download removes it), reported |
+
+The deploy prints the outcome before the build (`tag values: 11 kept from
+the controller, 1 reset to the project's value (SpareSP: DINT → REAL), 1
+new (NewSP)`), and a build without `--download` prints what a download
+would do. The values are the controller's at the upload, about half a
+minute (the import and build) before the controller stops: a value the
+program changes in that window is not carried. A changed `init:` in
+`nautilus.yaml` does not override a kept value, since the controller's
+value wins; use `--reset-values` (or change the tag's value live) when the
+project's value must win. A ladder timer becoming an ST one changes its
+type (`TIMER` → `FBD_TIMER`), so it starts fresh.
+
 `naut logix mode [--yes run|program] <project-dir>` reads or changes the
-controller's mode. `naut logix write program.ld` writes an L5X without a
-project, for inspection.
+controller's mode. `naut logix write program.ld` writes the L5X without
+logixd, for inspection: for a project's task program it is what deploy
+would send, and its flags override the manifest.
 
 **`naut test --target logix`** runs the project's
 [acceptance tests](https://github.com/joyautomation/nautilus/blob/main/docs/testing.md#against-a-logix-controller) against the controller over
@@ -269,17 +402,112 @@ assertion is only as sharp as one poll plus one scan, so give a timer's
 `near`. A one-scan pulse can fall between polls, so latch it if a test
 needs to see it.
 
+## From the editor
+
+With `naut logix serve --project .` running and `nautilus.runtimeUrl`
+pointing at it, the loop never leaves VS Code. The server serves the
+controller's live values (hover, the Live Values panel, the rung overlay)
+and takes deploys from the editor through the same logixd agent the CLI
+uses; the editor only asks it.
+
+In a project whose `nautilus.yaml` has a `target: logix` section, a ladder
+or ST program shows two commands, in the editor title bar and the command
+palette:
+
+- **nautilus: Push Online Edit to Logix Controller** (the cloud-upload
+  button). The same as `naut logix deploy --online`: the routine's rungs
+  are replaced and finalized in the running controller, which keeps its
+  mode. It sends the open buffer, unsaved edits included. The first edit
+  after the server starts opens an online session (upload, open, go
+  online: about a minute); every edit after that is a rung import and a
+  verification, about two seconds. **nautilus: Download Program to
+  Controller** does the same thing on a Logix server.
+- **nautilus: Download Project to Logix Controller** (in the title bar's
+  `…` menu). The same as `naut logix deploy --download --yes`. A modal
+  says first that the download **stops the controller**, that tag values
+  are kept (the rule above) and that it leaves the controller in Program
+  mode; choose **Download** if it is in Program mode already, or **Switch
+  to Program Mode and Download**. The setting
+  `nautilus.logix.resetValuesOnDownload` makes the download start every
+  tag at the project's value, as `--reset-values` does, and the modal says
+  so. The summary says how many values were kept and which tags were
+  reset. The server re-reads `nautilus.yaml` for the
+  download, so new tags go with it. The summary comes as soon as the
+  download is verified; the server then opens the online session again
+  (about a minute, in the output channel), so the next online edit is
+  warm. An edit pushed meanwhile waits for that session and says so.
+  A plain **Download** with the controller in Run is refused: the
+  message says so, the SDK's own text is in the output channel, and the
+  notification offers **Switch to Program Mode and Download**.
+
+Both show the deploy's progress in a notification and in the **nautilus
+Logix** output channel as it happens, and end with what happened: verified
+or not, rungs replaced, the controller's mode, and the whole time you
+waited (an online session opening included). A refusal is shown as the server words it.
+A change an online edit cannot carry (new tags, a routine the controller
+does not have) offers **Download Project…**.
+
+Live values keep streaming through both: they are polled over
+EtherNet/IP, separately from the deploy. If nothing answers at
+`nautilus.runtimeUrl`, the commands offer to start `naut logix serve
+--project` in a terminal. That terminal needs `NAUTILUS_LOGIXD_URL` (or
+`target.logix.agent`) and `NAUTILUS_LOGIXD_TOKEN`, as the CLI does.
+
+The server answers these commands on `POST /api/logix/deploy`:
+`{"mode": "online" | "download", "source", "baseHash", "programMode",
+"resetValues", "yes"}`; a download's `done` event carries `valuesKept`
+and the `resets`. The answer is a stream of JSON lines (`progress` events, then
+`done` or `error`). A download is refused unless the body says
+`"yes": true`, and only one deploy runs at a time. The server needs
+`--project`; without it, it serves live values only.
+
 ## What it does not do yet
 
-- **One controller family, one revision verified.** Every behaviour test
-  ran on a 5580 at v38 on FactoryTalk Logix Echo. Other revisions and
-  families are expected to work but are not yet in a test matrix.
-- **One task, one program.** Multi-task projects are not in the subset.
-- **No hardware configuration.** The writer emits no I/O modules, so
-  aliases to rack points need a controller project that already has them.
-- **A download resets tag values.** Values the controller holds are not
-  carried across a download, and there is no warm download. An online edit
-  keeps them, but cannot add tags.
+- **One controller family, one revision verified, no real hardware yet.**
+  Every behaviour test ran on an emulated 5580 at v38 on FactoryTalk Logix
+  Echo. Other revisions and families are expected to work but are not yet
+  in a test matrix. The project's controller module (`Local`) is Logix
+  Designer's own for the ControlLogix 5580 (1756-L8xE), CompactLogix 5370
+  (1769-L30ER to 1769-L36ERM) and CompactLogix 5380 (5069-L306ER to
+  5069-L3100ERM) processors, and a project written for a 5069-L320ER or a
+  1769-L33ER imports and builds in Logix Designer v38. For any other
+  processor (a 5370 L1 or L2, a 5480, a safety controller, a 5570) it is
+  the 1756-L85E's with only the catalog number changed; `naut logix write`
+  and `naut logix deploy` say so, and Logix Designer will likely refuse
+  the project, unless the project has a hardware configuration
+  (`target.logix.hardware`), whose own `Local` module is used instead.
+- **One task, one program.** Multi-task projects, FBD and SFC are not in
+  the subset.
+- **Not everything IEC 61131-3 has.** No `STRING`, unsigned, bit-string,
+  `LINT` or `LTIME` types; no `TP`, `CTD`, `CTUD` or edge-trigger
+  instances; no `MIN`, `MAX`, `LIMIT`, `SEL`, `MUX` or `ATAN2` in ST; no
+  user FUNCTIONs; no arrays of your own function blocks (arrays of
+  timers and counters are fine); in ST, an Add-On Instruction's input is
+  a tag or a number, not an expression. A conversion the controller would
+  compute differently, and an integer `/` whose quotient meets a REAL,
+  are refused. Each is a [check-time
+  diagnostic](#rejected-at-check-time-by-name) that names the rule.
+- **The numbers are the controller's.** A REAL is 32 bits on the
+  controller and 64 in nautilus, so compare REALs with `near`. A REAL out
+  of range for the integer it is stored into wraps silently on the
+  controller, where nautilus faults the scan. nautilus does not wrap an
+  integer at its declared width; the controller does.
+- **The hardware configuration comes from Logix Designer.** The writer
+  carries an exported `<Modules>` section; it does not create a module from
+  a description (catalog number and slot) yet, so a new module is added in
+  Logix Designer and exported. With a hardware configuration, the
+  controller's own module is the configuration's, not the writer's.
+- **A download keeps values only for tags it can match.** A renamed or
+  retyped tag starts at the project's value, and the values are the ones
+  uploaded about half a minute before the controller stops. There is no
+  warm download: it still stops the controller. An online edit keeps every
+  value and does not stop anything, but cannot add tags.
+- **New tags need a serve restart.** `naut logix serve` reads the
+  controller's tags when it starts, so a tag a download adds shows in
+  live values after a restart.
+- **Import is not complete.** A rung with no nautilus form stays a
+  comment and is reported; message instructions (`MSG`) and the buffer
+  copies that feed them are the largest gap.
 - **No runtime parity promise.** The subset is the set of constructs whose
   behaviour on both runtimes has been checked by running the same
   scenarios on each. Anything outside it is refused, not approximated.
@@ -291,3 +519,6 @@ prohibit headless or CI use, but each concurrent user of a logixd agent
 needs their own SDK activation, and the SDK may not be offered as a hosted
 service: run logixd on your own licensed machine for your own team, and
 **do not host a logixd agent for other people.**
+
+The commercial licence terms that bear on building a product on the SDK
+(the automation-interface and pooling clauses) are not settled.

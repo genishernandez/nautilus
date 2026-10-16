@@ -103,7 +103,7 @@ func TestRenderNestedStructInit(t *testing.T) {
 		Name: "T", Role: "state", Type: "Motor1Speed",
 		Init: map[string]any{
 			"STRTTMRSP": 30,
-			"LVL":       map[string]any{"CTL1HSP": 60.0, "CTL1LSP": 40.0},
+			"LVL":       map[string]any{"HSP": 60.0, "LSP": 40.0},
 		},
 	}})
 	if err != nil {
@@ -111,7 +111,7 @@ func TestRenderNestedStructInit(t *testing.T) {
 	}
 	out := strings.TrimSpace(string(raw))
 	want := "- { name: T, role: state, type: Motor1Speed, init: " +
-		"{ LVL: { CTL1HSP: 60.0, CTL1LSP: 40.0 }, STRTTMRSP: 30 } }"
+		"{ LVL: { HSP: 60.0, LSP: 40.0 }, STRTTMRSP: 30 } }"
 	if out != want {
 		t.Errorf("got:\n%s\nwant:\n%s", out, want)
 	}

@@ -104,3 +104,33 @@ func TestEmptyAndVarBlock(t *testing.T) {
 		t.Errorf("var block wrong:\n%s", vb)
 	}
 }
+
+// A comment renders as the declaration's trailing (* … *): one line, or a
+// multi-line text continued under it; a comment delimiter in the text is
+// broken up so it cannot end the comment early. The result compiles.
+func TestRenderComments(t *testing.T) {
+	s := Struct("Status_Type",
+		FieldDef{Name: "Mode", Type: DINT, Comment: "0 idle, 1 run"},
+		FieldDef{Name: "Alarm", Type: BOOL, Init: "FALSE", Comment: "a *) and a (* in it"},
+		Field("Spare", BOOL),
+	)
+	s.Comment = "Mode/alarm summary\r\n  second line"
+	src, err := Render(s)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	want := "TYPE\n" +
+		"  Status_Type : STRUCT (* Mode/alarm summary\n" +
+		"     second line *)\n" +
+		"    Mode : DINT; (* 0 idle, 1 run *)\n" +
+		"    Alarm : BOOL := FALSE; (* a * ) and a ( * in it *)\n" +
+		"    Spare : BOOL;\n" +
+		"  END_STRUCT;\n" +
+		"END_TYPE\n"
+	if src != want {
+		t.Errorf("got\n%s\nwant\n%s", src, want)
+	}
+	if got := VarBlock("VAR", FieldDef{Name: "X", Type: INT, Comment: "doc"}); got != "VAR\n  X : INT; (* doc *)\nEND_VAR\n" {
+		t.Errorf("VarBlock = %q", got)
+	}
+}

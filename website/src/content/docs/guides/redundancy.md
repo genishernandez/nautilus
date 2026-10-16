@@ -33,6 +33,16 @@ retain:
   inputs re-read from the field, state re-seeds, outputs re-derive from
   logic. The PID does not persist its integral; it warm-starts from live
   field values, the way a real changeover does.
+- **Any shape:** a setpoint can be a scalar, a struct (UDT), or an array —
+  an array of scalars, an array of structs, or a multi-dimensional array.
+  A setpoint table in an `ARRAY` survives a restart or a failover like a
+  single setpoint does. A struct or array comes back member by member
+  onto the current tag, so if the project has since grown an array, the
+  new elements keep their `init:` seeds; if it has shrunk one, the array
+  keeps its seeds and the mismatch shows in `lastRetainError`. A setpoint
+  cannot hold a function-block instance: the tag model refuses an `ARRAY
+  OF TON`, or a struct with a TON member, as a tag's type, whether the
+  manifest or a program's `VAR_EXTERNAL` declares it.
 - **When:** every 2 seconds, only when something changed, and only by the
   leader. A hard kill can lose at most 2 seconds of operator input.
 - **Load order:** retained values are applied before the first scan and
@@ -40,6 +50,13 @@ retain:
   outlives what the project file said first.
 - A retained online edit still shows as *modified* in the dashboard and
   `naut pull`, so the git loop closes the same way it always did.
+- **A deploy wins:** an online edit is reloaded only by the same build it
+  was made on. A build whose program for that task differs replaces the
+  edit (logged, and named in `retainDiscardedEdits`), so pull the edit into
+  git before you deploy over it. The replaced source stays in the store
+  under `discardedPrograms` (the last one per task, never applied) for
+  recovery. A build that already contains the edit just clears it from the
+  store.
 
 Store failures surface in the dashboard's diagnostics (`retainErrors`,
 `lastRetainError`) — a save that keeps failing is invisible exactly until

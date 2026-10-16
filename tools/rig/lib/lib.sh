@@ -393,7 +393,9 @@ dismiss_first_run() {
 # screen space, and the window sits under a title bar. The first attempt at the
 # squiggle landed 24px high, in the line-number gutter.
 hover_at() { # <x> <y> [approach x] [approach y]
-  local x=$1 y=$2 ax=${3:-$((x > 300 ? x - 300 : x + 300))} ay=${4:-$((y > 300 ? y - 300 : y + 300))}
+  # Two statements: a default that reads $x can't share the `local` that sets it.
+  local x=$1 y=$2
+  local ax=${3:-$((x > 300 ? x - 300 : x + 300))} ay=${4:-$((y > 300 ? y - 300 : y + 300))}
   xdotool mousemove --window "$WIN" "$ax" "$ay"; sleep 1
   xdotool mousemove --window "$WIN" "$x" "$y"; sleep 1
   local _

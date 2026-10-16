@@ -1,6 +1,8 @@
 package sparkplug
 
 import (
+	"time"
+
 	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/runtime"
 	"github.com/joyautomation/nautilus/sparkplug/spb"
@@ -24,6 +26,23 @@ func (n *Node) birth() error {
 	// NBIRTH answering it.
 	n.pubMu.Lock()
 	defer n.pubMu.Unlock()
+
+	// A birth belongs to an open connection. One asked for across
+	// newSession (a rebirth command or timer from the session it ended)
+	// would otherwise go out into the new client while it is still
+	// connecting — paho queues a publish on a client retrying its connect.
+	// The new session's onConnect births instead, with the bdSeq its will
+	// carries. HostOfflineDisconnect: and with the primary host online; the
+	// host's ONLINE STATE births otherwise.
+	n.mu.Lock()
+	ready := n.cli.IsConnectionOpen()
+	if n.disconnectsOnHostOffline() {
+		ready = ready && n.hostOnline
+	}
+	n.mu.Unlock()
+	if !ready {
+		return nil
+	}
 
 	snap := n.rt.Tags().Snapshot()
 
@@ -49,14 +68,14 @@ func (n *Node) birth() error {
 		{Name: "Node Control/Rebirth", Datatype: spb.DataType_Boolean, Timestamp: ts, Value: false},
 	}
 	// UDT template definitions precede instances so a host can resolve them.
-	nbirth = append(nbirth, n.templateDefs(snap, ts)...)
+	// Flattened, there are no Template metrics to resolve.
+	if !n.flatten {
+		nbirth = append(nbirth, n.templateDefs(snap, ts)...)
+	}
 	for _, name := range nodeTags {
-		m, err := n.birthMetric(name, snap[name], ts)
-		if err != nil {
-			n.mu.Unlock()
-			return err
+		if m, ok := n.birthMetric(name, snap[name], ts); ok {
+			nbirth = append(nbirth, n.expand(m)...)
 		}
-		nbirth = append(nbirth, m)
 	}
 	nbirthSeq := n.seq
 
@@ -68,19 +87,16 @@ func (n *Node) birth() error {
 	}
 	var births []dbirth
 	for _, d := range n.devices {
-		healthy := d.Health == nil || d.Health()
+		healthy := n.deviceReadyLocked(d, func(name string) bool { _, ok := snap[name]; return ok }, time.Now())
 		n.devHealth[d.ID] = healthy
 		if !healthy {
 			continue
 		}
 		var ms []Metric
 		for _, name := range devTags[d.ID] {
-			m, err := n.birthMetric(name, snap[name], ts)
-			if err != nil {
-				n.mu.Unlock()
-				return err
+			if m, ok := n.birthMetric(name, snap[name], ts); ok {
+				ms = append(ms, n.expand(m)...)
 			}
-			ms = append(ms, m)
 		}
 		births = append(births, dbirth{device: d.ID, seq: n.nextSeq(), metrics: ms})
 	}
@@ -129,15 +145,26 @@ func (n *Node) birth() error {
 
 // birthMetric builds a birth metric (name + datatype + value + properties)
 // and seeds its RBE baseline + known table. Caller holds n.mu.
-func (n *Node) birthMetric(name string, v ir.Value, ts uint64) (Metric, error) {
-	tmplRef := ""
-	if v.Kind == ir.TypeStruct && v.Struct != nil {
-		tmplRef = v.Struct.Name
-	}
-	m, err := MetricFromValue(name, v, tmplRef)
+//
+// ok=false is a tag Sparkplug has no datatype for (an array of structs, say):
+// it is logged once and left out of the birth — not allowed to fail it, which
+// would take every other metric down with it — and marked known so it does
+// not ask for a rebirth on every tick (see Node.unpublishable).
+func (n *Node) birthMetric(name string, v ir.Value, ts uint64) (Metric, bool) {
+	m, err := n.metricFor(name, v)
 	if err != nil {
-		return Metric{}, err
+		if !n.unpublishable[name] {
+			n.log.Warn("sparkplug: tag left out of the birth — no Sparkplug datatype for it",
+				"tag", name, "error", err)
+		}
+		if n.unpublishable == nil {
+			n.unpublishable = map[string]bool{}
+		}
+		n.unpublishable[name] = true
+		n.known[name] = true
+		return Metric{}, false
 	}
+	delete(n.unpublishable, name)
 	m.Timestamp = ts
 	attachMeta(&m, name, n.rt.Meta())
 	n.known[name] = true
@@ -147,7 +174,79 @@ func (n *Node) birthMetric(name string, v ir.Value, ts uint64) (Metric, error) {
 	// values once — conservative, and births are rare.
 	st.record(v, 0, timeFromMs(ts))
 	n.rbeState[name] = st
-	return m, nil
+	return m, true
+}
+
+// metricFor builds the metric for one tag's value, birth or data. A struct
+// instance references its type's definition by name; an array takes its
+// element type from the tag's declared type when the value is empty and
+// cannot say.
+func (n *Node) metricFor(name string, v ir.Value) (Metric, error) {
+	tmplRef := ""
+	if v.Kind == ir.TypeStruct && v.Struct != nil {
+		tmplRef = v.Struct.Name
+	}
+	var t *ir.Type
+	if v.Kind == ir.TypeArray && len(v.Arr) == 0 {
+		t = n.rt.Tags().TypeOf(name)
+	}
+	return MetricFromTypedValue(name, v, t, tmplRef)
+}
+
+// deviceReady reports whether a device may be born: its connection is
+// healthy AND has delivered — every tag it contributes is in the store. A
+// driver connects before its first read completes, and its snapshot fills
+// tag by tag; the store catches up a runtime scan later. A DBIRTH sent while
+// only some tags are in carries only those ("device birth device=RTU53
+// metrics=27" of 47, the slow struct tags read member by member missing).
+// One tag that never reads must not keep the device unborn, so once some
+// tags are in and the device has waited (see Node.deviceReadyLocked) it is
+// born with what it has; a tag arriving after the birth is a new metric,
+// which rebirths as any new metric does. A device with no tags is ready
+// when healthy.
+func deviceReady(d Device, has func(string) bool, waited bool) bool {
+	if d.Health != nil && !d.Health() {
+		return false
+	}
+	if len(d.Tags) == 0 {
+		return true
+	}
+	some, all := false, true
+	for _, name := range d.Tags {
+		if has(name) {
+			some = true
+		} else {
+			all = false
+		}
+	}
+	return all || some && waited
+}
+
+// deviceBirthWait is how long a healthy device with only some of its tags in
+// the store waits for the rest before it is born without them.
+const deviceBirthWait = 5 * time.Second
+
+// deviceReadyLocked is deviceReady with the wait tracked per device: the
+// clock starts when the device is healthy with some tags in, and resets
+// whenever it is not.
+func (n *Node) deviceReadyLocked(d Device, has func(string) bool, now time.Time) bool {
+	wait := n.birthWait
+	if wait == 0 {
+		wait = deviceBirthWait
+	}
+	since, waiting := n.devPartialSince[d.ID]
+	if deviceReady(d, has, waiting && now.Sub(since) >= wait) {
+		delete(n.devPartialSince, d.ID)
+		return true
+	}
+	if deviceReady(d, has, true) { // healthy, some tags in: start or keep waiting
+		if !waiting {
+			n.devPartialSince[d.ID] = now
+		}
+	} else {
+		delete(n.devPartialSince, d.ID)
+	}
+	return false
 }
 
 // attachMeta states a tag's documentation as birth properties: `unit:` as

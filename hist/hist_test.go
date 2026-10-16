@@ -426,7 +426,7 @@ func TestAggregateAndSnapshotPostgres(t *testing.T) {
 	}
 	for _, r := range runst {
 		ts := base.Add(time.Duration(r.off) * time.Minute)
-		if err := s.Insert(ts, map[string]float64{"WEL1.RUNST": r.v}); err != nil {
+		if err := s.Insert(ts, map[string]float64{"ZONE1.RUNST": r.v}); err != nil {
 			t.Fatalf("Insert RUNST: %v", err)
 		}
 	}
@@ -453,7 +453,7 @@ func TestAggregateAndSnapshotPostgres(t *testing.T) {
 	// apart, last "on" sample bounds an interval to the first "off"
 	// sample), off after.
 	rows, err := s.Aggregate(context.Background(), AggQuery{
-		Tags: []string{"WEL1.RUNST"}, From: from, To: to, Fn: "ontime",
+		Tags: []string{"ZONE1.RUNST"}, From: from, To: to, Fn: "ontime",
 	})
 	if err != nil {
 		t.Fatalf("Aggregate ontime: %v", err)

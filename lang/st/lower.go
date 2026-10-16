@@ -48,6 +48,11 @@ type LowerOpts struct {
 	ImplicitGlobals map[string]*ir.Type
 	TagTypes        map[string]*ir.Type
 	Types           map[string]*ir.Type
+	// Peers are the project's other programs (the one being lowered may be
+	// among them; it is skipped). They put nothing in scope — they only let
+	// an undeclared identifier that names another program's variable say
+	// that programs share only tags (#327). See PeerProgram.
+	Peers []PeerProgram
 }
 
 // Lower converts a parsed ST program into typed IR.
@@ -110,6 +115,7 @@ func LowerWithOpts(prog *Program, opts LowerOpts) (*ir.Program, error) {
 	l.userFuncs = combinedFuncs
 	l.implicitGlobals = opts.ImplicitGlobals
 	l.tagTypes = opts.TagTypes
+	l.peers = opts.Peers
 	// Seed the file's TYPE table with any the caller supplies (a separately
 	// compiled library), then resolve this file's own TYPE block. Both are
 	// in scope for the POUs below — a FUNCTION_BLOCK pin may name a UDT.
@@ -431,6 +437,7 @@ type lowerer struct {
 	implicitGlobals map[string]*ir.Type    // optional; PLC project vars surfaced as globals
 	tagTypes        map[string]*ir.Type    // optional; tags whose type the project states
 	untypedTags     map[string]string      // NameKey → spelling: project tags with no knowable type
+	peers           []PeerProgram          // optional; the project's other programs, for diagnostics only
 	// returnSlot, when >= 0, marks the slot the bare function-name
 	// identifier should bind to inside a FUNCTION body so `Name := value`
 	// assigns the return value rather than failing as undeclared.
@@ -512,6 +519,41 @@ func (l *lowerer) child(prog *Program) *lowerer {
 func (l *lowerer) lookup(name string) (symbol, bool) {
 	sym, ok := l.scope[ir.NameKey(name)]
 	return sym, ok
+}
+
+// userFunc resolves a call's bare name to a user FUNCTION. A function
+// block instance in scope with that name wins (#336): the declaration in
+// scope is what the name means, as IEC scoping has it, so `f(IN := 1)`
+// with `f : Counter` runs the block even when a FUNCTION F exists (names
+// are case-insensitive). Only an instance hides a function: a variable of
+// any other type is not callable, so a call by its name still means the
+// function. `naut check` and the editor warn about the clash
+// (InstancesShadowingFunctions).
+func (l *lowerer) userFunc(name string) (*ir.FuncDef, bool) {
+	if _, hidden := l.hiddenFunc(name); hidden {
+		return nil, false
+	}
+	if l.userFuncs == nil {
+		return nil, false
+	}
+	def, _, ok := ir.Lookup(l.userFuncs, name)
+	return def, ok && def != nil
+}
+
+// hiddenFunc names the user FUNCTION that an FB instance in scope called
+// name hides, if there is one.
+func (l *lowerer) hiddenFunc(name string) (string, bool) {
+	if l.userFuncs == nil {
+		return "", false
+	}
+	sym, defined := l.lookup(name)
+	if !defined || sym.typ == nil || sym.typ.Kind != ir.TypeFB {
+		return "", false
+	}
+	if def, _, ok := ir.Lookup(l.userFuncs, name); ok && def != nil {
+		return def.Name, true
+	}
+	return "", false
 }
 
 // dupErr is the duplicate-declaration error. When the two declarations
@@ -1299,8 +1341,8 @@ func (l *lowerer) lowerStmt(s Statement) (ir.Stmt, error) {
 // effects worth invoking as a statement.
 func (l *lowerer) lowerCallStmt(n *CallStmt) (ir.Stmt, error) {
 	// User FUNCTION called as a statement — discard the return value.
-	if l.userFuncs != nil {
-		if def, _, ok := ir.Lookup(l.userFuncs, n.Call.Name); ok && def != nil {
+	if n.Call.Callee == nil {
+		if def, ok := l.userFunc(n.Call.Name); ok {
 			call, x, err := splitExecControl(n.Call, funcDeclaresEN(def), false)
 			if err != nil {
 				return nil, err
@@ -1540,13 +1582,11 @@ func (l *lowerer) lowerCallExpr(n *CallExpr) (ir.Expr, error) {
 	// User-defined FUNCTION dispatch — preferred over the (case-insensitive)
 	// builtin table so a user can shadow nothing accidentally with mixed
 	// case while still binding by bare name.
-	if l.userFuncs != nil {
-		if def, _, ok := ir.Lookup(l.userFuncs, n.Name); ok && def != nil {
-			if !funcDeclaresEN(def) && hasExecControl(n) {
-				return nil, errExecInExpr(n)
-			}
-			return l.lowerUserFuncCall(n, def)
+	if def, ok := l.userFunc(n.Name); ok {
+		if !funcDeclaresEN(def) && hasExecControl(n) {
+			return nil, errExecInExpr(n)
 		}
+		return l.lowerUserFuncCall(n, def)
 	}
 	if conv, handled, err := l.lowerEnumConversion(n); handled {
 		return conv, err
@@ -1557,7 +1597,11 @@ func (l *lowerer) lowerCallExpr(n *CallExpr) (ir.Expr, error) {
 		// are read via member access (t1.Q), and bare `t1(...)` produces
 		// no value. Surface a clearer message when this is the case.
 		if sym, defined := l.lookup(n.Name); defined && sym.typ != nil && sym.typ.Kind == ir.TypeFB {
-			return nil, errName(n.Pos, n.Name, fmt.Errorf("FB instance %q can't be used as an expression — invoke it as a statement and read outputs (e.g. %s.Q)", n.Name, n.Name))
+			hides := ""
+			if fn, ok := l.hiddenFunc(n.Name); ok {
+				hides = fmt.Sprintf(" (it hides FUNCTION %s of the same name — rename the instance to call the function)", fn)
+			}
+			return nil, errName(n.Pos, n.Name, fmt.Errorf("FB instance %q can't be used as an expression — invoke it as a statement and read outputs (e.g. %s.Q)%s", n.Name, n.Name, hides))
 		}
 		return nil, errName(n.Pos, n.Name, fmt.Errorf("unknown function %q%s", n.Name, ir.ConversionHint(n.Name)))
 	}
@@ -1611,7 +1655,7 @@ func (l *lowerer) lowerCallExpr(n *CallExpr) (ir.Expr, error) {
 			return nil, errNode(srcArgs[i], fmt.Errorf("function %s arg %d: cannot pass %s as %s", sig.Name, i+1, args[i].ExprType(), p))
 		}
 	}
-	return &ir.Call{Name: sig.Name, Args: args, Fn: fn, T: resultT}, nil
+	return &ir.Call{Name: sig.Name, Args: args, Fn: fn, HostFn: sig.HostFn, T: resultT}, nil
 }
 
 // lowerUserFuncCall resolves a CallExpr against a user-defined FUNCTION.
@@ -1717,6 +1761,9 @@ func (l *lowerer) lowerIdent(n *IdentExpr) (ir.Expr, error) {
 		}
 		if tag, isTag := l.untypedTags[ir.NameKey(name)]; isTag {
 			return nil, errName(n.Pos, name, fmt.Errorf("%q is a project tag with no type — give %s a type: (or an init:) in the manifest, or declare it in VAR_EXTERNAL", name, tag))
+		}
+		if hint := l.peerHint(name); hint != "" {
+			return nil, errName(n.Pos, name, fmt.Errorf("undeclared identifier %q: %s", name, hint))
 		}
 		return nil, errName(n.Pos, name, fmt.Errorf("undeclared identifier %q (declare in VAR_* or VAR_GLOBAL block)", name))
 	}
@@ -1925,7 +1972,8 @@ func resolveBinType(op ir.BinKind, lt, rt *ir.Type) (*ir.Type, error) {
 		if lt.Kind == ir.TypeTime || rt.Kind == ir.TypeTime {
 			return nil, fmt.Errorf("TIME may only be combined with TIME")
 		}
-		return ir.IntT, nil
+		// The operands' common type: DINT + DINT is DINT (#326).
+		return ir.CommonInt(lt, rt), nil
 	case ir.OpEq, ir.OpNeq, ir.OpLt, ir.OpLte, ir.OpGt, ir.OpGte:
 		if lt.Kind == ir.TypeBool && rt.Kind == ir.TypeBool && (op == ir.OpEq || op == ir.OpNeq) {
 			return ir.BoolT, nil

@@ -20,6 +20,7 @@ import { FbMonitorLenses, LiveValues } from "./liveValues";
 import { LiveValuesView } from "./liveValuesView";
 import { fireTransition, setActiveStep } from "./sfcCommands";
 import { OnlineEdit } from "./onlineEdit";
+import { LogixDeploy } from "./logixDeploy";
 import { broadcastSyncState, FbdEditorProvider, FbdPreview } from "./fbdPreview";
 import { LdEditorProvider, LdPreview } from "./ldPreview";
 import { SfcEditorProvider, SfcPreview } from "./sfcPreview";
@@ -116,6 +117,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // divergence from the live program is visible where the editing happens.
   const online = new OnlineEdit(broadcastSyncState);
   context.subscriptions.push(online);
+  // A project with a Logix target deploys through `naut logix serve`.
+  const logix = new LogixDeploy(online);
+  context.subscriptions.push(logix);
 
   const fbd = new FbdPreview(context, live);
   context.subscriptions.push(fbd);
@@ -287,6 +291,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("nautilus.program.diff", () => online.diff()),
     vscode.commands.registerCommand("nautilus.program.rollback", () => online.rollback()),
     vscode.commands.registerCommand("nautilus.program.pull", () => online.pull()),
+    vscode.commands.registerCommand("nautilus.logix.onlineEdit", () => logix.onlineEdit()),
+    vscode.commands.registerCommand("nautilus.logix.download", () => logix.download()),
     vscode.commands.registerCommand("nautilus.installCli", () => installCliCommand()),
     vscode.commands.registerCommand("nautilus.showCliInfo", () => showCliInfo()),
     vscode.commands.registerCommand("nautilus.restartLanguageServer", async () => {

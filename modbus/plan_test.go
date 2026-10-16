@@ -46,15 +46,20 @@ func TestPlanCoalescesAdjacent(t *testing.T) {
 
 func TestPlanGapTolerance(t *testing.T) {
 	// Default gap 8: a hole of 7 registers is bridged, reading unused words
-	// instead of paying a second round-trip.
+	// instead of paying a second round-trip...
 	p := mustPlan(t, mk(0, holding("T0", 0, "int16"), holding("T8", 8, "int16")), -1)
 	if len(p.Blocks) != 1 || p.Blocks[0].Count != 9 {
-		t.Fatalf("gap 8: %s", p)
+		t.Fatalf("hole of 7: %s", p)
 	}
-	// The hole just past the tolerance splits.
+	// ...and so is a hole of exactly 8 (T0 occupies 0, T9 follows 1..8).
+	p = mustPlan(t, mk(0, holding("T0", 0, "int16"), holding("T9", 9, "int16")), -1)
+	if len(p.Blocks) != 1 || p.Blocks[0].Count != 10 {
+		t.Fatalf("hole of 8 (the limit itself): %s", p)
+	}
+	// The first hole past the tolerance (9) splits.
 	p = mustPlan(t, mk(0, holding("T0", 0, "int16"), holding("T10", 10, "int16")), -1)
 	if len(p.Blocks) != 2 {
-		t.Fatalf("beyond gap: %s", p)
+		t.Fatalf("hole of 9: %s", p)
 	}
 	// Gap 0 is the escape hatch for devices that fault reads touching
 	// unimplemented registers: only contiguous bindings merge.

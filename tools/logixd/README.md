@@ -42,6 +42,19 @@ framework-dependent build launched with `DOTNET_ROOT_X64` and no plain
 
 ## Install
 
+From a release, one command in an **elevated** PowerShell does all of it,
+including a private .NET 10 SDK when the machine has none:
+
+```powershell
+irm https://github.com/joyautomation/nautilus/releases/latest/download/install-logixd.ps1 | iex
+```
+
+`install-logixd.ps1` fetches the release's `logixd.zip` (this directory plus a
+`VERSION` file, stamped into the build and reported by `GET /v1/health`) and
+runs `install.ps1` from it, passing any options through. It is source, never
+a binary: the SDK's client package is Rockwell's and is only on the licensed
+machine. From a clone:
+
 `install.ps1` does the whole setup and proves it worked. Run it in an
 **elevated** PowerShell on the licensed Windows machine:
 

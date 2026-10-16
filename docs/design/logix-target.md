@@ -1270,6 +1270,13 @@ has its own upload/restore of tag values, and whether the SDK exposes enough to
 automate it is unverified. Worth settling before the download path is offered
 to anyone.
 
+**Settled (2026-10-14, #273):** the SDK's upload carries every tag's current
+value in its L5X export, so `naut logix deploy --download` uploads first and
+writes the controller's values into the project before the build: kept for
+every tag that survives the change unchanged, the project's for the rest,
+each reset reported. Rule and Echo results: `logix-authoring.md` §6 item 4
+and §7b.
+
 ---
 
 ## 16. `lang/l5x` — built 2026-09-20

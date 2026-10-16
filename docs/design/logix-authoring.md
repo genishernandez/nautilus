@@ -6,6 +6,9 @@ This brief **supersedes the recommendation in [`logix-target.md`](logix-target.m
 §8** for the Allen-Bradley development use case. Everything else in that
 document still stands, and most of what it built is reused here.
 
+The current caveats, the list the video scripts quote, are in
+[§10](#10-caveats-the-videos-quote).
+
 ## 1. The thesis
 
 > **Keep the hardware. Ditch the IDE.**
@@ -103,6 +106,7 @@ positions (`logix-target.md` §6.4).
 | global (`VAR_EXTERNAL`) | controller tag | |
 | a manifest tag a program names undeclared (#177/#210) | controller tag, typed from the manifest | ladder and ST (#248); uses resolved on the compiler's AST (`logix/writer/uses.go`) |
 | enumeration type and its members | `DINT`; a member is its value | Logix has no enumerated type; the names do not reach the controller, and an import brings the tag back as `DINT` (`logix/writer/enum.go`) |
+| `X_TO_Y` / `TO_Y` / `TRUNC_<int>` in ST | Logix that computes nautilus's result, or `logix/conversion` | narrowing as an integer-arithmetic wrap, int → REAL as `v` or `(v * 1.0)`, BOOL → number as an `IF`, REAL → integer as a plain store of the whole right-hand side into a tag of that type; REAL → integer inside an expression, an integer `/` whose quotient meets a REAL (#361; on a rung too, #368), unsigned, bit strings, LINT, LTIME and STRING refused (`logix/writer/convert.go`, #255) |
 | program-local `VAR` | program tag | |
 | one nautilus task + program | one Logix task + program + `MainRoutine` | a stated decision, not a derivation |
 
@@ -194,6 +198,15 @@ and a running controller's values always move.
    the repo, captured once from an existing project (or created by `logixd`
    for a bare controller), and merged by the writer. It is the one
    Studio-shaped artifact left; generating it from YAML is a later phase.
+   **Decided and built (2026-10-14, #275):** the merge, as proposed. A
+   project names an L5X with `target.logix.hardware` (the import writes
+   `hardware.L5X` at the project root); the writer copies its `<Modules>`
+   verbatim in place of the generated `Local` module, and the alias tags'
+   modules are checked at write time (`logix/io-module`). Controller model
+   and revision stay in `target.logix`, checked against the file's `Local`
+   module (`logix/hardware`). Generated stubs from a manifest description
+   are not built; the stub evidence is in §7b, "Follow-up — the hardware
+   configuration".
 2. **Online edit or download.** Rung-only changes go as an online edit
    (verified path). New tags or structural changes need a download, which
    stops the controller and so needs explicit confirmation. Unverified: how
@@ -202,7 +215,11 @@ and a running controller's values always move.
    comm path, firmware revision) so `naut check`, the editor's Download
    button and the deploy command all know what they are aiming at.
 4. **Tag-value preservation across downloads.** Open since `logix-target.md`
-   §15.2. Needed before anyone downloads to a plant.
+   §15.2. Needed before anyone downloads to a plant. **Decided and built
+   (2026-10-14, #273):** a download keeps the controller's values of the
+   tags that survive it unchanged, taken from the upload that precedes the
+   build; `--reset-values` opts out. The rule and the Echo results are in
+   §7b, "Follow-up — a download keeps the controller's values".
 5. **Names for generated tags** (edge storage, rewritten timers) must be
    stable across regenerations, or every regeneration looks like drift.
 
@@ -355,7 +372,7 @@ corpus. Estimate was about a week; it took one session. Timebox not hit.
   mnemonics) are in the emit set.** The seventh, `LES`, is the editor
   caption, not neutral text (§21 of `logix-target.md`: it is `LT`), so
   that fixture would fail an SDK build exactly as DemoProgram's `GEQ` did —
-  worth a one-token fix in `examples/`. The real gap is the data model:
+  worth a one-token fix in `examples/` (made 2026-10-14, #372). The real gap is the data model:
   `Line.L5X` has one UDT (`Line_Status`) and a coil on its member, and v1
   has no UDTs. **Instruction set: covered. Types: not yet.**
 - *An instruction not equivalent and not rejectable* — none in v1. The two
@@ -627,7 +644,8 @@ loop; generated rungs online-edit; licence as recorded.
   One rule changed from a conformance finding (CTU ends its rung).
 - *The equivalent subset is too small to be useful* — the yardstick is
   batch-skid `line/Line.L5X`. Its instruction set is covered (all of
-  `XIC XIO OTE OTU TON GE`, plus `LT` once its `LES` caption is fixed),
+  `XIC XIO OTE OTU TON GE`, plus `LT` once its `LES` caption is fixed —
+  fixed 2026-10-14, #372),
   and every instruction family now has behavioural equivalence measured on
   Echo. What it cannot express is the UDT (`Line_Status` with a coil on a
   member). **Instructions: not a toy. Types: still v1.** Widening to UDTs
@@ -676,8 +694,9 @@ over EtherNet/IP that the controller's logic then acts on.
 
 **The yardstick, written:** `logix/writer/testdata/conformance/yardstick`
 is batch-skid's `line/Line.L5X` Receive routine as a nautilus project. The
-writer emits the export's rung text, with `LES` spelled `LT`
-(`TestYardstickMatchesLineL5X`). **Downloaded to Echo and run there: 3 of
+writer emits the export's rung text byte for byte
+(`TestYardstickMatchesLineL5X`; until #372 corrected the example's `LES`
+caption, with `LES` spelled `LT`). **Downloaded to Echo and run there: 3 of
 3 scenarios pass on both runtimes** (ready below 80 %, the 2 s settle
 before accept with a fault dropping it and raising the structure's alarm
 member, the high-level cutoff unlatching an accept the same scan the OTE
@@ -1094,7 +1113,9 @@ element's preset (179 corpus rungs).
   `Timers[0].PRE` for good on the controller; on nautilus the next call
   bound PT back. Exact rule: when any call indexes an array of blocks
   with a variable, every call on that array presets through a MOVE ahead
-  of its rung. The importer folds those MOVEs back into `PT :=`.
+  of its rung. The importer folds those MOVEs back into `PT :=`. A
+  literal-index element keeps its preset in the tag's data as well (#331):
+  that is its value from download until its first call.
 
 **Measured on Echo:** `bits` 4 of 4 (contacts and coils on bits, a bit
 latched into another word, a masked compare), `arrays` 2 of 2 (four
@@ -1177,9 +1198,16 @@ tag. The writer emits the tag as `TagType="Alias" AliasFor="…"`; the
 importer turns an export's alias tags, and rack points the logic names
 directly (`Local:1:I.Data.3`), into tags with `alias:` (a trailing bit
 index types the guess BOOL, else DINT; the module gives the real type on
-the controller). The nautilus runtime ignores the binding. Controller
-status flags (`S:FS`, first scan) are not rack points: refused by name,
-113 rungs — a first-scan block is the obvious next dialect entry.
+the controller). An export's alias tag carries no DataType, so a rung
+naming one is typed through the target (#330): a tag, a UDT or Add-On
+Instruction member, an array element, a bit, or a rack point's bit (a
+BOOL whatever the module). A whole rack word is typed only by the module
+definition the export does not carry, so an alias of one is refused by
+name rather than guessed, and so are an alias of a whole TIMER, COUNTER
+or AOI instance (a nautilus block instance is never a binding) and a
+program-scoped alias tag (`alias:` is a controller tag's). The nautilus
+runtime ignores the binding. Controller status flags (`S:FS`, first
+scan) are not rack points: refused by name, 113 rungs — a first-scan block is the obvious next dialect entry.
 
 **Measured on Echo:** the `dialect` conformance project (a free-running
 TONR pulse counted by edge; a TONR an input resets while it runs) — 2 of
@@ -1206,7 +1234,7 @@ Rebased onto main, website guide *Authoring for Logix (experimental)*,
 experimental labels on the target's CLI surface, extension CHANGELOG;
 draft PR #225. Known gap carried as a follow-up: `naut lsp` does not run
 the Logix target's rules, so the editor's live diagnostics do not show
-them yet (§5.1); `naut check` does.
+them yet (§5.1); `naut check` does. (Closed by the follow-up below.)
 
 **James's call (2026-10-05):** guide and this phase log reviewed and
 approved; the PR comes out of draft.
@@ -1239,6 +1267,620 @@ exactly the ten tags named plus the side code's `Nautilus_Scan`, `State` a
 match the program (`Count` 6, `StateNo` 1, `HiSP` 80 from the manifest).
 4/4 scenarios on nautilus.
 
+### Follow-up — the target's rules in the editor (2026-10-05)
+
+**Built:** `naut lsp` runs the Logix target's rules on every keystroke,
+closing the §5.1 gap the pre-PR entry carried. It matches `naut check`:
+only in a project whose manifest has `target: logix` (read through the
+LSP's modtime-keyed manifest cache, so adding the section takes effect
+without a restart), only on a buffer that compiles, with the same library
+sources (the dialect's first, unsaved sibling buffers winning). Each rule
+is an error squiggle over its whole line (the writer reports no column),
+source `nautilus (logix target)`, the rule ID as the diagnostic's code.
+One behaviour was settled for both: a file with no PROGRAM, in any
+language, is a library and is checked where a program uses it, so an FBD
+block library no longer draws the "only ladder and ST" diagnostic from
+`naut check`; an FBD or SFC *program* still does, on its PROGRAM line.
+**Cost, measured on the corpus** (133 imported program routines, writer
+check only, steady state): it first ran 9 ms median and up to ~150 ms on
+a 45-line routine with a large project library, because every operand's
+block lookup rescanned every library. The writer now indexes the
+libraries once per lowering: 4.3 ms median, 13 ms p90, 26 ms worst, 7 ms
+for the largest (1,385-line) routine; no debounce. Corpus numbers
+unchanged (97.2 % of rungs; 53 identical + 15 equivalent, 0 refused).
+
+### Follow-up — first scan and the wall clock (2026-10-05)
+
+**James's calls:** dialect blocks before I/O modules, in corpus order;
+and nothing Logix-specific in the language ("as standard as possible"),
+so the two corpus idioms with a standard equivalent became **core**
+features, not `dialect: logix` blocks.
+
+**Built: `FIRST_SCAN()`.** A BOOL function, TRUE for the whole of a
+program's first scan after a start or download; an online edit (a warm
+swap, state kept) and a rollback are not a start, as `S:FS` is not set
+by a Logix online edit. Builtin functions gained an optional host-aware
+form (`ir.HostFn`) and the host an optional `ir.ScanInfo`, which the
+runtime's scan view answers from the program's cold-start flag. Ladder
+uses it as a function contact (`FIRST_SCAN()`, `/FIRST_SCAN()`), ST as
+an expression. The writer emits `XIC(S:FS)` / `XIO(S:FS)` and `S:FS` in
+ST; the importer turns an `S:FS` contact back. Other status flags
+(`S:N`, `S:Z`, …) stay refused by name.
+
+**Built: `LOCAL_TIME`.** A block with no inputs and the outputs of IEC
+`SPLIT_DT` (`YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, `SECOND`,
+`MILLISECOND`), read from the runtime's clock through an optional
+`ir.WallClock`: local time in production, the virtual clock in UTC under
+`naut test`, so calendar tests are machine-independent. In a rung it has
+no power pins (it sits on the rail, power passes through), which is the
+only shape GSV has in the corpus. The writer makes an instance a `DINT[7]`
+tag, a call `GSV(WallClockTime,,LocalDateTime,clk[0])`, a member read its
+element; `MILLISECOND` (Logix keeps microseconds) is an ST expression and
+refused in ladder. The importer turns `GSV(…,arr[k])` into the POU's
+`wallClock` instance plus one assignment copying the seven outputs into
+`arr[k..k+6]` (microseconds as `MILLISECOND * 1000`); the writer folds
+that pair back into the one GSV, and drops the instance's tag, when
+nothing else reads the instance, and otherwise fills the instance and
+copies element by element. GSV of anything else (`Task`, `LastScanTime`:
+none in the corpus) stays refused.
+
+**Not built: `COP`.** Classified by operand type, the corpus's COPs are
+byte serialization: DINT and INT into SINT byte buffers, socket
+structures into bytes and back, for `MSG`/socket payloads. Five are
+same-type array copies. Emulating them needs a byte-layout memory model
+nautilus deliberately lacks, and the routines are blocked by `MSG`
+anyway. **James's call:** skip it; the remaining gap is messaging.
+
+**Corpus:** rungs 97.2 % → 97.9 % (29,752 of 30,397); ladder routines
+complete 70.4 % → 81.0 %; AOI routines 73.5 % → 85.8 %; write-backs
+unchanged (53 identical + 15 equivalent of 68, 0 refused). The "status"
+and "GSV" buckets are gone; the largest left are MESSAGE types (187),
+`RES` (162), `SSV` (51), `COP` (35).
+
+**Measured:** conformance project `system` (the corpus idiom: GSV into an
+array, a sequencer seeded on the first scan, a once-a-second tick, plus a
+clock read by member): 3 of 3 on nautilus and 3 of 3 on Echo; the SDK
+built the GSV and `S:FS` unchanged (download 2 m 13 s). One controller
+fact found on the way: a Logix controller whose clock was never set
+reads 1998-01-01 (Echo after its service restarts), so the scenario
+asks for a calendar, not the date. Echo itself needed attention first:
+after the VM rebooted, Tailscale wanted a desktop login (James), and the
+Echo service needed a restart to bind its controller to the address
+again, which emptied the controller.
+
+### Follow-up — conversions written exactly or refused (2026-10-13, #255)
+
+Phase D dropped every conversion ("Logix converts on assignment"), and
+that ran differently: `DINT_TO_INT(x)` of 70000 stayed 70000 (nautilus
+4464), `REAL_TO_DINT(r) + 1` was not rounded inside the expression,
+`DINT_TO_REAL(a) / 2` divided as integers, `DWORD_TO_DINT(REAL_TO_DWORD(r))`
+moved the number instead of the bits. Logix has no conversion functions;
+it converts as it stores a value or mixes operand types. So the ST writer
+(`logix/writer/convert.go`) now types each argument from the
+declarations and writes each conversion as Logix that computes the same,
+or refuses it with **`logix/conversion`**:
+
+| Conversion | Written as | Why it is exact |
+|---|---|---|
+| integer → narrower integer or TIME | `((((v MOD 65536) + 98304) MOD 65536) - 32768)` (INT), `… 256 … 384 … 128` (SINT); `v` when it already fits; a literal folded | the first `MOD` leaves a remainder of either sign, the offset makes it positive, so the result is the low bits read signed whichever sign rule `MOD` has; integer arithmetic only, no `AND`/`XOR` |
+| integer → wider integer, TIME ↔ DINT | `v` | a tag of that width holds only values that fit; Logix integers are 32 bits |
+| the argument wider than the source (`INT_TO_DINT(dint)`) | the wrap to the source width | nautilus reads the argument as the source type first |
+| integer → BOOL, REAL → BOOL | `(v <> 0)`, `((v MOD 65536) <> 0)`, `(v <> 0.0)` | nonzero, at the source width |
+| integer → REAL | `v` as the whole right-hand side or beside a REAL tag or literal, else `(v * 1.0)`; a tag or literal only | Logix converts the operand itself in each of those places; an integer *expression* is refused, since Logix may evaluate it in REAL once it meets one |
+| integer → LREAL, REAL ↔ LREAL | `v`, as the whole right-hand side only | the store converts; mixing inside an expression is unverified |
+| BOOL → number | `IF b THEN x := 1; ELSE x := 0; END_IF;`, whole right-hand side only | no arithmetic on a BOOL |
+| `TRUNC_<int>(r)` | `TRUNC(r)`, as the whole right-hand side of an integer assignment | the value stored is already whole, so no rounding rule applies |
+| REAL → integer or TIME | `r`, as the whole right-hand side of an assignment to a tag of the conversion's own type (`i := REAL_TO_INT(r)` → `i := r;`, `t := REAL_TO_TIME(r)` → `t := r;`) | the store rounds halves to even, as nautilus does (verified on Echo, below); TIME is a DINT of milliseconds, the unit `REAL_TO_TIME` counts. Refused inside an expression (Logix would compute with the unrounded REAL), into another type (the store rounds to the destination's width) |
+| LREAL → integer or TIME | refused | not verified on a controller |
+| unsigned, BYTE…LWORD, LINT, LTIME, STRING | refused, the type named | no Logix type in the subset (the importer reads LINT and the unsigned types in brownfield declarations; the writer declares none) |
+
+A narrowing wrap is also refused inside an expression that mixes in a
+REAL (Logix might compute its `MOD`s in REAL); a comparison's operands and
+an array index count as computations of their own. Two divergences stay,
+as they do for every value: a REAL is 32 bits on the controller and 64 in
+nautilus, and a REAL with no value in the target faults the nautilus scan
+where the controller rounds it and stores the result's low bits (below).
+Ladder is unchanged:
+`{ y := X_TO_Y(v) }` was and is refused by `logix/data-op`
+(`logix/operand` in a compare).
+
+**Verified on Echo** (v38, 1756-L85E emulation, 2026-10-14, #297): the
+written conversions computed nautilus's value for 271 of 279 results over
+9 input sets; the other 8 were a `3.7` input's float32 rounding. What the
+controller does:
+
+| Question | Observed |
+|---|---|
+| a REAL stored into DINT / INT / SINT | rounds **halves to even**, at run time and for literals: 2.5 → 2, 3.5 → 4, −2.5 → −2, −3.5 → −4, 0.5 → 0, 1.5 → 2, −0.5 → 0, −1.5 → −2 (nautilus's `REAL_TO_DINT`) |
+| `MOD` of a negative DINT | truncated, the dividend's sign: −70000 MOD 65536 = −4464, −7 MOD 3 = −1, 7 MOD −3 = 1 (as nautilus) |
+| `AND` / `XOR` on a DINT | bitwise: 70000 AND 65535 = 4464, 5 XOR 3 = 6; `((v AND 65535) XOR 32768) - 32768` wraps to INT for every value tried (the writer keeps the `MOD` form) |
+| `(v * 1.0)`, a DINT compared with a REAL | the integer becomes REAL (float32: 16777217 = 16777216.0 is TRUE) |
+| `TRUNC` of a REAL into a DINT | toward zero (2.7 → 2, −2.7 → −2) |
+| a REAL out of range | rounded, then **wrapped** to the target's low bits, never saturated: 3e9 → DINT −1294967296, 2^31 → −2^31, 1e20 → 0, 40000.5 → INT −25536. With the writer's `ReportMinorOverflow="false"` nothing is logged and the controller keeps running; `S:V` cannot be read in ST. nautilus faults the scan |
+| an integer `/` beside a REAL | divided **in REAL** once the destination or a comparison partner is REAL: `r := a / 2` is 3.5 for a = 7 (nautilus 3) — #361, below |
+
+### Follow-up — REAL → integer as a store, integer `/` beside a REAL (2026-10-14, #361)
+
+With ties-to-even verified, `REAL_TO_DINT` / `_INT` / `_SINT`, `TO_<int>`
+of a REAL and `REAL_TO_TIME` are written as a plain store when the
+conversion is the whole right-hand side of an assignment to a tag of the
+conversion's own type. Anything else stays refused: inside an expression
+(Logix rounds only as it stores), into a narrower or wider tag
+(`i := REAL_TO_DINT(r)` with `i` INT: nautilus stores the rounded DINT
+unwrapped, the store would round and wrap to 16 bits; the fix is a DINT
+tag and `DINT_TO_INT`), and from an LREAL (unverified). Out of range the
+general divergence applies: Logix wraps silently, nautilus faults; a
+`REAL_TO_TIME` beyond a DINT of milliseconds (±24.8 days) wraps on the
+controller, where nautilus's TIME is 64 bits.
+
+An integer `/` whose quotient meets a REAL — stored into a REAL or LREAL,
+computed beside a REAL operand, or compared with one — is refused with
+`logix/conversion`, naming the fix: compute the quotient into a DINT tag
+first (or divide by a REAL if a REAL quotient is meant). A division whose
+own operand is REAL is a REAL division in nautilus too and is written as
+before; an all-integer division (an integer destination, an integer
+comparison partner, an array index) is written unchanged. Ladder's `DIV`
+and `CPT` with a REAL destination are not covered here (unverified).
+
+### Follow-up — integer `/` on a rung, expressions as AOI inputs in ST (2026-10-14, #368)
+
+**Verified on Echo** (ws-test, v38, 1756-L85E emulation), DINT `a`, `b`,
+`c`, REAL `x`, results read over EtherNet/IP with `naut test --target
+logix`:
+
+| Rung (as written) | a, b, c, x = 7, 2, 3, 3.25 | −7, 2, 3, −3.25 | 11, 4, 1, 2.5 | nautilus |
+|---|---|---|---|---|
+| `DIV(a,b,rDiv)`, REAL destination | **3.5** | **−3.5** | **2.75** | 3, −3, 2 |
+| `DIV(a,2,rLit)`, REAL destination | **3.5** | **−3.5** | **5.5** | 3, −3, 5 |
+| `CPT(rCpt,(a / b) + c)`, REAL destination | **6.5** | **−0.5** | **3.75** | 6, 0, 3 |
+| `CPT(rCptX,(a / b) + x)` | **6.75** | **−6.75** | **5.25** | 6.25, −6.25, 4.5 |
+| `CMP(a / b > x)` | **TRUE** | **FALSE** | **TRUE** | FALSE, TRUE, FALSE |
+| `DIV` / `CPT` into a DINT, `CMP(a / b > c)` | 3, 6, FALSE | −3, 0, FALSE | 2, 3, TRUE | the same |
+
+So a rung divides integers in REAL in the same places ST does. The writer
+now refuses with `logix/conversion` an integer `/` in a DIV or CPT into a
+REAL or LREAL, in a CPT with a REAL operand, and in a CMP against a REAL
+(`logix/writer/data.go`, typed as ST through `realDivision` in
+`convert.go`); into an integer, or against an integer, it is written as
+before.
+
+**An integer `/` bound to a REAL input of an AOI in an ST call** has no
+run-time divergence to measure: the call does not build. The v38 SDK
+refuses any expression as an Add-On Instruction operand in ST —
+`PassR(p1, (a / b));`, `PassR(p1, a / b);`, `PassR(p1, (a));` and
+`PassR(p1, -a);` all fail the build with `RxSTX_E_UNEXPECTED_TOKEN` —
+while `a`, `p2.y`, `-5`, `2.5` and `3` build. The writer emitted the
+expression form, so a project with one passed `naut check` and failed at
+the SDK build (§7a, "errors surface late"). `logix/fb-pin` now refuses an
+input bound to an operator expression or to anything that is not written
+as a tag path or a number; a negative literal is written `-5` (not
+`- (5)`), and the input counts as a store into the parameter, so
+`DINT_TO_REAL(a)` into a REAL input is written as `a`. Not built: an
+element with a tag index (`arr[k]`), which the writer accepts.
+
+**The conformance set (#255's last item).** Two projects under
+`logix/writer/testdata/conformance/`, run on Echo with `naut test --target
+logix` from a copy whose target block names ws-test:
+
+| project | scenarios | nautilus | Echo |
+|---|---|---|---|
+| `conversions` (ST): every written class into its own tag — the narrowing wraps, widening, TIME as DINT ms, int → REAL / LREAL, BOOL both ways, TRUNC, REAL → DINT / INT / SINT / TIME as a store, a comparison and an index of their own, `xa / 2` into a DINT and through it into a REAL, and three user-block inputs (a DINT tag into a REAL input, `DINT_TO_REAL(xd)`, `REAL_TO_DINT(xr)` into a DINT input) | 12 | pass | **12 of 12 pass**, exact |
+| `division` (ladder): DIV and CPT into a DINT and an INT, a CMP against a DINT, the quotient through a DINT tag into a REAL (MOVE), a REAL divided by a DINT, that tag compared with a REAL | 4 | pass | **4 of 4 pass** |
+
+The REAL inputs are exact in float32 (2.5, 3.75, 100.25, …), so the
+#297 run's 8 float32 differences of a `3.7` input do not recur, and every
+assertion is an exact comparison. The ties 2.5, −2.5, 3.5, −3.5, 1.5,
+0.5 and −0.5 are among the inputs, so the user-block input
+`REAL_TO_DINT(xr)` shows that the copy into an AOI parameter rounds halves
+to even like an assignment. An INT store out of range is not asserted
+(`division`'s large quotient): the controller wraps where nautilus keeps
+the value (`st-int-width`), which is not a conversion question.
+
+### Round trip on the yardstick (2026-10-14, #276)
+
+The video beat: import the public yardstick, show the project it writes,
+write it back, diff. Run offline, pure Go, no controller, from a
+directory holding a copy of `examples/batch-skid/line/Line.L5X`:
+
+```sh
+naut logix import --project line Line.L5X
+#   wrote line/MainProgram.ld, line/lib/logix_types.st,
+#   line/nautilus.yaml, line/tags/logix.yaml
+#   1 ladder routine, 1 complete; 5 rungs, 5 carried
+naut check line                       # clean: 0 errors, 0 warnings
+naut logix write -o back.L5X line/MainProgram.ld
+naut logix normalize --logic --check back.L5X Line.L5X
+```
+
+**On main before this change the flow did not hold.** `naut logix write`
+ignored the imported `target: logix` and the tag file, so the write-back
+was controller `MainProgram` on a 1756-L85E at 38.11, routine
+`MainRoutine`, and every tag at zero with no description: `Line_Ready`
+1 → 0, `Line_TankLevel` 20.0 → 0.0, `Line_Status.Mode` 1 → 0. And
+`naut check` warned on the fresh import (the timer, moved into the
+program, was also left in the tag file). Fixed here:
+
+- `naut logix write` on a project's task program writes what `naut logix
+  deploy` would send: controller, processor, revision, program, routine
+  and task from `target: logix`, the rate from the task, each tag's
+  `init:`, `desc:` and `alias:` from the tag file. A flag given still
+  overrides.
+- The import records `routine:` (when it is not `MainRoutine`), `program:`
+  (when the Logix name is not an identifier) and the new
+  `continuous: true` for a CONTINUOUS task, which `write` and `deploy`
+  honour instead of turning the task PERIODIC at the 10 ms nautilus scan.
+- A controller-scoped TIMER/COUNTER the import declares as a program
+  instance is left out of the tag file (unless some program also names it
+  as a tag), so the imported project checks clean. (The follow-up below
+  lists it under `target.logix.controller-scoped` instead.)
+- `naut logix normalize --check` gained `--logic`: drift `--logic`'s
+  comparison (programs, routines, rung text and comments, tag names,
+  scopes and types; never values) between two files on disk, each
+  difference listed. A byte or normalized comparison of a write-back with
+  a lean export can never be equal (below), so this is the diff the beat
+  shows.
+
+**Outcome on #276: equivalent, not identical, with four logic
+differences, each named** — rung 0's `LES(` came back `LT(`, `AcceptTmr`
+came back program-scoped (`MainProgram.AcceptTmr`) and without its
+description, and `Line_BatchId`, which no routine names, was not written.
+Each became an issue; all three are closed by the follow-up below.
+
+**Follow-up (2026-10-14, #370, #371, #372): the same logic, no
+differences.** `TestLogixRoundTripYardstickCLI` in `cmd/naut` pins the
+exact output; any difference fails it:
+
+```
+Line.L5X and back.L5X have the same logic
+```
+
+| was | fix | issue |
+| --- | --- | --- |
+| rung 0 `LES(` → `LT(` (spelling: `LES` is the editor caption, `LT` what an export carries, logix-target.md's display/neutral-text split) | The example itself was wrong: on the v38 SDK (2026-10-14, #377) `LT(a,c)` imports, builds and exports as `LT`, while `LES(a,c)` imports and exports unchanged but fails the build (`RxCMP_E_AUDIT_INVALIDOPTYPE`, DINT and REAL operands alike). Rung 0 of `Line.L5X` now reads `LT(Line_TankLevel,80.0)OTE(Line_Ready);`, a third commit on the file (the README's two-revision interlock story is unchanged). No other example or fixture L5X carries a caption in rung text | #372 |
+| `AcceptTmr` controller → program scope, description dropped (semantic for an external client: `AcceptTmr.ACC` moved to `Program:MainProgram.AcceptTmr.ACC`) | A block instance is still a program's in nautilus (a manifest tag cannot be a TON), so the import keeps declaring it in `MainProgram.ld`; it also lists it in the manifest, `target.logix.controller-scoped: [{ name: AcceptTmr, desc: "Accept-handshake settling delay" }]`, and the writer emits a listed program `VAR` as a controller tag with that description. The rungs are unchanged. A listed name that is not a program `VAR` is a diagnostic, never ignored | #371 |
+| `Line_BatchId` not written (semantic: the skid writes it over EtherNet/IP; no routine names it and the writer emitted only the tags a program names) | The import sets `target.logix.all-tags: true` — its tag file is the controller's tag set — and the writer then emits every typed manifest tag it can carry, named or not. The tag file now types each tag whose `init:` does not already say its type (`Line_BatchId`: `type: DINT`, since `init: 0` alone is a REAL); a tag with no nautilus type (`MESSAGE`, a multi-dimensional array, an unnamed TIMER) stays in the tag file as documentation, and one whose type the v1 subset lacks (`STRING`, `LINT`, unsigned) stays there too and is skipped by the writer, not refused; the import reports each, because no write can create it. Without `all-tags` a tag no program names is still not written (LGA-001): the opt-in keeps a hand-written project's tag set, and so its `--online` deploys, unchanged | #370 |
+
+Rungs 0–4 are byte-identical, all five rung comments are identical, the
+controller (`LineController`, 1769-L33ER, 36.11), program, routine
+(`Receive`) and task (`MainTask`, CONTINUOUS) are identical, every one of
+the export's eight controller tags comes back at controller scope with its
+initial value and description, and the program has no tags, as in the
+export.
+
+Outside the logic comparison (the raw `diff` is 129 lines; `normalize
+--check` without `--logic` says "differ"):
+
+- **Equivalent — envelope.** The writer emits a whole project where the
+  yardstick is a lean export: `RedundancyInfo`, `Security`, `SafetyInfo`,
+  `Modules` (the `Local` module), `AddOnInstructionDefinitions`, `CST`,
+  `WallClockTime`, `Trends`, `TimeSynchronize`, `EthernetPorts`, more
+  `Controller` attributes, `Owner="nautilus"`, a different
+  `ExportOptions`, and `ExportDate="(pinned)"`.
+- **Equivalent — formatting.** Controller tags in the program's
+  declaration order (its `VAR_EXTERNAL`, which the import sorts by name,
+  then `AcceptTmr`, then `Line_BatchId`, which no routine names) rather
+  than the export's; each value also as `<Data Format="L5K">`; the
+  Decorated data on its own lines.
+- **Equivalent — the `Local` module.** The yardstick is a lean export
+  with no `<Modules>`; the write-back's `Local` module is the
+  1769-L33ER's own, from Logix Designer's export of one (#373, below).
+  Until #373 (c) it was the 1756-L85E's with the catalog number changed,
+  which Logix Designer v38 refuses to import.
+
+**Follow-up (2026-10-14, #373): metadata.** Two of the three named
+metadata differences are gone; the third is now said out loud.
+`TestLogixRoundTripYardstickCLI` also compares `SoftwareRevision` and each
+UDT's description and its members' with the export's.
+
+| was | fix |
+| --- | --- |
+| `SoftwareRevision="38.01"` for any target (the yardstick's export says `36.00`) | The default is the target's own Logix Designer release, `writer.SoftwareRevisionFor(major)`: `38.01` for v38 (what ECHO1's real exports, `lang/l5x/testdata/demoline.L5X` and its siblings, carry) and `<major>.00` for any other major — `36.00` for v36, which is what the yardstick, a stand-in export, says. The firmware minor (`.11`) is not the software minor, so the controller's `MinorRev` is not used. `naut logix write --software` still overrides it, and now defaults to empty (derived); deploy and serve get the derived value because they leave `SoftwareRevision` unset. A v38 project's output is unchanged, so no golden moved |
+| the UDT's description dropped | `naut logix import` writes a UDT's description, and each member's, as the declaration's trailing comment in `lib/logix_types.st` (`LineStatus : STRUCT (* Mode/alarm summary … *)`, `Mode : DINT; (* … *)`) — the IEC habit the LSP already reads for a VAR's description, and the type stays the one place it is said, rather than a manifest field beside it. The writer reads a STRUCT's and member's trailing comment (`//` or `(* … *)`, a multi-line one joined line by line, a `(* @… *)` pragma ignored, a comment on a line of its own not attached) and writes it as the `<DataType>`'s and `<Member>`'s `<Description>`, the member in the element form an export uses. A `*)` or `(*` inside a description is written `* )` / `( *`, so that round trip is lossy by one space |
+| the `Local` module is the 1756-L85E's for any processor | Fixed by data, below ("The `Local` module, from Logix Designer itself"). This row first shipped as a warning only (#382): the repo had no CompactLogix export with a `<Modules>` section, and product codes are not guessed |
+
+Needs a controller-side (Logix Designer) check: that v36 Logix Designer
+opens a write-back claiming `36.00` (and v38 one claiming `38.01`, as
+today); that a UDT and member `<Description>` written in this shape import
+and survive a build. (The `Local` module's check is done, below.)
+
+**The `Local` module, from Logix Designer itself (2026-10-14, #373 (c)).**
+No export had the data, so Logix Designer was asked for it: on ws-test
+(Logix Designer v38.01, the only release installed) logixd's
+`POST /v1/create` (`logixd.Client.CreateProject`, the SDK's
+`LogixProject.CreateAsync`) made an empty project for each processor at
+38.11 and `POST /v1/convert` exported it to a lean L5X. Each export is
+committed verbatim in `logix/writer/testdata/local/<catalog>.L5X`; they
+are vendor-generated metadata with no client data. The writer's table
+(`localModules`) has a row for exactly those processors, and
+`TestLocalModulesMatchExports` writes a project for each and compares
+it with the export: the `<Modules>` element attribute for attribute,
+`<EthernetPorts>`, `<RedundancyInfo>`, and the `<Controller>`
+attributes in the export's order (all but the name, the dates and the
+`DataExchangeId`).
+
+Three envelopes, by family; within a family only the product code and
+the backplane size change:
+
+| family | processors (ProductType 14, ProductCode, backplane `Bus Size`) | `Local` ports | `<EthernetPorts>` | `<Controller>` differs by |
+| --- | --- | --- | --- | --- |
+| ControlLogix 5580 | 1756-L81E 164, L82E 165, L83E 166, L84E 167, L85E 168 — all 17 | 1 `ICP`, 2 `Ethernet` | `1` | — (the shape the writer always had; DemoLine's L85E agrees) |
+| CompactLogix 5370 L3 | 1769-L30ER 106 (9), L30ER-NSE 109 (9), L30ERM 156 (9), L33ER 107 (17), L33ERM 110 (17), L36ERM 108 (31) | 1 `Compact`, 2 `Ethernet` | `1`, `2` | `TimeSlice="20" ShareUnusedTimeSlice="1"` after `MinorRev`; no `AutoDiagsEnabled`/`WebServerEnabled`; `RedundancyInfo` carries `IOMemoryPadPercentage="90" DataTablePadPercentage="50"` |
+| CompactLogix 5380 | 5069-L306ER 196 (9), L306ERM 189 (9), L310ER 216 (9), L310ER-NSE 188 (9), L310ERM 190 (9), L320ER 217 (17), L320ERM 192 (17), L330ER 218 (32), L330ERM 193 (32), L340ER 219 (32), L340ERM 194 (32), L350ERM 195 (32), L380ERM 228 (32), L3100ERM 230 (32) | 1 `5069`, 3 and 4 `Ethernet` | `A1`, `A2` | `EtherNetIPMode="A1/A2: Dual-IP"` before `AutoDiagsEnabled` |
+
+The writer still omits the trailing `<OpcUaInfo EnabledPorts=""/>`
+(5580, 5380) and `<EthernetNetwork …/>` (5370, DLR supervisor defaults)
+an export ends with, as it always has for the L85E; the import defaults
+them.
+
+Not in the table, so still the 1756-L85E's module and the warning:
+
+- **CompactLogix 5370 L1/L2** (1769-L16ER-BB1B 153, L18ER-BB1B 154,
+  L18ERM-BB1B 155, L19ER-BB1B 152 on a `PointIO` port; 1769-L24ER-QB1B
+  149, L24ER-QBFC1B 150, L27ERM-QBFC1B 151 on `Compact`). v38 creates
+  them, but each project carries embedded I/O modules beside `Local`
+  (one or three) that the writer does not emit; a `Local` row alone
+  would write a controller without its own I/O.
+- **CompactLogix 5480**: v38 cannot create one (5069-L46ERMW:
+  `RxPTV_E_UNSUPPORTED_PROCESSOR_REV`; 5069-L4100ERW, L4200ERW, L4200ERM:
+  "Not supported processor type").
+- Safety controllers (GuardLogix, Compact GuardLogix), ControlLogix 5570
+  and anything else not tried.
+
+Revision: every row came from a v38 project. The `Local` module's
+`Major`/`Minor` are the target's, as before; the product code and ports
+are the hardware's, so a v36 target (the yardstick) gets the same row,
+but no v36 Logix Designer has opened one (only v38 is installed).
+
+**Build-checked on v38** (ws-test, `naut logix build` of a written L5X:
+the SDK imports it, then `BuildAsync`): the batch-skid yardstick,
+imported with `naut logix import` and written back with its target
+retargeted in a scratch copy to 38.11 and each of 5069-L320ER,
+5069-L340ERM, 1769-L33ER, 1769-L36ERM and 1756-L83E, imports with
+`<Summary Warnings="0" Errors="0"/>` and builds ("Build succeeded") for
+every one. A conversion of the 5069-L320ER and 1769-L33ER write-backs
+back to L5X shows Logix Designer kept the written `Local` module and
+`<EthernetPorts>` unchanged. The writer before this change (the L85E's
+module with the catalog number changed) is refused for both
+CompactLogix processors: `XMLSrv_E_IMPORT_ABORTED_NO_CHANGES - The
+Import was cancelled due to errors`, so the warning #382 added was
+describing a project v38 would not open.
+
+Not yet checked on a controller: the v38 build of the corrected
+`Line.L5X` and of a write-back with a controller-scoped `TIMER`.
+
+What the video can say, word for word: *"Import, write back, compare the
+logic: no differences — every rung, and every tag where the controller had
+it, including a timer at controller scope and a tag only the skid
+writes."*
+
+### Follow-up — deploy from the editor, verified on a controller (2026-10-14, #375)
+
+The editor's **Push Online Edit** and **Download Project** commands
+(#271) post to `POST /api/logix/deploy` on `naut logix serve --project`
+and read its NDJSON stream. Verified on an Echo controller (v38,
+1756-L85E emulation) with the DemoLine project
+(`logix/writer/testdata/project`, its target pointed at that controller in
+a scratch copy), driving the endpoints with the request the extension
+sends and running each recorded stream through the extension's own
+splitter and summary (`logixDeployLogic.ts`). Live values were read from
+`/api/stream` throughout.
+
+| step | wall time | result |
+|---|---|---|
+| Download, controller in Run, no Program-mode switch | 81 s to the refusal | refused by the SDK after import + build (29 s) and the logic diff (39 s): `RxE_INVALID_START_STATE - Invalid start state.  Internal error.`, shown verbatim with the SDK's status lines |
+| Download with *Switch to Program Mode and Download* | 120 s to verified, 173 s to the summary | import + build 33 s, diff 37 s, download 16 s, verify 34 s; the reopened online session 53 s more. Summary: "downloaded to DemoLine and verified in 120 s — the controller is in Program mode" |
+| first online edit after the serve starts | 50.2 s | session open 47.2 s, then the edit 3.0 s; 2 rungs replaced, verified, Run kept. Largest gap between stream chunks 47.2 s, well inside undici's 300 s body timeout |
+| warm online edits, Run | 1.6 s, 1.5 s | 2 rungs replaced, verified, Run kept |
+| online edit that adds a tag | immediate | 422: "the tag set changed (1 difference(s)); an online edit cannot create or retype tags, so a download is needed. Download the project to the controller (nautilus: Download Project to Logix Controller, …)"; the extension reads it as needs-download and offers **Download Project…** |
+| that download (the tag added to `nautilus.yaml` after the serve started) | 108 s to verified, 154 s to the summary | the held session closed in 0.6 s, then logixd took the download's own project at once; session reopened in 45 s |
+| the next online edit, controller in Program | 2.9 s | 2 rungs replaced, verified, Program kept |
+
+Through the edits the live stream never paused (no gap over 2 s) and the
+controller's scan counter kept counting; a rung change (`GE` → `GT` with
+`LevelPct` = `HiLevelSP` = 85) turned `HiLevelAlm` off on the stream as the
+edit finalized. Across a download, tag reads failed for about 3 s and
+then recovered with the project's values (`LevelPct` back to 0); the tag
+the download added was not served until the serve restarted, the
+documented limitation (the facade browses once at startup).
+
+Found and fixed on the way:
+
+- **The warm session could pick the side program's routine.** With
+  `side: heartbeat`, the controller has two `MainRoutine`s
+  (`MainProgram` and `Nautilus`), and the session chose one in map order:
+  after the first download it held `Nautilus/MainRoutine` and refused the
+  next edit with "does not run this program's routine yet". The session
+  now keeps every routine from the upload and picks by the program each
+  edit writes, and compares only that routine (the side routine had also
+  kept an unchanged program from ever reading as "already runs this
+  logic").
+- **A stopped serve left its online session open** in logixd until the
+  idle reaper (30 minutes). Stopping the serve now takes the session
+  offline and closes it (checked on the controller: logixd listed the
+  session before Ctrl+C and none after).
+
+The buttons themselves: smoke check 19 (`tools/rig/smoke/19-logix-deploy-buttons.sh`)
+opens DemoLine's `MainProgram.ld` in the text and the diagram editor and
+finds **Push Online Edit** in the title bar and **Download Project** in
+the `…` menu, and finds neither on a `naut new` project.
+
+Two things were left as they were, and #379 then changed them: a
+download's summary arrived only after the next edit's session had
+reopened (about 50 s after "verified", with "opening the online session
+for the next edit" on screen meanwhile), and an edit's summary time
+counted the edit, not the session open before it. Now the download's
+report goes out when it has verified and the session reopens after it,
+on the same stream (`ProgramPlane.Warm`), while the plane already takes
+the next deploy, which waits for the session and says so; `elapsedMs` is
+the whole wait from the request (`deployMs` the deploy's own part); the
+stream's headers and a first line go out at once, and a warm edit says
+"replacing …" and "verifying …" as it gets there. A plain download
+refused with `RxE_INVALID_START_STATE` is a `deploy.StartStateError`: a
+409 saying the controller is in Run and to use *Switch to Program Mode
+and Download*, `needsProgramMode` for the editor's button, and the SDK's
+text as `detail`. Not yet re-measured on a controller.
+
+**An ST routine's warm online edit in Run (#272, measured 2026-10-14 with
+#273):** the same endpoint, an ST version of DemoLine
+(`MainProgram.st`, 11 lines, one comparison changed per edit), the
+session opened after an editor download, the controller then put in Run:
+
+| edit, controller in Run | wall time | result |
+|---|---|---|
+| first after the mode change | 3.7 s | routine replaced, verified, Run kept |
+| second, third, fourth | 1.9 s, 1.9 s, 1.85 s | routine replaced, verified, Run kept |
+
+Phase B measured 4.0 s for an ST edit in Program; in Run the warm ST edit
+is under 2 s, about the ladder edit's 1.5 s plus the larger routine
+export that verifies it.
+
+### Follow-up — a download keeps the controller's values (2026-10-14, #273)
+
+**Before:** a download sent the project as written, so every tag went back
+to its initial value. Checked on Echo (v38, ws-test) with a scratch
+DemoLine carrying a nested UDT (`Pump1 : Pump`), a REAL array, a TIMER and
+a COUNTER: HiLevelSP 72.5, SpareSP 42, Pump1.Speed 55.5,
+Pump1.Status.Mode 3, LevelLog[2] 12.25 and the counter's accumulator 17,
+all written over EtherNet/IP with the controller in Run, came back as 85,
+5, 40, 0, 0 and 0 after `naut logix deploy --download` of the same
+project. The upload the deploy already made carried every one of those
+values, in both the L5K and the Decorated form.
+
+**Now:** for a download, the deploy uploads the running controller first
+(the upload it made anyway, moved ahead of the import), plans the values
+tag by tag (`deploy.PlanValues`, a pure function over the generated
+project and the upload's L5X), and splices the controller's `<Data>`
+elements into the project before import and build (`ValuePlan.Apply`;
+the skeleton and the program partial of the two-step AOI build too).
+The rule:
+
+- **kept:** a Base tag with the same name (case-insensitive) and scope
+  (controller, or the same program) on both sides, the same data type and
+  dimensions, and for a UDT or AOI type the same definition on both sides
+  (visible members; AOI parameters and local tags; nested types expanded).
+  Its data is copied as the SDK exported it.
+- **except a TIMER's or COUNTER's preset,** which is the project's: a
+  literal `PT := T#30S` lives only in the tag's PRE, so it is code, and a
+  changed one must take effect. The accumulator and status bits are kept.
+  (An ST timer is an `FBD_TIMER` whose PRE the routine assigns every scan;
+  kept whole.)
+- **reset, with the reason reported:** type, dimensions or definition
+  changed; constant in the project; no data in the upload.
+- **new:** only in the project, at its initial value. **Dropped:** only on
+  the controller; reported, removed by the download.
+
+The values are the upload's, taken about 30 s (the import + build) before
+the download stops the controller; what the program changes in that window
+is not carried. A changed `init:` in `nautilus.yaml` does not override a
+kept value. `--reset-values` (CLI), `"resetValues": true` (endpoint) and
+`nautilus.logix.resetValuesOnDownload` (extension) start every tag at the
+project's value. A build without `--download` reports what a download
+would do. Total download time is unchanged (the upload moved, it was not
+added): 1 m 57 s to verified, against 2 m 0 s before.
+
+**On Echo** (ws-test, controller in Run with the values above written):
+
+| step | result |
+|---|---|
+| `naut logix deploy --download --yes --program-mode` of a changed project: a new rung, a new tag `NewSP` (init 7), `SpareSP` DINT → REAL (init 5.0), the timer's `PT` 30 s → 45 s | "tag values: 11 kept from the controller, 1 reset to the project's value (SpareSP: DINT → REAL), 1 new (NewSP)"; verified in 1 m 57 s |
+| read back over EtherNet/IP | HiLevelSP 72.5, Pump1.Speed 55.5, Pump1.Status.Mode 3, LevelLog[2] 12.25, counter ACC 17 (PRE 1000): kept. SpareSP 5.0: reset. NewSP 7: initial. Timer PRE 45000: the project's |
+| Run, StartPB pulsed | RunCmd sealed in, the counter counted on from the kept 17 to 18, Pump1.Run on (from the kept speed), the scan counter counting |
+| download from the editor endpoint (`POST /api/logix/deploy`, Switch to Program Mode) of the project rewritten in ST, after writing HiLevelSP 66, SpareSP 9.5, NewSP 12 | "11 kept, 2 reset (MainProgram.RunTmr: TIMER → FBD_TIMER; MainProgram.Starts: COUNTER → FBD_COUNTER)"; done event `valuesKept: 11` and the two `resets`; HiLevelSP 66, SpareSP 9.5, NewSP 12, Pump1 and LevelLog read back kept |
+
+`TestHardwareDownloadKeepsValuesUnlessReset` (LGA-037, LGA-047) is the
+repeatable check: download with values reset (85), write 70, online edit
+(70 kept), download (70 kept), download with ResetValues (85). Passed on
+Echo in 466 s, after a fix: it held one EtherNet/IP connection across the
+downloads, and a download resets every connection open before it, so it
+now dials per access.
+
+
+### Follow-up — the hardware configuration (2026-10-14, #275)
+
+Decision 1 of §6, built as proposed: the project carries Logix Designer's
+own `<Modules>` section, and the writer merges it. Alias tags of rack
+points (Phase E) now land on modules, so an imported real-shaped program
+with I/O writes, builds and downloads.
+
+**Built.**
+
+- `lang/l5x` reads `<Modules>`: each module's identity (`Vendor`,
+  `ProductType`, `ProductCode`, `Major`/`Minor`), parent, parent port and
+  ports, and the element's own bytes (`Controller.ModulesXML`).
+- `target.logix.hardware`: an L5X, relative to the project, whose
+  `<Modules>` is the I/O configuration. Any whole-project export works;
+  only that section is read. `writer.Options.Hardware` replaces the
+  generated `Local` module with it, verbatim (CRLF made LF, which XML
+  reads the same). `naut logix write`, `naut logix deploy`, the editor's
+  deploy (`naut logix serve --project`) and `naut test --target logix`
+  all load it through `loadLogixProject`; a file that does not parse, or
+  has no `<Modules>` or no `Local` module, stops them by name. With a
+  configuration the unverified-`Local`-module warning (#382) is not
+  printed: the module is the export's.
+- Rules. `logix/io-module`: an alias whose target is a rack point —
+  `Local:1:I.Data.3` (slot 1 of the controller's chassis),
+  `Remote1:1:I.Data.0` (slot 1 under the adapter `Remote1`),
+  `Drive1:I.Speed` (the module `Drive1`) — needs that module in the
+  configuration; the message names the alias, the module, and what the
+  configuration has, or, with no configuration, says to add one.
+  `logix/hardware`: the configuration's `Local` module is the target's
+  processor at the target's revision. Both fire in `naut logix write` and
+  deploy, not in `naut check` or the editor's live diagnostics, which do
+  not read the manifest's target.
+- `naut logix import --project` writes `hardware.L5X` (the controller's
+  name, processor and revision around the export's `<Modules>`, with a
+  comment saying where it came from) and `hardware: hardware.L5X` when
+  the export has a module besides `Local`. A `Local`-only export gets
+  none: the writer's table (#373) already reproduces that module.
+
+**Why not stubs first.** The 2026-10-06 spike found that Logix Designer's
+import takes a module stub — `Name`, `CatalogNumber`, `Vendor`,
+`ProductType`, `ProductCode`, `Major`, `Minor`, `ParentModule`,
+`ParentModPortId`, the upstream port's `Address` (slot or IP) and an
+`EKey` — and fills in the rest, but that the identity is the key: a
+missing code aborts the import (`XMLSrv_E_IMPORT_ABORTED_NO_CHANGES`) and
+a wrong one silently makes it a different module (in the spike,
+product code 13 came back as a 1756-OA16). A generated module is only as good
+as an identity table nobody has a public source for, and a module's
+configuration (filters, fault modes, RPI) is the plant's, not a default.
+A merged export carries both exactly. So the merge is the primary path,
+and generation waits for a table verified module by module.
+
+**Measured on ws-test** (Logix Designer v38.01, an Echo 5580 at v38.11):
+
+| step | result |
+|---|---|
+| a synthetic 1756-L85E project (`IOLine`: seal-in + flow alarm), aliases `StartPB`/`StopPB` → `Local:1:I.Data.0/1`, `RunCmd` → `Local:2:O.Data.0`, `FlowSw` → `Remote1:1:I.Data.0`, written with no modules | SDK import 0 errors, build fails: `RxTAG_ALIAS_TARGET_NOT_FOUND - The target of this alias was not found` (no tag named) — what `logix/io-module` now says at write time |
+| the same with four module stubs: 1756-IB16 (1/7/11, 3.1) in slot 1, 1756-OB16E (1/7/16, 3.1) in slot 2, 1734-AENT (1/12/108, 3.1) `Remote1` at 192.168.1.20 on the controller's Ethernet port, 1734-IB8 (1/7/216, 3.1) in its slot 1, all `EKey State="Disabled"` | import 0 errors, build succeeded; exported, every module has its configuration tag, connections and `ExtendedProperties` filled in, and two catalog numbers gained their series (`1734-AENT/A`, `1734-IB8/C`). That export is `lang/l5x/testdata/ioline.L5X` |
+| `naut logix import --project` of it, `naut logix write` back | `hardware.L5X` + `hardware: hardware.L5X`; the write-back imports with 0 errors and builds; converted back to L5X, its `<Modules>` is byte for byte the original export's (module `DataExchangeId`s included); the whole file differs only in dates and the controller's and tags' `DataExchangeId`s |
+| `naut logix deploy --download --yes --program-mode` of the imported project | 13 differences (a new tag set), downloaded and verified in 2 m 4 s; `naut logix mode run` → Run. The controller browses `Local:1:C/I`, `Local:2:C/I/O`, `Remote1:I/O`, `Remote1:1:C/I` beside the alias tags. Echo emulates no I/O, so the module connections never open; the controller runs regardless |
+| over EtherNet/IP in Run: write `StartPB` 1, then 0, then `StopPB` 1 | `Local:1:I.Data` 1 → 0 → 2 (the alias tags are the module's bits); `RunCmd` 1, sealed in at 1, then 0, and `Local:2:O.Data` follows it bit for bit; `FlowAlm` follows `RunCmd` (`FlowSw` 0) |
+| restored | `DemoLine.ACD` downloaded, Run, `naut logix drift` against `DemoLine.L5X`: no drift |
+
+`TestSDKConvertAndBuild/ioline` repeats the import and build against any
+logixd (passed on ws-test, 1.9 s import and build). The stub identities
+above are verified only in that sense: Logix Designer v38 kept each
+catalog number (adding a series) and built. They are the start of a
+table for generated stubs, not one.
+
+**Not done.**
+
+- Generated stubs from a manifest description (name, catalog number,
+  slot or IP). Needs an identity table verified per catalog number as
+  above, and a call on where the description lives (the vendor-neutral
+  rule: a `target.logix` key, not the language).
+- `naut check` / the editor do not run `logix/io-module`, because they do
+  not read `target.logix`.
+- The importer still refuses an alias of a whole rack word
+  (`Local:1:I.Data`): the export now carries the module's connection
+  types (`AB:1756_DI:I:0`), but not their member layout in a non-detailed
+  export, so the word's type is still unknown.
+- The rule checks the module, not the point: `Local:1:I.Data.40` on a
+  16-point module passes it.
+- Only a 5580 at v38 has run it; a CompactLogix with embedded I/O
+  (1769-L1x/L2x), whose `Local` row #373 left out, should now write from
+  its own export's configuration, but no such export has been tried.
+
 ## 8. The demo this enables
 
 James's target demo (2026-10-03), which replaces the Tier A `ab01` draft in the
@@ -1269,3 +1911,48 @@ Z: (client work).
 - Echo: `ssh echo1` (10.154.92.210; CIP on :44818 when Tailscale refuses).
   Fast Startup is off; restart with `incus restart echo-vm --timeout 300`.
   Don't change the controller's mode without asking James.
+
+## 10. Caveats the videos quote
+
+The one list of what the Logix authoring target does not do, for the
+video scripts' caveats beat (#277). A script reads the **Caveat** column
+as written. Keeping it current is standing practice: when a caveat
+closes, move it to *Closed since* with the PR and date; when one opens,
+add it here and to the guide's [What it does not do
+yet](../../website/src/content/docs/guides/logix-authoring.md#what-it-does-not-do-yet).
+Last checked against `main` on 2026-10-14.
+
+**Open**
+
+| # | Caveat | Evidence | Status |
+|---|---|---|---|
+| 1 | Every behaviour test has run on one emulated controller, a ControlLogix 5580 at firmware v38 on FactoryTalk Logix Echo; nothing has run on real hardware yet. | §7b Echo runs (#297, #368, #375, #273); LGA-037 | open, 2026-10-14 |
+| 2 | For a processor nautilus has no Logix Designer export for, such as a CompactLogix 5370 L1 or L2, a CompactLogix 5480, a safety controller or a ControlLogix 5570, the write warns that Logix Designer may refuse the project, unless the project carries its own hardware configuration. | `writer.LocalModuleWarning`; `TestLocalModule`; LGA-046; #373 | open, 2026-10-14 |
+| 3 | A Logix project is one task running one ladder or structured text program; multiple tasks, function block diagrams and SFC are refused. | `TestLogixTargetRefusesSFCAndASecondTask`; LGA-036 | open, 2026-10-14 |
+| 4 | The target has no STRING, unsigned, bit-string, LINT or LTIME types, and refuses a program that uses one. | `logix/type`, `logix/conversion`; `TestRejections` (`type`, `unsigned`) | open, 2026-10-14 |
+| 5 | The IEC TP, CTD and CTUD blocks and edge-trigger instances are refused, because their behaviour differs from the Logix instructions; TON, TOF and CTU are written. | `logix/fb`; `TestRejections` (`TP block`, `CTUD block`) | open, 2026-10-14 |
+| 6 | In structured text, MIN, MAX, LIMIT, SEL, MUX, ATAN2, RETURN and CONTINUE are refused; write the IF or CASE instead. | `logix/st`; `TestStructuredTextRejections` | open, 2026-10-14 |
+| 7 | User functions are refused, since Logix has none; user function blocks become Add-On Instructions. | `logix/function-block`, `logix/fb`; `TestUserFunctionsAndBlockArraysAreRefused` | open, 2026-10-14 |
+| 8 | An array of timers or counters is written as one Logix array, but an array of your own function block is refused; declare one instance per element. | `logix/array-shape`; `TestTimerInstanceArrayOnLogix`, `TestUserFunctionsAndBlockArraysAreRefused` | open, 2026-10-14 |
+| 9 | A type conversion the controller would compute differently is refused, and so is an integer division whose result meets a REAL; compute the quotient into a DINT tag first. | `logix/conversion`; #255, #361, #368; conformance projects `conversions` and `division` (§7b) | open, 2026-10-14 |
+| 10 | In structured text, each input of an Add-On Instruction call must be a tag or a number, because Logix Designer will not build an expression there. | `logix/fb-pin`; #368 | open, 2026-10-14 |
+| 11 | A REAL is 32 bits on the controller and 64 bits in nautilus, so results can differ in the last digits; tests compare REALs with a tolerance. | #297 (8 of 279 results, all float32 rounding) | open, 2026-10-14 |
+| 12 | A REAL too large for the integer it is stored into wraps silently on the controller, where nautilus faults the scan. | #297 out-of-range row (§7b); #361 | open, 2026-10-14 |
+| 13 | nautilus does not wrap an integer at its declared width and the controller does, so an overflowing INT gives a different value on each. | conformance `st-int-width`; #368 note (§7b) | open, 2026-10-14 |
+| 14 | A download still stops the controller; it keeps tag values it can match, but reads them about thirty seconds before the stop, so a value the program changes in that window is not carried. | #273; LGA-047; `deploy.PlanValues` | open, 2026-10-14 |
+| 15 | A tag that a download adds does not appear in live values until `naut logix serve` is restarted. | #375 Echo run (§7b); `logix/facade` browses the controller once at startup | open, 2026-10-14 |
+| 16 | nautilus does not create I/O modules itself: a program that uses rack I/O takes its modules from a Logix Designer export kept in the project, which the import writes, so a new module is added in Logix Designer first. | #275; LGA-052, LGA-053; §7b "Follow-up — the hardware configuration" | open, 2026-10-14 |
+| 17 | Import keeps a rung it cannot express as a comment and reports it; message instructions and the buffer copies that feed them are the largest gap. | corpus of 52 exports: 97.9% of rungs, 81% of routines whole (guide) | open, 2026-10-14 |
+| 18 | Commercial licence terms (automation interface, pooling) are not settled. | §7b Phase A licence check (§1.4.10, §1.4.7) | open, 2026-10-14 |
+
+**Closed since the issue was filed (2026-10-10)**
+
+| Was | Now | Evidence | Closed |
+|---|---|---|---|
+| a download resets tag values | a download keeps the values of every tag it can match (`--reset-values` to opt out) | #273, #387; LGA-047, LGA-048; `TestHardwareDownloadKeepsValuesUnlessReset` on Echo | 2026-10-14 |
+| the target's rules show only with #239 | they squiggle in the editor as you type | #239 | 2026-10-13 |
+| no deploy from the editor | online edit and download from VS Code, verified on Echo | #375; LGA-041, LGA-042 | 2026-10-14 |
+| the import round trip differs | the public yardstick writes back with no logic differences | #380; LGA-044; `TestLogixRoundTripYardstickCLI` | 2026-10-14 |
+| one processor's `Local` module | Logix Designer's own for ControlLogix 5580, CompactLogix 5370 L3 and 5380; written projects import and build on v38 | #389; LGA-046; `TestLocalModulesMatchExports` | 2026-10-14 |
+| a program that uses rack I/O needs a controller project that already has the modules | the project carries the export's I/O modules (`target.logix.hardware`, `hardware.L5X` from the import); an imported program with rack-I/O aliases writes, builds, downloads and runs on Echo, and an alias of a missing module is refused at write time by name | #275; LGA-052, LGA-053; `TestSDKConvertAndBuild/ioline` | 2026-10-14 |
+| arrays of block instances | arrays of TON, TOF and CTU are one Logix array tag (user blocks: item 8) | Phase E (§7b); `TestTimerInstanceArrayOnLogix` | 2026-10-03 |

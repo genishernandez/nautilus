@@ -21,11 +21,18 @@ const ladderB = "PROGRAM MainProgram\nVAR A : BOOL; B : BOOL; END_VAR\nLD\n  RUN
 // startPlane serves a facade whose program plane deploys through fn.
 func startPlane(t *testing.T, fn func(ctx context.Context, src string) (*deploy.Report, error)) string {
 	t.Helper()
+	return startPlaneWith(t, &ProgramPlane{Source: ladderA, Deploy: func(ctx context.Context, src string, _ func(string)) (*deploy.Report, error) {
+		return fn(ctx, src)
+	}})
+}
+
+// startPlaneWith serves a facade with the given program plane (nil: none).
+func startPlaneWith(t *testing.T, plane *ProgramPlane) string {
+	t.Helper()
 	port, _ := startController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	f, err := New(ctx, Options{Host: "127.0.0.1", Port: port, Poll: 30 * time.Millisecond,
-		Program: &ProgramPlane{Source: ladderA, Deploy: fn}})
+	f, err := New(ctx, Options{Host: "127.0.0.1", Port: port, Poll: 30 * time.Millisecond, Program: plane})
 	if err != nil {
 		t.Fatal(err)
 	}

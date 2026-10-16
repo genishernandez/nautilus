@@ -1,0 +1,20 @@
+PROGRAM InstFbd
+(* Two CTU instances in FBD, their outputs wired out as inst.Pin. *)
+VAR_EXTERNAL
+    CU1     : BOOL;
+    CU2     : BOOL;
+    PV      : INT;
+    fbd_Q1  : BOOL;
+    fbd_CV1 : INT;
+    fbd_Q2  : BOOL;
+    fbd_CV2 : INT;
+END_VAR
+FBD
+  c1 : CTU(CU := CU1, PV := PV)
+  c2 : CTU(CU := CU2, PV := PV)
+  fbd_Q1  := c1.Q
+  fbd_CV1 := c1.CV
+  fbd_Q2  := c2.Q
+  fbd_CV2 := c2.CV
+END_FBD
+END_PROGRAM

@@ -187,8 +187,8 @@ tag-meta:
 
 const levelLib = `TYPE
   Level : STRUCT
-    CTL1HSP : REAL;
-    CTL1LSP : REAL;
+    HSP : REAL;
+    LSP : REAL;
   END_STRUCT;
   Pump : STRUCT
     STRTTMRSP : INT;
@@ -229,7 +229,7 @@ func pumpProject(tags, tagFile string) fstest.MapFS {
 // a site's ~55-field first-scan CfgDone block collapses into the manifest.
 func TestStructInitSeedsNestedMembersOthersZero(t *testing.T) {
 	proj, err := Load(pumpProject(
-		"  - { name: P101, role: state, type: Pump, init: { STRTTMRSP: 30, LVL: { CTL1HSP: 60.0, CTL1LSP: 40.0 } } }\n", ""), "")
+		"  - { name: P101, role: state, type: Pump, init: { STRTTMRSP: 30, LVL: { HSP: 60.0, LSP: 40.0 } } }\n", ""), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,10 +249,10 @@ func TestStructInitSeedsNestedMembersOthersZero(t *testing.T) {
 	}
 	lvl := v.Fld[2]
 	if got := lvl.Fld[0].F; got != 60.0 {
-		t.Errorf("LVL.CTL1HSP = %v, want 60", got)
+		t.Errorf("LVL.HSP = %v, want 60", got)
 	}
 	if got := lvl.Fld[1].F; got != 40.0 {
-		t.Errorf("LVL.CTL1LSP = %v, want 40", got)
+		t.Errorf("LVL.LSP = %v, want 40", got)
 	}
 }
 
@@ -324,7 +324,7 @@ func TestStructInitRenderRoundTripsThroughTagFile(t *testing.T) {
 		Name: "P101", Role: "state", Type: "Pump",
 		Init: map[string]any{
 			"STRTTMRSP": 30,
-			"LVL":       map[string]any{"CTL1HSP": 60.0, "CTL1LSP": 40.0},
+			"LVL":       map[string]any{"HSP": 60.0, "LSP": 40.0},
 		},
 	}})
 	if err != nil {
@@ -347,9 +347,9 @@ func TestStructInitRenderRoundTripsThroughTagFile(t *testing.T) {
 	}
 	lvl := v.Fld[2]
 	if got := lvl.Fld[0].F; got != 60.0 {
-		t.Errorf("LVL.CTL1HSP = %v, want 60", got)
+		t.Errorf("LVL.HSP = %v, want 60", got)
 	}
 	if got := lvl.Fld[1].F; got != 40.0 {
-		t.Errorf("LVL.CTL1LSP = %v, want 40", got)
+		t.Errorf("LVL.LSP = %v, want 40", got)
 	}
 }

@@ -37,6 +37,16 @@ func wantNoDiag(t *testing.T, diags []Diagnostic, substr string) {
 	}
 }
 
+// wantNoDiagSev fails if a diagnostic of severity sev contains substr.
+func wantNoDiagSev(t *testing.T, diags []Diagnostic, sev Severity, substr string) {
+	t.Helper()
+	for _, d := range diags {
+		if d.Severity == sev && strings.Contains(d.Message, substr) {
+			t.Errorf("unexpected diagnostic containing %q at severity %v: %v", substr, sev, d)
+		}
+	}
+}
+
 // baseline is a minimal, fully clean two-step loop: no diagnostics at all.
 // Individual tests mutate a copy of it to isolate exactly one rule.
 const baseline = `PROGRAM P
@@ -230,7 +240,7 @@ END_PROGRAM
 	diags := Check(prog)
 	wantDiag(t, diags, SeverityWarning, `step "Terminal" is a dead end`)
 	// A dead end is a warning, not an error — the chart otherwise compiles.
-	wantNoDiag(t, diags, `error: step "Terminal" is a dead end`)
+	wantNoDiagSev(t, diags, SeverityError, `step "Terminal" is a dead end`)
 }
 
 func TestCheckUnresolvedActionAssociation(t *testing.T) {

@@ -278,9 +278,15 @@ func TestDriverExprSelectorMissingIsBad(t *testing.T) {
 	defer cancel()
 	d.Start(ctx)
 	defer d.Stop()
-	waitFor(t, "NODE1 delivered cleanly first", func() bool {
-		return d.Quality()["NODE1"] != nio.Bad && d.Quality()["NODE1"] != nio.NotConnected
-	})
+	// Quality lists only non-Good tags, so Good is "delivered and absent" —
+	// "not Bad" alone would also admit NotConnected before first delivery.
+	good := func(name string) bool {
+		v, _ := d.ReadInputs()
+		_, delivered := v[name]
+		_, flagged := d.Quality()[name]
+		return delivered && !flagged
+	}
+	waitFor(t, "NODE1 delivered cleanly first", func() bool { return good("NODE1") })
 	srv.RemoveAll("node_cpu_seconds_total")
 	waitFor(t, "NODE1 marked Bad", func() bool {
 		return d.Quality()["NODE1"] == nio.Bad
@@ -291,8 +297,8 @@ func TestDriverExprSelectorMissingIsBad(t *testing.T) {
 		_, ok := v["NODE1_Temp_C1"]
 		return ok
 	})
-	if q := d.Quality()["NODE1_Temp_C1"]; q == nio.Bad {
-		t.Fatalf("sibling tag must stay Good, got %v", q)
+	if !good("NODE1_Temp_C1") {
+		t.Fatalf("sibling tag must stay Good, got %v", d.Quality()["NODE1_Temp_C1"])
 	}
 }
 

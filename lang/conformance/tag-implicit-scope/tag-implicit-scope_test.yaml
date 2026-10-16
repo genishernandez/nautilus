@@ -1,0 +1,14 @@
+# Manifest tags in scope with no declaration, in every language. Every step
+# asserts st_, ld_, fbd_ and sfc_ together.
+tests:
+  - name: undeclared tags read and write in ST, ladder, FBD and SFC
+    given: { Gain: 2.5, Cnt: 41 }
+    steps:
+      - scans: 1
+        expect: { st_On: false, ld_On: false, fbd_On: false, sfc_On: false, st_Out: 5.0, ld_Out: 5.0, fbd_Out: 5.0, sfc_Out: 5.0, st_N: 42, ld_N: 42, fbd_N: 42, sfc_N: 42 }
+      - given: { Run: true, Gain: 4.0, Cnt: 9 }
+        scans: 1
+        expect: { st_On: true, ld_On: true, fbd_On: true, sfc_On: true, st_Out: 8.0, ld_Out: 8.0, fbd_Out: 8.0, sfc_Out: 8.0, st_N: 10, ld_N: 10, fbd_N: 10, sfc_N: 10 }
+      - given: { Run: false }
+        scans: 1
+        expect: { st_On: false, ld_On: false, fbd_On: false, sfc_On: false }

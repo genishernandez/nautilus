@@ -82,16 +82,42 @@ func TestWriteTag(t *testing.T) {
 		t.Errorf("empty name accepted: %d", rec.Code)
 	}
 
-	// A non-scalar value the runtime can't store must be rejected, not
-	// silently accepted with a 204 that wrote nothing.
-	rec = httptest.NewRecorder()
-	body = bytes.NewBufferString(`{"name": "Mode", "value": "AUTO"}`)
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", body))
-	if rec.Code != 422 {
-		t.Errorf("string value status = %d, want 422", rec.Code)
+	// A name no tag declares is refused with a 400 naming it, whatever the
+	// value: the write would otherwise create a stray top-level tag no
+	// program reads (#329). The same holds for a string and for a number.
+	for _, c := range []struct{ name, body string }{
+		{"Mode", `{"name": "Mode", "value": "AUTO"}`},
+		{"Bias", `{"name": "Bias", "value": 2.5}`},
+	} {
+		rec = httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", bytes.NewBufferString(c.body)))
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "undefined tag "+c.name) {
+			t.Errorf("write to undeclared %s: status %d, body %q; want 400 naming it", c.name, rec.Code, rec.Body)
+		}
+		if _, ok := rt.Tags().All()[c.name]; ok {
+			t.Errorf("a refused write created the tag %s", c.name)
+		}
 	}
-	if _, ok := rt.Tags().All()["Mode"]; ok {
-		t.Error("rejected write should not have created the tag")
+	// A value the declared tag can't store is still rejected, not silently
+	// accepted with a 204 that wrote nothing.
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", bytes.NewBufferString(`{"name": "SP", "value": "AUTO"}`)))
+	if rec.Code != 422 {
+		t.Errorf("string value to a REAL tag: status = %d, want 422", rec.Code)
+	}
+	// A member path under an unknown name creates nothing: it is refused
+	// with the reason, and neither the dotted name nor its root appears.
+	rec = httptest.NewRecorder()
+	body = bytes.NewBufferString(`{"name": "Nope.Speed", "value": 1.0}`)
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/tags", body))
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "Nope") {
+		t.Errorf("member write under an unknown tag: status %d, body %q; want 400 naming it", rec.Code, rec.Body)
+	}
+	all := rt.Tags().All()
+	for _, name := range []string{"Nope", "Nope.Speed"} {
+		if _, ok := all[name]; ok {
+			t.Errorf("a refused member write created tag %q", name)
+		}
 	}
 }
 

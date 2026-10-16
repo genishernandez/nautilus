@@ -156,7 +156,7 @@ type Binding struct {
 	// Metric is the verbatim Sparkplug metric name.
 	Metric string
 	// Member is a dotted path to ONE member inside a Template metric
-	// ("START", "LVL.CTL1HSP"), or "" for the metric as a whole.
+	// ("START", "LVL.HSP"), or "" for the metric as a whole.
 	//
 	// A member binding is how an operator commands one control of a site's
 	// UDT without touching its siblings. It is a SCALAR nautilus tag carrying
@@ -357,8 +357,32 @@ type Driver struct {
 	// attempt before CONNECT. The STATE birth must carry the byte-identical
 	// value the will carries (TCK host-topic-phid-birth-payload-timestamp).
 	sessionTS int64
-	cancel    context.CancelFunc
-	done      chan struct{}
+	// sessionPrimary records whether this session was opened as the primary
+	// host — with the STATE will installed and the birth published. Only
+	// such a session may re-assert its birth (reassertState): a standby that
+	// has just been promoted has no birth of its own to repeat until it
+	// reconnects.
+	sessionPrimary bool
+	cancel         context.CancelFunc
+	done           chan struct{}
+
+	// ── leadership under redundancy: (driver.go SetWriteGate, mqtt.go) ──
+	// gateMu guards this block.
+	gateMu sync.Mutex
+	// writeGate is the leadership gate `naut run` installs through
+	// SetWriteGate when — and only when — the manifest has a redundancy:
+	// section. nil (a single host) is always open. isLeader ANDs it with
+	// Config.Leader.
+	writeGate func() bool
+	// replicaID tells the replicas of a redundant pair apart on the broker:
+	// they run one manifest, so without it they would share an MQTT client
+	// ID and take each other's sessions over in a loop. Set alongside the
+	// write gate; "" (a single host) leaves the client ID as configured.
+	replicaID string
+	// stopping is set by Stop before it publishes the STATE death, so the
+	// echo of our own certificate is never mistaken for a stale one that
+	// needs re-asserting (reassertState).
+	stopping bool
 }
 
 // stats are the monotonic counters Status() reports.
@@ -374,6 +398,9 @@ type stats struct {
 	// WriteQueued counts commands parked for a dark node, cumulatively. The
 	// gauge — how many are waiting right now — is Status.QueuedWrites.
 	WriteQueued uint64
+	// WritesRefused counts array members stripped from outgoing struct
+	// commands (Status.WritesRefused).
+	WritesRefused uint64
 }
 
 // ── Internal seam ────────────────────────────────────────────────────────
@@ -506,6 +533,9 @@ type queued struct {
 type discovery struct {
 	key      metricKey
 	datatype string
+	// arrayLen is an array metric's element count as last seen — the
+	// arraylen: its manifest line needs, which the datatype cannot say.
+	arrayLen int
 	count    int
 	logged   bool
 }
@@ -524,8 +554,13 @@ type Status struct {
 	// a full queue); WriteQueued counts commands parked for a dark node,
 	// cumulatively, and QueuedWrites is how many are waiting RIGHT NOW.
 	WriteDrops, WriteQueued uint64
-	QueuedWrites            int
-	Unknown                 int
+	// WritesRefused counts writes the driver will not send because Sparkplug
+	// array writes are not supported: the array members it strips from a
+	// struct output's command (the template's other members still go out).
+	// An array binding itself cannot be writable — Validate refuses it.
+	WritesRefused uint64
+	QueuedWrites  int
+	Unknown       int
 	// Degraded is set when the discovery policy is DiscoveryStrict and an
 	// unmanifested metric has been seen — /api/drivers reports the driver
 	// "degraded" for it (docs/design/sparkplug-host.md §5).

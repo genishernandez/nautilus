@@ -53,7 +53,7 @@ type AlarmsConfig struct {
 	// SiteFrom and AreaFrom derive a definition's site and area from the
 	// TAG NAME, by regexp: the first capture group of a match becomes the
 	// value, and a tag the pattern does not match simply has none. This is
-	// how `RTU9_WEL15_FIT_001` becomes site RTU9, area WEL15 without a
+	// how `RTU9_ZONE15_FIT_001` becomes site RTU9, area ZONE15 without a
 	// generator writing `site:` on two thousand entries — and why the
 	// rules' `{site}` / `{area}` placeholders have anything to
 	// interpolate. Empty (the default) leaves both blank.
@@ -189,6 +189,13 @@ func composeAlarms(fsys fs.FS, m *Manifest) error {
 		file, err := alarm.Load(strings.NewReader(string(raw)))
 		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("%s: %w", p, err)
+		}
+		file.Path = p
+		for i := range file.Rules {
+			file.Rules[i].Source = p
+		}
+		for i := range file.Defs {
+			file.Defs[i].Source = p
 		}
 		// Prepended, not appended: a file's rules and defs are read BEFORE
 		// the manifest's own, so `alarms:` is the last word — the same

@@ -20,8 +20,8 @@ no opinion of its own about your control logic. A project with no
 ```yaml
 # nautilus.yaml
 alarms:
-  site-from: "^([A-Za-z]+[0-9]+)_"   # RTU9_WEL15_FIT_001 → site RTU9
-  area-from: "^[A-Za-z]+[0-9]+_([A-Za-z]+[0-9]+)_"   # → area WEL15
+  site-from: "^([A-Za-z]+[0-9]+)_"   # RTU9_ZONE15_FIT_001 → site RTU9
+  area-from: "^[A-Za-z]+[0-9]+_([A-Za-z]+[0-9]+)_"   # → area ZONE15
 
   defaults: { ack-required: true, auto-clear: true, shelve: true }
   shelve-times: [5m, 15m, 30m, 1h, 2h, 4h, 8h]
@@ -96,13 +96,13 @@ The rest are ordinary definitions, one per condition, and they belong in
 
 ```yaml
 # alarms/rtu9.yaml — a bare YAML list, exactly like a tag file
-- id: RTU9_WEL15_INT_001_YA
-  tag: RTU9_WEL15_INT_001_YA     # a flat tag, or "tag.member"; BOOL, true = in alarm
-  name: RTU 9 Well 15 Intrusion
+- id: RTU9_ZONE15_INT_001_YA
+  tag: RTU9_ZONE15_INT_001_YA     # a flat tag, or "tag.member"; BOOL, true = in alarm
+  name: RTU 9 Zone 15 Intrusion
   priority: critical             # diagnostic|low|medium|high|critical
   class: security
   site: RTU9
-  area: WEL15
+  area: ZONE15
   on-delay: 5m
   enable: RTU9__Online
 ```
@@ -176,10 +176,10 @@ thing and stays an ordinary tag write. It is not the same button as
 ```
 GET  /api/alarms                    {"ts":…,"summary":{…},"alarms":[…]}
 GET  /api/alarms/journal?from&to&site&priority&id&kind&state&q&limit
-POST /api/alarms/ack       {"ids":["RTU9_WEL15_FIT_001.HH"],"by":"rchon"}
-                           {"all":true,"by":"rchon"}
-POST /api/alarms/shelve    {"id":"…","seconds":1800,"by":"rchon"}
-POST /api/alarms/unshelve  {"id":"…","by":"rchon"}
+POST /api/alarms/ack       {"ids":["RTU9_ZONE15_FIT_001.HH"],"by":"operator1"}
+                           {"all":true,"by":"operator1"}
+POST /api/alarms/shelve    {"id":"…","seconds":1800,"by":"operator1"}
+POST /api/alarms/unshelve  {"id":"…","by":"operator1"}
 ```
 
 Reads are ungated like every other read. Writes go through the same
@@ -270,18 +270,18 @@ expression can see it. So acceptance tests get one key and three verbs of
 their own, and virtual time makes an `on-delay` an exact assertion:
 
 ```yaml
-- given: { RTU9_WEL15_FIT_001.PV: 120.0 }
+- given: { RTU9_ZONE15_FIT_001.PV: 120.0 }
   advance: 4m                    # the bit is set; the ALARM is not, yet
   alarms: { active: [], unacked: 0 }
 - advance: 1m1s                  # ... and now the on-delay has elapsed
   alarms:
-    active: ["RTU9_WEL15_FIT_001.HH"]
+    active: ["RTU9_ZONE15_FIT_001.HH"]
     unacked: 1
-    state: { RTU9_WEL15_FIT_001.HH: unack-active }
-- ack: { ids: ["RTU9_WEL15_FIT_001.HH"], by: test }
+    state: { RTU9_ZONE15_FIT_001.HH: unack-active }
+- ack: { ids: ["RTU9_ZONE15_FIT_001.HH"], by: test }
   scans: 1
-  alarms: { state: { RTU9_WEL15_FIT_001.HH: ack-active }, unacked: 0 }
-- given: { RTU9_WEL15_FIT_001.PV: 50.0 }
+  alarms: { state: { RTU9_ZONE15_FIT_001.HH: ack-active }, unacked: 0 }
+- given: { RTU9_ZONE15_FIT_001.PV: 50.0 }
   scans: 1
   alarms: { active: [], journal: [active, ack, rtn] }
 ```

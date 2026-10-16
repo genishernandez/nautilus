@@ -27,13 +27,13 @@ END_TYPE
 
 const alarmProgram = `PROGRAM Main
 VAR_EXTERNAL
-    RTU9_WEL15_FIT_001 : AnalogInput;
+    RTU9_ZONE15_FIT_001 : AnalogInput;
     RTU9__Online : BOOL;
     Duty : REAL;
 END_VAR
-RTU9_WEL15_FIT_001.HH := RTU9_WEL15_FIT_001.PV > 100.0;
-RTU9_WEL15_FIT_001.L  := RTU9_WEL15_FIT_001.PV < 10.0;
-Duty := RTU9_WEL15_FIT_001.PV;
+RTU9_ZONE15_FIT_001.HH := RTU9_ZONE15_FIT_001.PV > 100.0;
+RTU9_ZONE15_FIT_001.L  := RTU9_ZONE15_FIT_001.PV < 10.0;
+Duty := RTU9_ZONE15_FIT_001.PV;
 END_PROGRAM`
 
 // alarmFS is a two-tag project: one struct tag whose members a rule can
@@ -55,8 +55,8 @@ const alarmTags = `
 tasks:
   - program: program.st
 tags:
-  - { name: RTU9_WEL15_FIT_001, role: state, type: AnalogInput, init: { PV: 50.0 }, desc: "Well 15 flow" }
-  - { name: RTU9_WEL15_INT_001_YA, role: state, init: false, desc: "Well 15 intrusion" }
+  - { name: RTU9_ZONE15_FIT_001, role: state, type: AnalogInput, init: { PV: 50.0 }, desc: "Zone 15 flow" }
+  - { name: RTU9_ZONE15_INT_001_YA, role: state, init: false, desc: "Zone 15 intrusion" }
   - { name: RTU9__Online, role: setpoint, init: true }
   - { name: Duty, role: state, init: 0.0 }
 `
@@ -91,7 +91,7 @@ alarms:
       on-delay: 5m
       enable: "{site}__Online"
   defs:
-    - { id: intrusion, tag: RTU9_WEL15_INT_001_YA, name: Intrusion, priority: critical }
+    - { id: intrusion, tag: RTU9_ZONE15_INT_001_YA, name: Intrusion, priority: critical }
 `, nil))
 
 	defs, err := proj.AlarmDefs(rt)
@@ -101,16 +101,16 @@ alarms:
 	if len(defs) != 2 {
 		t.Fatalf("got %d definitions, want 2: %+v", len(defs), defs)
 	}
-	// Sorted by id: "RTU9_WEL15_FIT_001.HH" then "intrusion".
+	// Sorted by id: "RTU9_ZONE15_FIT_001.HH" then "intrusion".
 	d := defs[0]
-	if d.ID != "RTU9_WEL15_FIT_001.HH" {
+	if d.ID != "RTU9_ZONE15_FIT_001.HH" {
 		t.Errorf("id = %q, want the default {path}", d.ID)
 	}
-	if d.Name != "Well 15 flow High High" {
+	if d.Name != "Zone 15 flow High High" {
 		t.Errorf("name = %q — the {desc} template did not interpolate the tag's own description", d.Name)
 	}
-	if d.Site != "RTU9" || d.Area != "WEL15" {
-		t.Errorf("site/area = %q/%q, want RTU9/WEL15 from site-from/area-from", d.Site, d.Area)
+	if d.Site != "RTU9" || d.Area != "ZONE15" {
+		t.Errorf("site/area = %q/%q, want RTU9/ZONE15 from site-from/area-from", d.Site, d.Area)
 	}
 	if d.Enable != "RTU9__Online" {
 		t.Errorf("enable = %q, want the {site} template resolved", d.Enable)
@@ -139,18 +139,20 @@ func TestAlarmFilesDuplicateIDIsAnError(t *testing.T) {
 	proj, rt := loadAlarms(t, alarmFS(alarmTags+`
 alarms:
   defs:
-    - { id: RTU9_WEL15_INT_001_YA, tag: RTU9_WEL15_INT_001_YA }
+    - { id: RTU9_ZONE15_INT_001_YA, tag: RTU9_ZONE15_INT_001_YA }
 alarm-files: [alarms/rtu9.yaml]
 `, map[string]string{
-		"alarms/rtu9.yaml": "- { id: RTU9_WEL15_INT_001_YA, tag: RTU9_WEL15_INT_001_YA }\n",
+		"alarms/rtu9.yaml": "- { id: RTU9_ZONE15_INT_001_YA, tag: RTU9_ZONE15_INT_001_YA }\n",
 	}))
 	_, err := proj.AlarmDefs(rt)
 	if err == nil {
 		t.Fatal("an id declared in both an alarm file and the manifest was accepted")
 	}
-	if !strings.Contains(err.Error(), "RTU9_WEL15_INT_001_YA") ||
-		!strings.Contains(err.Error(), "declared by both") {
-		t.Errorf("error should name the id and both sources, got: %v", err)
+	if !strings.Contains(err.Error(), "RTU9_ZONE15_INT_001_YA") ||
+		!strings.Contains(err.Error(), "declared by both") ||
+		!strings.Contains(err.Error(), "alarms/rtu9.yaml alarm") ||
+		!strings.Contains(err.Error(), "manifest alarm") {
+		t.Errorf("error should name the id, the alarm file and the manifest, got: %v", err)
 	}
 }
 
@@ -160,7 +162,7 @@ func TestAlarmFilesCompose(t *testing.T) {
 	proj, rt := loadAlarms(t, alarmFS(alarmTags+`
 alarms:
   defs:
-    - { id: intrusion, tag: RTU9_WEL15_INT_001_YA }
+    - { id: intrusion, tag: RTU9_ZONE15_INT_001_YA }
 alarm-files: [alarms/rtu9.yaml]
 `, map[string]string{
 		"alarms/rtu9.yaml": `
@@ -205,8 +207,8 @@ func TestCheckAlarmsCatchesUnknownMember(t *testing.T) {
 	proj, rt := loadAlarms(t, alarmFS(alarmTags+`
 alarms:
   defs:
-    - { id: bad, tag: RTU9_WEL15_FIT_001.HHH }
-    - { id: notbool, tag: RTU9_WEL15_FIT_001.PV }
+    - { id: bad, tag: RTU9_ZONE15_FIT_001.HHH }
+    - { id: notbool, tag: RTU9_ZONE15_FIT_001.PV }
 `, nil))
 	_, errs, _, err := proj.CheckAlarms(rt)
 	if err != nil {
@@ -287,7 +289,7 @@ alarms:
 	}
 	defer eng.Close()
 
-	rt.Tags().SetPath("RTU9_WEL15_FIT_001.PV", 150.0)
+	rt.Tags().SetPath("RTU9_ZONE15_FIT_001.PV", 150.0)
 	rt.Scan()
 	if got := eng.Summary().Active; got != 1 {
 		t.Fatalf("after one scan over a tripped limit, active = %d, want 1", got)
@@ -308,7 +310,7 @@ func TestPostgresJournalNeedsAnEnvironmentVariable(t *testing.T) {
 alarms:
   journal: { sink: postgres }
   defs:
-    - { id: a, tag: RTU9_WEL15_INT_001_YA }
+    - { id: a, tag: RTU9_ZONE15_INT_001_YA }
 `, nil))
 	t.Setenv(DefaultAlarmDSNEnv, "")
 	t.Setenv(FallbackAlarmDSNEnv, "")

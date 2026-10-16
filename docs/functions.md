@@ -150,15 +150,27 @@ expression (operators, functions, members, indexes); it is compiled as a
 `SEL` on the rung condition, so it is evaluated every scan like any block
 — an array index in it must stay valid while the rung is false. On a
 Logix target an assignment becomes the matching instruction (MOVE, ADD,
-SUB, MUL, DIV, MOD, NEG, ABS, SQR, XPY) or a CPT; see
+SUB, MUL, DIV, ABS) or, for anything else, a CPT; see
 `docs/design/logix-authoring.md`.
 
 Reading FB outputs: any instance output is addressable as `inst.Pin`
-everywhere — `GE(t2.ET, T#2S)` as a contact, `t2.Q` as an operand, or
-from another task's FBD/ST program. To capture an output **into a
+anywhere in the program that declares the instance — `GE(t2.ET, T#2S)` as
+a contact, `t2.Q` as an operand, in any rung. To capture an output **into a
 variable** at the call site, use the standard's output binding:
 `t2:TON(PT := T#5S, ET => Elapsed)` — the one way ladder stores a
 non-BOOL (coils only assign BOOL). `=>` works in ST and FBD calls too.
+
+An instance is a local of its program, so **another task's program cannot
+name it**: tasks share only tags. `t2.Q` there — or `Owner.t2.Q` through
+the program's name, or through its task's — is an undeclared identifier,
+and the error names the program that owns `t2` and says to go through a
+tag. To use an output in another task, publish it to a tag in the owning
+program (a coil, `t2.Q ( T2Done )`, or an assignment, `{ T2Elapsed :=
+t2.ET }`) and read the tag. The reader sees the value as of the owner's
+last committed scan: a reader that scans after the owner sees a change at
+once, one that scans before it sees the change on its own next scan. (In
+`naut test`, tasks due at the same instant scan main first, then in
+`tasks:` order.)
 
 ## SFC action qualifiers and step supervision
 
@@ -258,6 +270,18 @@ details, `type:` forms and `init:` forms (TIME members, arrays).
   are float64. The declared name is kept on the type, so a diagnostic
   says `DINT` or `WORD` for a variable declared that way, and
   [partial access](#bit-operations) knows a `DINT` has 32 bits.
+- **Arithmetic does not wrap at the declared width.** This is deliberate:
+  an `INT` holding 32767 plus 1 is 32768, not -32768 as on a PLC. A silent
+  wrap turns a totaliser or a counter into a wrong number with no fault,
+  and every seam on the tag bus carries the full value anyway. The width
+  is applied where you ask for it: a conversion (`TO_INT`, `DINT_TO_INT`)
+  wraps to the target, as on Codesys. A program that relies on a counter
+  rolling over should convert or `MOD` explicitly.
+- **Signed with unsigned widens** to the narrowest signed type that holds
+  both (`INT + UINT` is a `DINT`), as the
+  [common type](#operators) rules below say, rather than being refused as
+  strict IEC would. No value is lost either way, so the check stays out of
+  the way of ordinary mixed arithmetic.
 - `TIME` counts **milliseconds** internally. Literals: `T#500MS`, `T#5S`,
   `T#2M30S`. TIME values compare with the ordinary comparisons.
 - Mixed numeric arguments promote to REAL; comparing or combining a
@@ -392,11 +416,32 @@ means the block accepts 2+ inputs (the `+` pin in the FBD editor).
 | `ADD` | n-ary numeric | common type | sum |
 | `SUB` | 2 numeric | common type | difference |
 | `MUL` | n-ary numeric | common type | product |
-| `DIV` | 2 numeric | common type | quotient; integer and REAL ÷0 yield 0 and the scan keeps running. This is a deliberate deviation (the standard calls it an error; Codesys and TIA yield IEEE ±Inf) so a bad divisor cannot propagate Inf/NaN through a control loop — and because every seam on the tag bus (`/api/state`, the SSE stream, retained state, `*_test.yaml`) is JSON, which cannot carry Inf or NaN. The fault is not silent: every ÷0 bumps the program's **`divZero`** counter in the scan stats (`/api/state` → `stats.divZero`, controller-wide, counted since start), the way Logix raises `S:V` and keeps running |
-| `MOD` | 2 INT | INT | remainder; ÷0 yields 0 and counts in `divZero` |
+| `DIV` | 2 numeric | common type | quotient; integer and REAL ÷0 yield 0 and the scan keeps running. This is a deliberate deviation (the standard calls it an error; Codesys and TIA yield IEEE ±Inf) so a bad divisor cannot propagate Inf/NaN through a control loop — and because every seam on the tag bus (`/api/state`, the SSE stream, retained state, `*_test.yaml`) is JSON, which cannot carry Inf or NaN. The fault is not silent: every ÷0 bumps the controller's **`divZero`** counter in the scan stats (`/api/state` → `scan.divZero`, controller-wide, counted since start), the way Logix raises `S:V` and keeps running |
+| `MOD` | 2 integers | common type | remainder; ÷0 yields 0 and counts in `divZero` |
 | `MOVE` | 1 any | same | pass-through assignment (FBD wiring aid) |
 | `GT`, `GE`, `LT`, `LE` | 2 comparable | **BOOL** | ordering (numeric or TIME) |
 | `EQ`, `NE` | 2 comparable | **BOOL** | equality |
+
+**The common type** of integers (for `ADD`, `SUB`, `MUL`, `DIV`, `MOD` and
+the ST operators `+ - * / MOD`) is the narrowest type both arguments widen
+to without loss, the standard's implicit widening:
+
+- the same type gives that type: `DINT + DINT` is a `DINT`;
+- a literal takes the other argument's type: `d + 1` is a `DINT` (two
+  literals give the generic integer);
+- two signed, two unsigned or two bit-string types give the wider:
+  `INT + DINT` is a `DINT`, `USINT + UINT` a `UINT`, `BYTE + WORD` a `WORD`;
+- signed with unsigned gives the narrowest signed type that holds both:
+  `INT + USINT` is an `INT`, `INT + UINT` a `DINT`, `DINT + UDINT` a
+  `LINT`; a `ULINT` with a signed type has none, and gives `LINT`;
+- a bit string with a number counts as the unsigned type of its width:
+  `WORD + INT` is a `DINT`, as `UINT + INT` is.
+
+The type is what a diagnostic names (`s := d1 + d2` into a STRING says
+"cannot assign DINT to STRING"). It does not cut the value: arithmetic
+never wraps (see [Types](#types)), and `TO_<type>` of an expression reads
+every bit, so `TO_INT(d1 + d2)` with both at 40000 is 14464, the same as
+`DINT_TO_INT(80000)`. An integer with a REAL is a REAL.
 
 The comparison row is the ladder-relevant one: those six are the
 functions that can gate power directly.
@@ -481,6 +526,17 @@ clamp to the string instead of faulting.
 | `DELETE` | `DELETE(IN, L, P)` | STRING | L characters removed starting at P |
 | `REPLACE` | `REPLACE(IN1, IN2, L, P)` | STRING | L characters at P replaced by IN2 |
 | `FIND` | `FIND(IN1, IN2)` | INT | 1-based position of IN2 in IN1; **0** when absent or IN2 empty |
+
+### The scan
+
+| Name | Signature | Result | Behavior |
+| --- | --- | --- | --- |
+| `FIRST_SCAN` | `FIRST_SCAN()` | BOOL | TRUE for the whole of the program's first scan after it starts or is downloaded, FALSE from the second scan on. An online edit keeps the program's state, so it is not a start, and neither is a rollback |
+
+`FIRST_SCAN()` is how a program seeds state from the world once: a ladder
+function contact `FIRST_SCAN() { next := Clock.SECOND }`, or
+`IF FIRST_SCAN() THEN … END_IF;` in ST. Each task's program has its own
+first scan. On a Logix controller it is the status flag `S:FS`.
 
 ## Type conversions
 
@@ -574,7 +630,9 @@ family's edges) and `fn-conversions`; the faults in
 
 Stateful — declare an instance (`VAR t1 : TON; END_VAR`, or inline in a
 rung as `t1:TON(...)`), and each instance keeps its own state between
-scans. Outputs read as `inst.Pin` from any language.
+scans. Outputs read as `inst.Pin` from any language, within the program
+that declares the instance; another task reads one through a tag (see
+[Ladder power flow](#ladder-power-flow)).
 
 | Type | Inputs | Outputs | Behavior |
 | --- | --- | --- | --- |
@@ -589,6 +647,7 @@ scans. Outputs read as `inst.Pin` from any language.
 | `SR` | `S1: BOOL, R: BOOL` | `Q1: BOOL` | set-dominant latch |
 | `RS` | `S: BOOL, R1: BOOL` | `Q1: BOOL` | reset-dominant latch |
 | `PID` | see [below](#pid-closed-loop-control) | see below | closed-loop control — proportional/integral/derivative with anti-windup and bumpless auto/manual |
+| `LOCAL_TIME` | — | `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, `SECOND`, `MILLISECOND`: DINT | the calendar, now: each call reads the runtime's clock once, so the seven outputs are one instant. The names are IEC 61131-3's `SPLIT_DT` outputs. In production the clock is the machine's local time; under `naut test` it is the test's virtual clock, read in UTC (it starts at 2000-01-01 00:00:00), so a test that reads the calendar gives the same answer on every machine |
 
 ## EN/ENO: execution control
 
@@ -646,6 +705,7 @@ parentheses:
 | `R_TRIG`, `F_TRIG` | `CLK` | `Q` |
 | `SR` | `S1` | `Q1` |
 | `RS` | `S` | `Q1` |
+| `LOCAL_TIME` | none: it sits on the rail | none: power passes through |
 | user FUNCTION_BLOCK | `EN`, else the first **BOOL** `VAR_INPUT` the call doesn't bind by name | `ENO`, else the first **BOOL** `VAR_OUTPUT` |
 
 Passing the power pin explicitly in the argument list (`t1:TON(IN := x)`)
@@ -738,6 +798,10 @@ retained state. Call an element by index and read its outputs by index:
 On a Logix target the array is one `TIMER[4]` tag; an element called
 with a literal index carries its preset in the tag's data, one called
 with a computed index takes a `MOVE` to its `.PRE` ahead of the rung.
+A `MOVE` to `.PRE` stays on the controller, and a computed index can
+land on any element, so once an array is called with a computed index
+anywhere, its literal-index calls also re-assert their presets with a
+`MOVE` ahead of their rungs.
 
 ## Dialects
 
@@ -761,7 +825,12 @@ The `logix` dialect today:
 
 | Block | Pins | Semantics | On a Logix controller |
 | --- | --- | --- | --- |
-| `TONR` | `IN`, `PT`, `Reset` → `Q`, `ET` | a TON whose `Reset` clears the accumulated time and `Q` while TRUE; the free-running pulse is `t:TONR(PT := T#1S, Reset := t.Q)` | a `TON` with a `RES(t)` rung ahead of the timer's rung |
+| `TONR` | `IN`, `PT`, `Reset` → `Q`, `ET` | a TON whose `Reset` clears the accumulated time and `Q` while TRUE; the free-running pulse is `t:TONR(PT := T#1S, Reset := t.Q)` | in ladder, a `TON` with a `RES(t)` rung ahead of the timer's rung; in ST, an `FBD_TIMER` run by `TONR(t);`, its `.Reset` TRUE while `Reset` is TRUE or `IN` is FALSE |
+
+A vendor idiom with a standard equivalent is not a dialect block. The
+first-scan flag and the controller's calendar are `FIRST_SCAN()` and
+`LOCAL_TIME`, standard in every project; the Logix writer spells them
+`S:FS` and `GSV(WallClockTime,,LocalDateTime,…)`.
 
 **Tag aliases.** A manifest tag may carry `alias:`, the vendor-side
 binding of the tag — on Logix the alias tag's target, which is how a Logix
@@ -774,9 +843,10 @@ tags:
 
 The program names `StartPB`; the Logix writer emits it as an alias tag;
 the L5X importer turns an export's alias tags, and rack points the logic
-named directly, into tags with `alias:`. The nautilus runtime ignores the
-binding — the tag is a tag — so a simulation runs the same source. It is
-the one place a hardware address lives in a project.
+named directly, into tags with `alias:`, and a rung that names an alias
+tag imports with the tag typed through its target. The nautilus runtime
+ignores the binding — the tag is a tag — so a simulation runs the same
+source. It is the one place a hardware address lives in a project.
 
 ## User function blocks
 

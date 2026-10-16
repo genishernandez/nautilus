@@ -112,3 +112,28 @@ func TestTypesDeclaresPredefined(t *testing.T) {
 		}
 	}
 }
+
+// A UDT's description and its members' land as the declarations'
+// trailing comments (#373), where the Logix writer reads them back.
+func TestTypesCarryDescriptions(t *testing.T) {
+	f := &File{Controller: &Controller{DataTypes: []*DataType{{
+		Name: "LineStatus", Class: "User", Description: "Mode/alarm summary",
+		Members: []Member{
+			{Name: "Mode", DataType: "DINT", Description: "0 idle, 1 run"},
+			{Name: "Alarm", DataType: "BIT"},
+		},
+	}}}}
+	src, unresolved, err := Types(f, TypesOptions{})
+	if err != nil || len(unresolved) > 0 {
+		t.Fatalf("Types: %v %v", err, unresolved)
+	}
+	for _, want := range []string{
+		"  LineStatus : STRUCT (* Mode/alarm summary *)\n",
+		"    Mode : DINT; (* 0 idle, 1 run *)\n",
+		"    Alarm : BOOL;\n",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing %q in:\n%s", want, src)
+		}
+	}
+}

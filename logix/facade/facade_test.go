@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -57,24 +58,16 @@ func startController(t *testing.T) (int, *logixserver.TagStore) {
 	for _, tc := range tags {
 		store.Set(tc.Path, tc.LeafType, tc.Default)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
+	// Bind :0 inside the server (no pick-then-bind window) and read the port back.
+	srv := logixserver.NewServer(store, schema, name, "127.0.0.1:0", nil)
+	if err := srv.Listen(); err != nil {
 		t.Fatal(err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	srv := logixserver.NewServer(store, schema, name, addr, nil)
+	_, ps, _ := net.SplitHostPort(srv.Addr())
+	port, _ := strconv.Atoi(ps)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = srv.Run(ctx) }()
-	waitFor(t, "emulator", func() bool {
-		c, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-		if err == nil {
-			_ = c.Close()
-		}
-		return err == nil
-	})
 	return port, store
 }
 
@@ -170,16 +163,76 @@ func TestWritesReachTheController(t *testing.T) {
 		{`{"name": "MainProgram_Motor", "value": 42}`, "Program:MainProgram.Motor", 42.0},
 	}
 	for _, c := range cases {
+		// The controller must hold something else first, or an unchanged
+		// value would look like a write that landed.
+		_, before, _ := store.Resolve(c.device)
+		if fmt.Sprint(before) == fmt.Sprint(c.want) {
+			t.Fatalf("%s: controller already holds %v; the case cannot tell a write from no write", c.body, before)
+		}
 		if code, body := post(t, base, c.body); code != http.StatusNoContent {
 			t.Fatalf("%s = %d %s", c.body, code, body)
 		}
 		_, got, _ := store.Resolve(c.device)
 		if fmt.Sprint(got) != fmt.Sprint(c.want) {
-			t.Errorf("%s: controller holds %v, want %v", c.body, got, c.want)
+			t.Errorf("%s: controller holds %v (was %v), want %v", c.body, got, before, c.want)
 		}
 	}
 	// And the frame follows the controller, not the request.
 	waitFor(t, "write read back by the poll", func() bool { return state(t, base)["Speed"] == 55.5 })
+	// A frame that merely echoed the request would show 55.5 forever; a value
+	// the controller's own logic sets afterwards has to replace it.
+	store.UpdateValue("Speed", 61.25)
+	waitFor(t, "controller-side change after the write", func() bool { return state(t, base)["Speed"] == 61.25 })
+}
+
+// The write connection carries nothing between writes, so the controller
+// times it out (32 s for the Forward Open serve sends; 30 s on the
+// emulator). The first write after that must still land, not answer EOF.
+func TestAWriteSurvivesADroppedConnection(t *testing.T) {
+	base, store, f := startFacade(t)
+	waitFor(t, "first poll", func() bool { return state(t, base)["Speed"] == 10.0 })
+	if code, body := post(t, base, `{"name": "Speed", "value": 1}`); code != http.StatusNoContent {
+		t.Fatalf("first write = %d %s", code, body)
+	}
+
+	// The connection goes away under the writer, which has not noticed.
+	f.w.mu.Lock()
+	_ = f.w.ctrl.Close()
+	f.w.mu.Unlock()
+	if code, body := post(t, base, `{"name": "Speed", "value": 2}`); code != http.StatusNoContent {
+		t.Fatalf("write after the drop = %d %s", code, body)
+	}
+	if _, got, _ := store.Resolve("Speed"); fmt.Sprint(got) != "2" {
+		t.Errorf("controller holds Speed = %v, want 2", got)
+	}
+}
+
+func TestAnIdleWriteConnectionIsReplaced(t *testing.T) {
+	base, store, f := startFacade(t)
+	waitFor(t, "first poll", func() bool { return state(t, base)["Speed"] == 10.0 })
+	f.w.mu.Lock()
+	f.w.idle = 50 * time.Millisecond
+	f.w.mu.Unlock()
+	if code, body := post(t, base, `{"name": "Speed", "value": 3}`); code != http.StatusNoContent {
+		t.Fatalf("first write = %d %s", code, body)
+	}
+	f.w.mu.Lock()
+	first := f.w.ctrl
+	f.w.mu.Unlock()
+
+	time.Sleep(100 * time.Millisecond)
+	if code, body := post(t, base, `{"name": "Speed", "value": 4}`); code != http.StatusNoContent {
+		t.Fatalf("write after idle = %d %s", code, body)
+	}
+	f.w.mu.Lock()
+	again := f.w.ctrl
+	f.w.mu.Unlock()
+	if again == first {
+		t.Error("the idle connection was reused, not replaced")
+	}
+	if _, got, _ := store.Resolve("Speed"); fmt.Sprint(got) != "4" {
+		t.Errorf("controller holds Speed = %v, want 4", got)
+	}
 }
 
 func TestWritesThatCannotWork(t *testing.T) {

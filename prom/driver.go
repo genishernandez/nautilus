@@ -167,6 +167,9 @@ func New(m Manifest, opts ...Option) (*Driver, error) {
 		Assignments: d.assignments,
 		Log:         d.log,
 		Poll:        d.poll,
+		// Back from a park (or an outage): every rate restarts, none is
+		// computed across a gap the driver never saw.
+		OnReconnect: d.onReconnect,
 		// Write stays nil: scraping is one-way (docs/design/it-drivers.md
 		// §7 is generic across the three drivers, but Prometheus has no
 		// wire path to write anything down). hw.NewBase already refuses a
@@ -300,6 +303,10 @@ func (d *Driver) ScanClasses() map[string][]string     { return d.base.ScanClass
 func (d *Driver) SetWriteGate(gate func() bool)        { d.base.SetWriteGate(gate) }
 func (d *Driver) StructDefs() map[string]*ir.StructDef { return d.base.StructDefs() }
 func (d *Driver) Health() hw.Health                    { return d.base.Health() }
+
+// Connections and ConnectionUp are io.ConnectionReporter: one per source.
+func (d *Driver) Connections() []nio.Connection { return d.base.Connections() }
+func (d *Driver) ConnectionUp(id string) bool   { return d.base.ConnectionUp(id) }
 
 // ── the transport ────────────────────────────────────────────────────────
 

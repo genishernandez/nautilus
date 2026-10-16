@@ -53,6 +53,20 @@
 		if (active >= 0) listEl?.children[active]?.scrollIntoView({ block: 'nearest' });
 	});
 
+	// The dropdown opens below the field, left-aligned; when that would run
+	// off the right or bottom edge, shift it left or flip it above.
+	let listShift = $state(0);
+	let listFlip = $state(false);
+	$effect(() => {
+		if (!filtered.length || !listEl) return;
+		listShift = 0;
+		listFlip = false;
+		const r = listEl.getBoundingClientRect();
+		const box = el?.getBoundingClientRect();
+		if (r.right > window.innerWidth - 8) listShift = window.innerWidth - 8 - r.right;
+		if (r.bottom > window.innerHeight - 8 && box && box.top - r.height - 2 >= 8) listFlip = true;
+	});
+
 	export function focus() {
 		el?.focus();
 		el?.select();
@@ -142,7 +156,7 @@
 		}}
 	/>
 	{#if filtered.length}
-		<div class="list" bind:this={listEl}>
+		<div class="list" class:flip={listFlip} style:left="{listShift}px" bind:this={listEl}>
 			{#each filtered as it, i (it.name)}
 				<button
 					class="item"
@@ -184,6 +198,12 @@
 		border: 1px solid var(--nx-border);
 		border-radius: 3px;
 		box-shadow: var(--nx-shadow);
+	}
+	.list.flip {
+		top: auto;
+		bottom: 100%;
+		margin-top: 0;
+		margin-bottom: 2px;
 	}
 	.item {
 		display: flex;

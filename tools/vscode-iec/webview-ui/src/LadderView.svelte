@@ -10,10 +10,11 @@
 	// pointer-based with a movement threshold (HTML5 dnd doesn't exist for
 	// SVG), resolved at pointerup via elementFromPoint with a
 	// nearest-hotspot snap fallback.
-	import { annotate, argIdents, offerType, useTypes, type Ann, type LdElement, type LdFbType, type LdModel, type RungStatus } from './ladder';
+	import { annotate, argIdents, offerType, useTypes, type Ann, type LdElement, type LdFbType, type LdModel, type LdRung, type RungStatus } from './ladder';
 	import LdBlockPicker from './LdBlockPicker.svelte';
 	import { FB_TYPES } from './suggest';
-	import { layoutRung, rungMinWidth, fitArgs, L, OPERAND_LABEL_MAX, type LSpot, type LNode } from './ladderLayout';
+	import { layoutRung, rungMinWidth, fitArgs, L, OPERAND_LABEL_MAX, type LSpot, type LNode, type LBranch, type RungLayout } from './ladderLayout';
+	import { afterWrapOr, deleteOrder, inSel, orOp, selPaths, seriesKey, toggleSel, type LdSel } from './ladderSelect';
 	import { live, liveValue, liveForced, liveEnum, liveTypeNote, formatLive } from './liveState.svelte';
 	import { readClip, typingTarget, writeClip } from './clipboard';
 	import { descLine, descTail } from './xref.svelte';
@@ -50,8 +51,10 @@
 	} = $props();
 
 	// `whole` selects the rung itself (click its name): Del / ✕ then post
-	// deleteRung instead of an element delete.
-	type Sel = { rung: string; path?: number[]; coil?: number; whole?: boolean } | null;
+	// deleteRung instead of an element delete. `more` holds the rest of a
+	// Ctrl/Shift-click multi-selection — elements of the primary's series
+	// (ladderSelect.ts), which the OR gesture turns into one branch.
+	type Sel = LdSel;
 	let selected = $state<Sel>(null);
 
 	// ── model → geometry ────────────────────────────────────────────────────
@@ -141,12 +144,7 @@
 		const t = s ?? '';
 		return t.length <= n ? t : t.slice(0, Math.ceil(n / 2) - 1) + '…' + t.slice(t.length - Math.floor(n / 2));
 	};
-	const isSel = (rung: string, path?: number[], coil?: number) =>
-		selected !== null &&
-		!selected.whole &&
-		selected.rung === rung &&
-		JSON.stringify(selected.path) === JSON.stringify(path) &&
-		selected.coil === coil;
+	const isSel = (rung: string, path?: number[], coil?: number) => inSel(selected, rung, path, coil);
 
 	// ── the palette ─────────────────────────────────────────────────────────
 	// Each item inserts with placeholder operands (`_` retags after) — the
@@ -436,6 +434,12 @@
 			// Take keyboard focus so Del/N/M/Ctrl+C land (window keydown is
 			// dead in a webview while nothing in the document has focus).
 			(el.closest('.wrap') as HTMLElement | null)?.focus({ preventScroll: true });
+			if (pe.ctrlKey || pe.metaKey || pe.shiftKey) {
+				// Ctrl/Shift-click: grow (or shrink) the selection within the
+				// series — no drag; the OR gesture takes the whole set.
+				selected = toggleSel(selected, a.rung, a.node.path, a.node.coil);
+				return;
+			}
 			selected = { rung: a.rung, path: a.node.path, coil: a.node.coil };
 			drag = { kind: 'node', rung: a.rung, node: a.node, x: pe.clientX, y: pe.clientY, sx: pe.clientX, sy: pe.clientY, started: false };
 		};
@@ -580,6 +584,42 @@
 		};
 	}
 
+	// A branch's own wrapper: a press on its rails (or the space between
+	// its legs) selects the WHOLE branch — Del deletes it, O adds a leg,
+	// Ctrl/Shift adds it to a multi-selection like any series element.
+	// Its legs' elements sit above this hit area and keep their own.
+	function branchInteract(el: Element, args: { rung: string; br: LBranch }) {
+		let a = args;
+		const onDown = (ev: Event) => {
+			const pe = ev as PointerEvent;
+			if (!editable || pe.button !== 0) return;
+			// Only the branch's own hit area: a press on a leg's element is
+			// that element's (its listener stops propagation first anyway).
+			if (!(ev.target as Element | null)?.classList?.contains('branch-hit')) return;
+			ev.stopPropagation();
+			ev.preventDefault();
+			(el.closest('.wrap') as HTMLElement | null)?.focus({ preventScroll: true });
+			selected =
+				pe.ctrlKey || pe.metaKey || pe.shiftKey
+					? toggleSel(selected, a.rung, a.br.path)
+					: { rung: a.rung, path: a.br.path };
+		};
+		const onClick = (ev: Event) => {
+			if (editable && (ev.target as Element | null)?.classList?.contains('branch-hit')) ev.stopPropagation();
+		};
+		el.addEventListener('pointerdown', onDown);
+		el.addEventListener('click', onClick);
+		return {
+			update(next: { rung: string; br: LBranch }) {
+				a = next;
+			},
+			destroy() {
+				el.removeEventListener('pointerdown', onDown);
+				el.removeEventListener('click', onClick);
+			}
+		};
+	}
+
 	function spotInteract(el: Element, args: { rung: string; spot: LSpot }) {
 		let a = args;
 		const onClick = (ev: Event) => {
@@ -686,8 +726,34 @@
 		const addr = selAddr();
 		onTrace?.(`doDelete addr=${JSON.stringify(addr)}`);
 		if (!addr) return false;
-		post({ type: 'delete', ...addr });
+		const paths = selPaths(selected);
+		if (paths.length > 1) {
+			// A multi-selection deletes highest index first, one op each.
+			for (const path of deleteOrder(paths)) post({ type: 'delete', rung: addr.rung, path });
+		} else post({ type: 'delete', ...addr });
 		selected = null;
+		return true;
+	}
+
+	// The OR gesture (O, or the toolbar's OR): several selected elements
+	// become ONE branch with a leg each; a selected branch gets one more
+	// leg; a lone element gets a 2-leg OR around it (= B).
+	function kindAt(rung: string, path: number[]): string | undefined {
+		const lay = rungs.find((x) => x.r.name === rung)?.lay;
+		const key = path.join('.');
+		return (
+			lay?.branches.find((b) => b.path.join('.') === key)?.ann.el.kind ??
+			lay?.nodes.find((n) => n.path?.join('.') === key)?.ann.el.kind
+		);
+	}
+	const canOr = $derived(!!selected && !!orOp(selected, (p) => kindAt(selected!.rung, p)));
+	function doOr(): boolean {
+		const sel = selected;
+		if (!sel) return false;
+		const op = orOp(sel, (p) => kindAt(sel.rung, p));
+		if (!op) return false;
+		post(op);
+		if (op.type === 'wrapOr') selected = afterWrapOr(sel);
 		return true;
 	}
 
@@ -771,6 +837,8 @@
 			// Wrap the selection in a parallel branch (OR path around it).
 			post({ type: 'wrapBranch', ...selAddr() });
 			acted = true;
+		} else if (!ctrl && (ev.key === 'o' || ev.key === 'O')) {
+			acted = doOr();
 		}
 		if (
 			(!ctrl && (ev.key === 'Delete' || ev.key === 'Backspace')) ||
@@ -810,6 +878,10 @@
 					return n.ann;
 				}
 			}
+			if (sel.coil === undefined) {
+				const b = lay.branches.find((x) => JSON.stringify(x.path) === JSON.stringify(sel.path));
+				if (b) return b.ann;
+			}
 		}
 		return undefined;
 	}
@@ -817,6 +889,141 @@
 	const spotData = (rung: string, s: LSpot) =>
 		JSON.stringify({ rung, spot: s, accept: s.op === 'coil' ? 'coil' : 'series' });
 </script>
+
+{#snippet nodeEl(r: LdRung, n: LNode)}
+	<g
+		transform="translate({n.x}, {n.y})"
+		class="node"
+		data-kind={n.kind}
+		data-id={n.ann.el.ref ?? n.ann.el.inst ?? n.ann.el.fn}
+		data-rung={r.name}
+		data-path={n.path?.join('.')}
+		data-xref={n.ann.el.ref ?? n.ann.el.inst} data-xref-line={r.line} data-xref-end={r.endLine ?? r.line}
+		class:on={n.ann.val === true}
+		class:off={n.ann.val === false}
+		class:dadd={n.ann.el._diff === 'added'}
+		class:drem={n.ann.el._diff === 'removed'}
+		class:dchg={n.ann.el._diff === 'changed'}
+		class:selected={isSel(r.name, n.path, n.coil)}
+		class:editable
+		use:nodeInteract={{ rung: r.name, node: n }}
+	>
+		<rect class="hit" x="-2" y={-L.LABEL_TOP} width={n.w + 4} height={n.h + L.LABEL_TOP + L.LABEL_BOT - 4} rx="3" />
+		{#if n.kind === 'contact'}
+			<title>{n.ann.el.ref}{n.ann.el.neg ? ' (NC)' : ''} = {formatLive(liveValue(n.ann.el.ref ?? '', r.scope), r.scope ? undefined : n.ann.el.ref)}{r.scope ? '' : liveTypeNote(n.ann.el.ref)}{diffNote(n.ann.el)}{editable ? ' — dblclick: retag (+Tag / -Tag: an edge) · N: NO/NC · P: NO → P → N → NC · B: branch around · Del · drag to move' : ''}{descTail(n.ann.el.ref)}</title>
+			<line x1="0" y1={n.h / 2} x2={n.w / 2 - 5} y2={n.h / 2} class="w {wcls(n.ann.in)}" />
+			<line x1={n.w / 2 + 5} y1={n.h / 2} x2={n.w} y2={n.h / 2} class="w {wcls(n.ann.out)}" />
+			<line x1={n.w / 2 - 5} y1="2" x2={n.w / 2 - 5} y2={n.h - 2} class="post" />
+			<line x1={n.w / 2 + 5} y1="2" x2={n.w / 2 + 5} y2={n.h - 2} class="post" />
+			{#if n.ann.el.neg}
+				<line x1={n.w / 2 - 9} y1={n.h - 1} x2={n.w / 2 + 9} y2="1" class="post" />
+			{/if}
+			<text x={n.w / 2} y={n.h + 12} text-anchor="middle" class="operand">{trunc(n.ann.el.ref)}</text>
+			{#if !n.ann.el._diff && descLine(n.ann.el.ref, n.w)}<text x={n.w / 2} y={n.h + (valText(n.ann.el.ref, r.scope) ? 35 : 23)} text-anchor="middle" class="nx-desc">{descLine(n.ann.el.ref, n.w)}</text>{/if}
+			{#if valText(n.ann.el.ref, r.scope)}
+				<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="liveval" class:lit={n.ann.val === true} class:enum={!r.scope && liveEnum(n.ann.el.ref)}>{#if !r.scope && liveForced(n.ann.el.ref)}<tspan class="nx-forced-mark">{'F '}</tspan>{/if}{valText(n.ann.el.ref, r.scope)}</text>
+			{/if}
+		{:else if n.kind === 'edge'}
+			<title>{n.ann.el.mode === 'N' ? '-' : '+'}{n.ann.el.ref} — {n.ann.el.mode === 'N' ? 'falling' : 'rising'}-edge contact: TRUE for one scan when {n.ann.el.ref} goes {n.ann.el.mode === 'N' ? '1→0' : '0→1'} ({n.ann.el.ref} = {formatLive(liveValue(n.ann.el.ref ?? '', r.scope), r.scope ? undefined : n.ann.el.ref)}{r.scope ? '' : liveTypeNote(n.ann.el.ref)}){diffNote(n.ann.el)}{editable ? ' — dblclick: retag · P: NO → P → N → NC · Del · drag to move' : ''}{descTail(n.ann.el.ref)}</title>
+			<line x1="0" y1={n.h / 2} x2={n.w / 2 - 8} y2={n.h / 2} class="w {wcls(n.ann.in)}" />
+			<line x1={n.w / 2 + 8} y1={n.h / 2} x2={n.w} y2={n.h / 2} class="w {wcls(n.ann.out)}" />
+			<line x1={n.w / 2 - 8} y1="2" x2={n.w / 2 - 8} y2={n.h - 2} class="post" />
+			<line x1={n.w / 2 + 8} y1="2" x2={n.w / 2 + 8} y2={n.h - 2} class="post" />
+			<text x={n.w / 2} y={n.h / 2 + 3.5} text-anchor="middle" class="mark edgemark">{n.ann.el.mode === 'N' ? 'N' : 'P'}</text>
+			<text x={n.w / 2} y={n.h + 12} text-anchor="middle" class="operand">{trunc(n.ann.el.ref)}</text>
+			{#if !n.ann.el._diff && descLine(n.ann.el.ref, n.w)}<text x={n.w / 2} y={n.h + (valText(n.ann.el.ref, r.scope) ? 35 : 23)} text-anchor="middle" class="nx-desc">{descLine(n.ann.el.ref, n.w)}</text>{/if}
+			{#if valText(n.ann.el.ref, r.scope)}
+				<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="liveval" class:lit={n.ann.val === true} class:enum={!r.scope && liveEnum(n.ann.el.ref)}>{valText(n.ann.el.ref, r.scope)}</text>
+			{/if}
+		{:else if n.kind === 'coil'}
+			<title>{n.ann.el.mode ? n.ann.el.mode + ' ' : ''}{n.ann.el.ref} = {formatLive(liveValue(n.ann.el.ref ?? '', r.scope), r.scope ? undefined : n.ann.el.ref)}{r.scope ? '' : liveTypeNote(n.ann.el.ref)}{diffNote(n.ann.el)}{editable ? ' — dblclick: retag · M: mode · Del · drag to reorder' : ''}{descTail(n.ann.el.ref)}</title>
+			<line x1="0" y1={n.h / 2} x2={n.w / 2 - 12} y2={n.h / 2} class="w {wcls(n.ann.in)}" />
+			<line x1={n.w / 2 + 12} y1={n.h / 2} x2={n.w} y2={n.h / 2} class="w {wcls(n.ann.val)}" />
+			<path d="M {n.w / 2 - 8} 2 Q {n.w / 2 - 16} {n.h / 2} {n.w / 2 - 8} {n.h - 2}" fill="none" class="post" />
+			<path d="M {n.w / 2 + 8} 2 Q {n.w / 2 + 16} {n.h / 2} {n.w / 2 + 8} {n.h - 2}" fill="none" class="post" />
+			{#if n.ann.el.mode}
+				<text x={n.w / 2} y={n.h / 2 + 4} text-anchor="middle" class="mark">{n.ann.el.mode}</text>
+			{/if}
+			<text x={n.w / 2} y={n.h + 12} text-anchor="middle" class="operand">{trunc(n.ann.el.ref)}</text>
+			{#if !n.ann.el._diff && descLine(n.ann.el.ref, n.w)}<text x={n.w / 2} y={n.h + (valText(n.ann.el.ref, r.scope) ? 35 : 23)} text-anchor="middle" class="nx-desc">{descLine(n.ann.el.ref, n.w)}</text>{/if}
+			{#if valText(n.ann.el.ref, r.scope)}
+				<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="liveval" class:lit={n.ann.val === true} class:enum={!r.scope && liveEnum(n.ann.el.ref)}>{#if !r.scope && liveForced(n.ann.el.ref)}<tspan class="nx-forced-mark">{'F '}</tspan>{/if}{valText(n.ann.el.ref, r.scope)}</text>
+			{/if}
+		{:else if n.kind === 'fn'}
+			<title>{n.ann.el.fn}({n.ann.el.args}){diffNote(n.ann.el)}{editable ? ' — dblclick: edit the call (any function) · Del · drag to move' : ''}</title>
+			<rect x="0" y="0" width={n.w} height={n.h} rx="4" class="box" />
+			<text x={n.w / 2} y={n.h / 2 + 3.5} text-anchor="middle" class="fntext">{n.ann.el.fn}({n.ann.el.args})</text>
+		{:else if n.kind === 'assign'}
+			<title>{'{ ' + (n.ann.el.text ?? '') + ' }'}{diffNote(n.ann.el)}{editable ? ' — dblclick: edit the assignment(s) · Del · drag to move' : ''}</title>
+			<rect x="0" y="0" width={n.w} height={n.h} rx="4" class="box" />
+			<text x={n.w / 2} y={n.h / 2 + 3.5} text-anchor="middle" class="fntext">{n.ann.el.text}</text>
+		{:else if n.kind === 'fb'}
+			<title>{n.ann.el.inst} : {n.ann.el.type}({n.ann.el.args}){diffNote(n.ann.el)}{editable ? ' — dblclick the name: rename the instance · dblclick the body: edit args · Del · drag to move' : ''}{descTail(n.ann.el.inst)}</title>
+			<rect x="0" y="0" width={n.w} height={n.h} rx="3" class="box fbbox" />
+			<rect x="0" y={-L.LABEL_TOP - 8} width={n.w} height={L.LABEL_TOP + 28} class="fbhead" />
+			<text x={n.w / 2} y="-4" text-anchor="middle" class="operand inst">{n.ann.el.inst}</text>
+			<text x={n.w / 2} y="15" text-anchor="middle" class="fbtype">{n.ann.el.type}</text>
+			{#if n.ann.el.args}
+				<text x={n.w / 2} y={n.h - 5} text-anchor="middle" class="fbargs">{fitArgs(n.ann.el.args)}</text>
+			{/if}
+			<text x="3" y="9" class="pin">{n.ann.el.powerIn}</text>
+			<text x={n.w - 3} y="9" text-anchor="end" class="pin">{n.ann.el.powerOut}</text>
+		{/if}
+		{#if n.ann.el._diff}
+			<rect
+				class="dmark {n.ann.el._diff}"
+				x="-4"
+				y={-L.LABEL_TOP - 2}
+				width={n.w + 8}
+				height={n.h + L.LABEL_TOP + 16}
+				rx="4"
+			/>
+			{#if n.ann.el._diff === 'changed' && n.ann.el._was}
+				<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="dwas">was {trunc(n.ann.el._was, 20)}</text>
+			{:else if n.ann.el._diff === 'removed'}
+				<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="dwas gone">removed</text>
+			{/if}
+		{/if}
+	</g>
+{/snippet}
+
+<!-- One series of a rung ('' = the root; '1.0' = leg 0 of the branch at
+     index 1): its elements, then its branches — each branch ONE <g> that
+     wraps a <g> per leg, which renders that leg's series the same way. So
+     the DOM nests like the rung: g.branch > g.leg > g.node (and deeper
+     branches), and a branch is addressable, selectable and testable. -->
+{#snippet series(r: LdRung, lay: RungLayout, key: string)}
+	{#each lay.nodes.filter((n) => n.coil !== undefined ? key === '' : seriesKey(n.path) === key) as n (n.coil !== undefined ? 'c' + n.coil : n.path?.join('.'))}
+		{@render nodeEl(r, n)}
+	{/each}
+	{#each lay.branches.filter((b) => seriesKey(b.path) === key) as br (br.path.join('.'))}
+		<g
+			class="branch"
+			role="group"
+			aria-label="OR branch, {br.legYs.length} legs"
+			data-kind="branch"
+			data-id={`branch:${r.name}:${br.path.join('.')}`}
+			data-rung={r.name}
+			data-path={br.path.join('.')}
+			data-legs={br.legYs.length}
+			class:selected={isSel(r.name, br.path)}
+			class:dadd={br.ann.el._diff === 'added'}
+			class:drem={br.ann.el._diff === 'removed'}
+			class:dchg={br.ann.el._diff === 'changed'}
+			class:editable
+			use:branchInteract={{ rung: r.name, br }}
+		>
+			<rect class="branch-hit" x={br.x} y={br.y} width={br.w} height={br.h} rx="4">
+				<title>OR branch, {br.legYs.length} legs{editable ? ' — click its rails: select · O: add a leg · Del · B: branch around it · Ctrl+C/X' : ''}</title>
+			</rect>
+			{#each br.legYs as _y, li (li)}
+				<g class="leg" role="group" aria-label="leg {li + 1} of {br.legYs.length}" data-kind="leg" data-path={[...br.path, li].join('.')}>
+					{@render series(r, lay, [...br.path, li].join('.'))}
+				</g>
+			{/each}
+		</g>
+	{/each}
+{/snippet}
 
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events a11y_no_noninteractive_tabindex -->
 <div class="wrap" bind:this={wrapEl} class:dragging={drag?.started} tabindex={editable ? 0 : undefined} use:keyInteract use:measureView>
@@ -838,6 +1045,15 @@
 			<button title={selected?.whole ? `Copy rung ${selected.rung} (Ctrl+C) — it pastes as a new rung, its blocks renamed` : 'Copy the selected element — or the rung, when its name is selected (Ctrl+C)'} disabled={!canCopy} onclick={() => doCopy()}>⧉</button>
 			<button title={clipboard?.rung ? `Paste rung ${clipboard.rung.name} below the selected rung (Ctrl+V)` : 'Paste after the selection (Ctrl+V)'} disabled={!clipboard} onclick={() => doPaste()}>⎘</button>
 			<button title={selected?.whole ? `Delete rung ${selected.rung} (Del)` : 'Delete the selected element — or the rung, when its name is selected (Del)'} disabled={!selected} onclick={() => doDelete()}>✕</button>
+			<button
+				data-kind="chip"
+				data-id="or"
+				title={selPaths(selected).length > 1
+					? `OR the ${selPaths(selected).length} selected elements: one branch, a leg each (O)`
+					: 'OR: with several elements selected (Ctrl/Shift-click), ONE branch with a leg each; with a branch selected, one more leg; with one element, a 2-leg OR around it (O)'}
+				disabled={!canOr}
+				onclick={() => doOr()}
+			>OR</button>
 			{#if undeclared.length}
 				<span class="sep"></span>
 				<button
@@ -977,102 +1193,7 @@
 					<line x1={v.x} y1={v.y1} x2={v.x} y2={v.y2} class="w {wcls(v.on)}" />
 				{/each}
 
-				{#each lay.nodes as n, i (i)}
-					<g
-						transform="translate({n.x}, {n.y})"
-						class="node"
-						data-kind={n.kind}
-						data-id={n.ann.el.ref ?? n.ann.el.inst ?? n.ann.el.fn}
-						data-rung={r.name}
-						data-path={n.path?.join('.')}
-						data-xref={n.ann.el.ref ?? n.ann.el.inst} data-xref-line={r.line} data-xref-end={r.endLine ?? r.line}
-						class:on={n.ann.val === true}
-						class:off={n.ann.val === false}
-						class:dadd={n.ann.el._diff === 'added'}
-						class:drem={n.ann.el._diff === 'removed'}
-						class:dchg={n.ann.el._diff === 'changed'}
-						class:selected={isSel(r.name, n.path, n.coil)}
-						class:editable
-						use:nodeInteract={{ rung: r.name, node: n }}
-					>
-						<rect class="hit" x="-2" y={-L.LABEL_TOP} width={n.w + 4} height={n.h + L.LABEL_TOP + L.LABEL_BOT - 4} rx="3" />
-						{#if n.kind === 'contact'}
-							<title>{n.ann.el.ref}{n.ann.el.neg ? ' (NC)' : ''} = {formatLive(liveValue(n.ann.el.ref ?? '', r.scope), r.scope ? undefined : n.ann.el.ref)}{r.scope ? '' : liveTypeNote(n.ann.el.ref)}{diffNote(n.ann.el)}{editable ? ' — dblclick: retag (+Tag / -Tag: an edge) · N: NO/NC · P: NO → P → N → NC · B: branch around · Del · drag to move' : ''}{descTail(n.ann.el.ref)}</title>
-							<line x1="0" y1={n.h / 2} x2={n.w / 2 - 5} y2={n.h / 2} class="w {wcls(n.ann.in)}" />
-							<line x1={n.w / 2 + 5} y1={n.h / 2} x2={n.w} y2={n.h / 2} class="w {wcls(n.ann.out)}" />
-							<line x1={n.w / 2 - 5} y1="2" x2={n.w / 2 - 5} y2={n.h - 2} class="post" />
-							<line x1={n.w / 2 + 5} y1="2" x2={n.w / 2 + 5} y2={n.h - 2} class="post" />
-							{#if n.ann.el.neg}
-								<line x1={n.w / 2 - 9} y1={n.h - 1} x2={n.w / 2 + 9} y2="1" class="post" />
-							{/if}
-							<text x={n.w / 2} y={n.h + 12} text-anchor="middle" class="operand">{trunc(n.ann.el.ref)}</text>
-							{#if !n.ann.el._diff && descLine(n.ann.el.ref, n.w)}<text x={n.w / 2} y={n.h + (valText(n.ann.el.ref, r.scope) ? 35 : 23)} text-anchor="middle" class="nx-desc">{descLine(n.ann.el.ref, n.w)}</text>{/if}
-							{#if valText(n.ann.el.ref, r.scope)}
-								<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="liveval" class:lit={n.ann.val === true} class:enum={!r.scope && liveEnum(n.ann.el.ref)}>{#if !r.scope && liveForced(n.ann.el.ref)}<tspan class="nx-forced-mark">{'F '}</tspan>{/if}{valText(n.ann.el.ref, r.scope)}</text>
-							{/if}
-						{:else if n.kind === 'edge'}
-							<title>{n.ann.el.mode === 'N' ? '-' : '+'}{n.ann.el.ref} — {n.ann.el.mode === 'N' ? 'falling' : 'rising'}-edge contact: TRUE for one scan when {n.ann.el.ref} goes {n.ann.el.mode === 'N' ? '1→0' : '0→1'} ({n.ann.el.ref} = {formatLive(liveValue(n.ann.el.ref ?? '', r.scope), r.scope ? undefined : n.ann.el.ref)}{r.scope ? '' : liveTypeNote(n.ann.el.ref)}){diffNote(n.ann.el)}{editable ? ' — dblclick: retag · P: NO → P → N → NC · Del · drag to move' : ''}{descTail(n.ann.el.ref)}</title>
-							<line x1="0" y1={n.h / 2} x2={n.w / 2 - 8} y2={n.h / 2} class="w {wcls(n.ann.in)}" />
-							<line x1={n.w / 2 + 8} y1={n.h / 2} x2={n.w} y2={n.h / 2} class="w {wcls(n.ann.out)}" />
-							<line x1={n.w / 2 - 8} y1="2" x2={n.w / 2 - 8} y2={n.h - 2} class="post" />
-							<line x1={n.w / 2 + 8} y1="2" x2={n.w / 2 + 8} y2={n.h - 2} class="post" />
-							<text x={n.w / 2} y={n.h / 2 + 3.5} text-anchor="middle" class="mark edgemark">{n.ann.el.mode === 'N' ? 'N' : 'P'}</text>
-							<text x={n.w / 2} y={n.h + 12} text-anchor="middle" class="operand">{trunc(n.ann.el.ref)}</text>
-							{#if !n.ann.el._diff && descLine(n.ann.el.ref, n.w)}<text x={n.w / 2} y={n.h + (valText(n.ann.el.ref, r.scope) ? 35 : 23)} text-anchor="middle" class="nx-desc">{descLine(n.ann.el.ref, n.w)}</text>{/if}
-							{#if valText(n.ann.el.ref, r.scope)}
-								<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="liveval" class:lit={n.ann.val === true} class:enum={!r.scope && liveEnum(n.ann.el.ref)}>{valText(n.ann.el.ref, r.scope)}</text>
-							{/if}
-						{:else if n.kind === 'coil'}
-							<title>{n.ann.el.mode ? n.ann.el.mode + ' ' : ''}{n.ann.el.ref} = {formatLive(liveValue(n.ann.el.ref ?? '', r.scope), r.scope ? undefined : n.ann.el.ref)}{r.scope ? '' : liveTypeNote(n.ann.el.ref)}{diffNote(n.ann.el)}{editable ? ' — dblclick: retag · M: mode · Del · drag to reorder' : ''}{descTail(n.ann.el.ref)}</title>
-							<line x1="0" y1={n.h / 2} x2={n.w / 2 - 12} y2={n.h / 2} class="w {wcls(n.ann.in)}" />
-							<line x1={n.w / 2 + 12} y1={n.h / 2} x2={n.w} y2={n.h / 2} class="w {wcls(n.ann.val)}" />
-							<path d="M {n.w / 2 - 8} 2 Q {n.w / 2 - 16} {n.h / 2} {n.w / 2 - 8} {n.h - 2}" fill="none" class="post" />
-							<path d="M {n.w / 2 + 8} 2 Q {n.w / 2 + 16} {n.h / 2} {n.w / 2 + 8} {n.h - 2}" fill="none" class="post" />
-							{#if n.ann.el.mode}
-								<text x={n.w / 2} y={n.h / 2 + 4} text-anchor="middle" class="mark">{n.ann.el.mode}</text>
-							{/if}
-							<text x={n.w / 2} y={n.h + 12} text-anchor="middle" class="operand">{trunc(n.ann.el.ref)}</text>
-							{#if !n.ann.el._diff && descLine(n.ann.el.ref, n.w)}<text x={n.w / 2} y={n.h + (valText(n.ann.el.ref, r.scope) ? 35 : 23)} text-anchor="middle" class="nx-desc">{descLine(n.ann.el.ref, n.w)}</text>{/if}
-							{#if valText(n.ann.el.ref, r.scope)}
-								<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="liveval" class:lit={n.ann.val === true} class:enum={!r.scope && liveEnum(n.ann.el.ref)}>{#if !r.scope && liveForced(n.ann.el.ref)}<tspan class="nx-forced-mark">{'F '}</tspan>{/if}{valText(n.ann.el.ref, r.scope)}</text>
-							{/if}
-						{:else if n.kind === 'fn'}
-							<title>{n.ann.el.fn}({n.ann.el.args}){diffNote(n.ann.el)}{editable ? ' — dblclick: edit the call (any function) · Del · drag to move' : ''}</title>
-							<rect x="0" y="0" width={n.w} height={n.h} rx="4" class="box" />
-							<text x={n.w / 2} y={n.h / 2 + 3.5} text-anchor="middle" class="fntext">{n.ann.el.fn}({n.ann.el.args})</text>
-						{:else if n.kind === 'assign'}
-							<title>{'{ ' + (n.ann.el.text ?? '') + ' }'}{diffNote(n.ann.el)}{editable ? ' — dblclick: edit the assignment(s) · Del · drag to move' : ''}</title>
-							<rect x="0" y="0" width={n.w} height={n.h} rx="4" class="box" />
-							<text x={n.w / 2} y={n.h / 2 + 3.5} text-anchor="middle" class="fntext">{n.ann.el.text}</text>
-						{:else if n.kind === 'fb'}
-							<title>{n.ann.el.inst} : {n.ann.el.type}({n.ann.el.args}){diffNote(n.ann.el)}{editable ? ' — dblclick the name: rename the instance · dblclick the body: edit args · Del · drag to move' : ''}{descTail(n.ann.el.inst)}</title>
-							<rect x="0" y="0" width={n.w} height={n.h} rx="3" class="box fbbox" />
-							<rect x="0" y={-L.LABEL_TOP - 8} width={n.w} height={L.LABEL_TOP + 28} class="fbhead" />
-							<text x={n.w / 2} y="-4" text-anchor="middle" class="operand inst">{n.ann.el.inst}</text>
-							<text x={n.w / 2} y="15" text-anchor="middle" class="fbtype">{n.ann.el.type}</text>
-							{#if n.ann.el.args}
-								<text x={n.w / 2} y={n.h - 5} text-anchor="middle" class="fbargs">{fitArgs(n.ann.el.args)}</text>
-							{/if}
-							<text x="3" y="9" class="pin">{n.ann.el.powerIn}</text>
-							<text x={n.w - 3} y="9" text-anchor="end" class="pin">{n.ann.el.powerOut}</text>
-						{/if}
-						{#if n.ann.el._diff}
-							<rect
-								class="dmark {n.ann.el._diff}"
-								x="-4"
-								y={-L.LABEL_TOP - 2}
-								width={n.w + 8}
-								height={n.h + L.LABEL_TOP + 16}
-								rx="4"
-							/>
-							{#if n.ann.el._diff === 'changed' && n.ann.el._was}
-								<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="dwas">was {trunc(n.ann.el._was, 20)}</text>
-							{:else if n.ann.el._diff === 'removed'}
-								<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="dwas gone">removed</text>
-							{/if}
-						{/if}
-					</g>
-				{/each}
+				{@render series(r, lay, '')}
 
 				{#if editable}
 					{#each lay.spots as s, i (i)}
@@ -1081,6 +1202,8 @@
 							data-kind="chip"
 							data-id={`spot:${r.name}:${i}`}
 							data-spot={spotData(r.name, s)}
+							data-branch={s.op === 'leg' ? `branch:${r.name}:${s.branch?.join('.')}` : undefined}
+							aria-label={s.op === 'leg' ? `add an OR leg to branch ${s.branch?.join('.')}` : undefined}
 							transform="translate({s.x}, {s.y})"
 							use:spotInteract={{ rung: r.name, spot: s }}
 						>
@@ -1425,6 +1548,26 @@
 	.hit {
 		fill: transparent;
 		pointer-events: all;
+	}
+	/* A branch's own box: invisible until hovered or selected; clicks on
+	   its rails / the space between legs select the whole branch. */
+	.branch-hit {
+		fill: transparent;
+		stroke: none;
+	}
+	.branch.editable > .branch-hit {
+		pointer-events: all;
+		cursor: pointer;
+	}
+	.branch.editable > .branch-hit:hover {
+		stroke: color-mix(in srgb, var(--nx-accent) 45%, transparent);
+		stroke-dasharray: 4 3;
+	}
+	.branch.selected > .branch-hit {
+		fill: color-mix(in srgb, var(--nx-accent) 7%, transparent);
+		stroke: var(--nx-accent);
+		stroke-width: 1.4;
+		stroke-dasharray: 5 3;
 	}
 	.node.selected .hit {
 		fill: color-mix(in srgb, var(--nx-accent) 14%, transparent);

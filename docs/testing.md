@@ -229,7 +229,7 @@ And three verbs, applied with `given:` before the step spends its time —
 the same calls `POST /api/alarms/*` makes:
 
 ```yaml
-- ack:      { ids: ["RTU9_WEL15_FIT_001.HH"], by: test }   # or { all: true }
+- ack:      { ids: ["RTU9_ZONE15_FIT_001.HH"], by: test }   # or { all: true }
 - shelve:   { id: RTU9_TNK01_LIT_001.L, for: 15m, by: test }
 - unshelve: { id: RTU9_TNK01_LIT_001.L, by: test }
 ```
@@ -241,14 +241,14 @@ expires under `advance: 16m` — in microseconds, identically on every
 machine.
 
 ```yaml
-- given: { RTU9_WEL15_FIT_001.PV: 120.0 }
+- given: { RTU9_ZONE15_FIT_001.PV: 120.0 }
   advance: 4m                    # the bit is set; the ALARM is not, yet
-  expect: { RTU9_WEL15_FIT_001.HH: true }
+  expect: { RTU9_ZONE15_FIT_001.HH: true }
   alarms: { active: [], unacked: 0 }
 - advance: 1m1s                  # ... and now the on-delay has elapsed
   alarms:
-    active: ["RTU9_WEL15_FIT_001.HH"]
-    state: { RTU9_WEL15_FIT_001.HH: unack-active }
+    active: ["RTU9_ZONE15_FIT_001.HH"]
+    state: { RTU9_ZONE15_FIT_001.HH: unack-active }
 ```
 
 `alarms:` is checked at the end of a step, so it does not combine with

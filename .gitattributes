@@ -1,0 +1,8 @@
+# Test fixtures and goldens are compared byte for byte. Check them out
+# exactly as committed on every platform, so a Windows clone with
+# core.autocrlf=true doesn't turn them into CRLF and fail the tests.
+**/testdata/** -text
+*.golden -text
+*.golden.* -text
+*.L5X -text
+*.ACD binary

@@ -302,11 +302,36 @@ END_PROGRAM`
 	}
 }
 
-// Run schedules every task concurrently; scans serialize on the shared
-// store (this test's value is mostly under -race).
+// stallingDriver is a field driver whose second read blocks until the test
+// lets it go: a main scan stuck in I/O, for exactly as long as the test
+// needs, however fast or loaded the machine. Only ReadInputs and
+// WriteOutputs, so the runtime cannot route round the stall through
+// io.BatchReader.
+type stallingDriver struct {
+	mem     *nio.Memory
+	reads   int // the main scan is the only reader
+	stalled chan struct{}
+	release chan struct{}
+}
+
+func (d *stallingDriver) ReadInputs() (nio.Values, error) {
+	d.reads++
+	if d.reads == 2 {
+		close(d.stalled)
+		<-d.release
+	}
+	return d.mem.ReadInputs()
+}
+
+func (d *stallingDriver) WriteOutputs(v nio.Values) error { return d.mem.WriteOutputs(v) }
+
+// Run schedules every task concurrently: with the main scan stalled in its
+// driver read, the aux task keeps scanning on its own schedule. A
+// scheduler that ran the tasks one after another would stall them all.
 func TestTasksRunConcurrently(t *testing.T) {
-	drv := nio.NewMemory()
-	_ = drv.WriteOutputs(nio.Values{"x": 1.0})
+	mem := nio.NewMemory()
+	_ = mem.WriteOutputs(nio.Values{"x": 1.0})
+	drv := &stallingDriver{mem: mem, stalled: make(chan struct{}), release: make(chan struct{})}
 	rt, err := runtime.New(runtime.Options{
 		Program: `PROGRAM Main
 VAR_EXTERNAL x : REAL; y : REAL; END_VAR
@@ -330,17 +355,41 @@ END_PROGRAM`,
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
-	defer cancel()
-	rt.Run(ctx)
+	ctx, cancel := context.WithCancel(context.Background())
+	ran := make(chan struct{})
+	go func() { rt.Run(ctx); close(ran) }()
+	defer func() { cancel(); <-ran }()
 
+	// Deadlines here only bound how long a broken scheduler gets to show
+	// itself; a working one passes as soon as aux has scanned.
+	select {
+	case <-drv.stalled:
+	case <-time.After(10 * time.Second):
+		close(drv.release)
+		t.Fatal("setup: the main task never made its second read")
+	}
+	auxCount := func() uint64 {
+		if ts := rt.Stats().Tasks; len(ts) == 1 {
+			return ts[0].Count
+		}
+		return 0
+	}
+	from := auxCount()
+	deadline := time.Now().Add(10 * time.Second)
+	for auxCount() < from+5 {
+		if time.Now().After(deadline) {
+			close(drv.release)
+			t.Fatalf("aux scanned %d times in 10s with the main scan stalled; want it to keep its own schedule", auxCount()-from)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mainCount := rt.Stats().Count
+	close(drv.release)
+
+	if mainCount != 1 {
+		t.Errorf("main completed %d scans while stalled on its second read; want 1", mainCount)
+	}
 	st := rt.Stats()
-	if st.Count == 0 {
-		t.Fatal("main task never scanned")
-	}
-	if len(st.Tasks) != 1 || st.Tasks[0].Count == 0 {
-		t.Fatalf("aux task never scanned: %+v", st.Tasks)
-	}
 	if st.LogicErrors != 0 || st.Tasks[0].LogicErrors != 0 {
 		t.Fatalf("scans must run clean: main=%d aux=%+v", st.LogicErrors, st.Tasks[0])
 	}

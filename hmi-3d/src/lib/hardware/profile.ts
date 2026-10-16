@@ -253,6 +253,13 @@ export function capacity(gb: unknown): string | undefined {
 	return g >= 1000 ? `${+(g / 1000).toFixed(2)} TB` : `${Math.round(g)} GB`;
 }
 
+/** A rounded reading with its unit; `no data` when the member is not
+ * published (unbound in the driver's map), never a fake 0. */
+const reading = (v: unknown, unit: string): string => {
+	const x = num(v);
+	return x === undefined ? 'no data' : `${Math.round(x)}${unit}`;
+};
+
 /** The label's value text for a part. */
 export function partStatus(kind: PartKind, value: unknown, state: PartState): string {
 	switch (state) {
@@ -276,9 +283,9 @@ export function partStatus(kind: PartKind, value: unknown, state: PartState): st
 		case 'dimm':
 			return `${capacity(member(value, 'CapacityGB')) ?? 'DIMM'}${temp}${flag}`;
 		case 'fan':
-			return `${Math.round(num(member(value, 'RPM')) ?? 0)} rpm${flag}`;
+			return `${reading(member(value, 'RPM'), ' rpm')}${flag}`;
 		case 'psu':
-			return `${Math.round(num(member(value, 'OutputW')) ?? 0)} W${flag}`;
+			return `${reading(member(value, 'OutputW'), ' W')}${flag}`;
 		case 'cpu':
 			return `${str(member(value, 'Model')) ?? 'CPU'}${temp}${flag}`;
 		case 'pcie-card':

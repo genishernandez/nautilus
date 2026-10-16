@@ -106,6 +106,7 @@ const (
 	TokenDot          // .
 	TokenDotDot       // ..
 	TokenHash         // #
+	TokenCaret        // ^ (pointer dereference; unsupported, rejected by the parser)
 	TokenPartial      // %X3, %B1, %W0, %D0, %L0 — an IEC partial access after '.'
 
 	// tokenKindCount is one past the last token kind: the length the
@@ -206,6 +207,7 @@ var tokenNames = [...]string{
 	TokenDot:          "'.'",
 	TokenDotDot:       "'..'",
 	TokenHash:         "'#'",
+	TokenCaret:        "'^'",
 	TokenPartial:      "a partial access (%X3)",
 }
 

@@ -54,8 +54,26 @@ const MEMBERS: Record<string, { label: string; set: boolean | number }> = {
 	BroadcastPps: { label: 'broadcast storm', set: 1_000_000 },
 	MulticastPps: { label: 'multicast storm', set: 300_000 }
 };
+// A switch port's VLAN faults take a VLAN id (0 = as configured), so the
+// value that makes the fault depends on the port: a native or access VLAN
+// it is not already in, a VLAN it does carry to prune. Offered only with
+// the port's VLANs to hand (PortVlanContext); set, each shows its value.
+const VLAN_MEMBERS: Record<string, { label: string; pick: (v: PortVlanContext) => number | undefined }> = {
+	Pvid: { label: 'native', pick: (v) => v.site.find((id) => id !== v.native) },
+	Prune: { label: 'prune', pick: (v) => v.tagged.find((id) => id !== 1) },
+	Access: { label: 'access', pick: (v) => v.site.find((id) => id !== v.native) }
+};
 // The menu's order: the fault that takes the part out first.
-const ORDER = Object.keys(MEMBERS);
+const ORDER = [...Object.keys(MEMBERS), ...Object.keys(VLAN_MEMBERS)];
+
+/** A switch port's VLANs, for the VLAN faults' values: the site's VLANs
+ * (the topology's), and the port's native and tagged ones as it reports
+ * them. */
+export interface PortVlanContext {
+	site: number[];
+	native?: number;
+	tagged: number[];
+}
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 /** A member that differs from zero / false is a fault that is set. */
@@ -80,23 +98,31 @@ export function who(tag: string): string {
 	return t.replace(/^Cable_/, 'cable ').replace(/_/g, ' ');
 }
 
-function faultsOf(tag: string, v: unknown): Fault[] {
+function faultsOf(tag: string, v: unknown, vlans?: PortVlanContext): Fault[] {
 	if (!isObj(v)) return [];
 	// A server's struct has PowerOff; its Dark is the BMC going quiet, not the box.
 	const server = 'PowerOff' in v;
 	return Object.entries(v)
 		.filter(([, x]) => typeof x === 'number' || typeof x === 'boolean')
-		.map(([member, x]) => {
-			const m = MEMBERS[member];
+		.flatMap(([member, x]): Fault[] => {
 			const num = typeof x === 'number';
-			return {
-				tag,
-				member,
-				label: member === 'Dark' && server ? 'BMC dark' : (m?.label ?? member),
-				on: isSet(x),
-				set: m?.set ?? (num ? 1 : true),
-				clear: num ? 0 : false
-			};
+			const vlan = VLAN_MEMBERS[member];
+			if (vlan) {
+				const on = isSet(x);
+				const id = on ? (x as number) : vlans && vlan.pick(vlans);
+				return id === undefined ? [] : [{ tag, member, label: `${vlan.label} ${id}`, on, set: id, clear: 0 }];
+			}
+			const m = MEMBERS[member];
+			return [
+				{
+					tag,
+					member,
+					label: member === 'Dark' && server ? 'BMC dark' : (m?.label ?? member),
+					on: isSet(x),
+					set: m?.set ?? (num ? 1 : true),
+					clear: num ? 0 : false
+				}
+			];
 		})
 		.sort((a, b) => rank(a.member) - rank(b.member));
 }
@@ -105,10 +131,11 @@ const rank = (m: string) => (ORDER.includes(m) ? ORDER.indexOf(m) : ORDER.length
 /**
  * What a part can suffer: the members of `Sim_<tag>` for each tag given
  * that the plant has, in the order given. `state` is the plant's tags
- * (`/plant/api/state?tags=Sim_*`).
+ * (`/plant/api/state?tags=Sim_*`). `vlans`, a switch port's, gives its
+ * VLAN faults their values; without it they are offered only to clear.
  */
-export function faultsFor(state: Record<string, unknown>, simTags: string[]): Fault[] {
-	return simTags.flatMap((t) => faultsOf(t, state[t]));
+export function faultsFor(state: Record<string, unknown>, simTags: string[], vlans?: PortVlanContext): Fault[] {
+	return simTags.flatMap((t) => faultsOf(t, state[t], vlans));
 }
 
 /**

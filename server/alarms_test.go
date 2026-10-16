@@ -164,7 +164,7 @@ func TestAckShelveAndUnshelve(t *testing.T) {
 	srv, eng := alarmServer(t, cond)
 	eng.Evaluate()
 
-	rec := do(t, srv, "POST", "/api/alarms/ack", `{"ids":["HiTemp"],"by":"rchon"}`)
+	rec := do(t, srv, "POST", "/api/alarms/ack", `{"ids":["HiTemp"],"by":"operator1"}`)
 	if rec.Code != 200 {
 		t.Fatalf("ack status = %d: %s", rec.Code, rec.Body)
 	}
@@ -177,7 +177,7 @@ func TestAckShelveAndUnshelve(t *testing.T) {
 	}
 
 	// `all` is one request, not two thousand.
-	rec = do(t, srv, "POST", "/api/alarms/ack", `{"all":true,"by":"rchon"}`)
+	rec = do(t, srv, "POST", "/api/alarms/ack", `{"all":true,"by":"operator1"}`)
 	json.Unmarshal(rec.Body.Bytes(), &acked)
 	if acked.Acked != 1 {
 		t.Errorf("ack-all acked = %d, want 1 (the one still unacknowledged)", acked.Acked)
@@ -189,7 +189,7 @@ func TestAckShelveAndUnshelve(t *testing.T) {
 		t.Errorf("ack of an unknown id = %d, want 404", rec.Code)
 	}
 
-	rec = do(t, srv, "POST", "/api/alarms/shelve", `{"id":"LoFlow","seconds":600,"by":"rchon"}`)
+	rec = do(t, srv, "POST", "/api/alarms/shelve", `{"id":"LoFlow","seconds":600,"by":"operator1"}`)
 	if rec.Code != 200 {
 		t.Fatalf("shelve status = %d: %s", rec.Code, rec.Body)
 	}
@@ -197,11 +197,11 @@ func TestAckShelveAndUnshelve(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &recd); err != nil {
 		t.Fatal(err)
 	}
-	if recd.State != alarm.Shelved || recd.ShelfBy != "rchon" || recd.ShelfUntilMs == 0 {
+	if recd.State != alarm.Shelved || recd.ShelfBy != "operator1" || recd.ShelfUntilMs == 0 {
 		t.Errorf("shelve returned %+v", recd)
 	}
 
-	rec = do(t, srv, "POST", "/api/alarms/unshelve", `{"id":"LoFlow","by":"rchon"}`)
+	rec = do(t, srv, "POST", "/api/alarms/unshelve", `{"id":"LoFlow","by":"operator1"}`)
 	if rec.Code != 200 {
 		t.Fatalf("unshelve status = %d: %s", rec.Code, rec.Body)
 	}
@@ -212,7 +212,7 @@ func TestAckShelveAndUnshelve(t *testing.T) {
 
 	// There is no permanent shelf: a request with neither deadline nor
 	// duration is a 400 that says so.
-	rec = do(t, srv, "POST", "/api/alarms/shelve", `{"id":"LoFlow","by":"rchon"}`)
+	rec = do(t, srv, "POST", "/api/alarms/shelve", `{"id":"LoFlow","by":"operator1"}`)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "permanent shelf") {
 		t.Errorf("open-ended shelve = %d %q", rec.Code, rec.Body)
 	}
@@ -241,7 +241,7 @@ func TestAlarmWritesHonorAuth(t *testing.T) {
 		t.Errorf("GET /api/alarms with auth configured = %d, want 200", rec.Code)
 	}
 
-	r := httptest.NewRequest("POST", "/api/alarms/ack", strings.NewReader(`{"all":true,"by":"rchon"}`))
+	r := httptest.NewRequest("POST", "/api/alarms/ack", strings.NewReader(`{"all":true,"by":"operator1"}`))
 	r.Header.Set("X-Nautilus-Token", "s3cret")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, r)
@@ -254,7 +254,7 @@ func TestJournalQuery(t *testing.T) {
 	cond := map[string]any{"HiTempAlm": true, "LoFlowAlm": false}
 	srv, eng := alarmServer(t, cond)
 	eng.Evaluate()
-	eng.Ack([]string{"HiTemp"}, "rchon")
+	eng.Ack([]string{"HiTemp"}, "operator1")
 
 	var out journalResponse
 	rec := do(t, srv, "GET", "/api/alarms/journal", "")

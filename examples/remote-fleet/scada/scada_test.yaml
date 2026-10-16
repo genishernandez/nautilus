@@ -15,10 +15,10 @@ tests:
     given: {
       Well1_Pump1.Run: false, Well2_Pump1.Run: false,
       Booster1_Pump1.Run: false, Booster1_Pump2.Run: false,
-      Booster1_plc1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
+      Booster1_FM1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
     }
     steps:
-      - given: { Well1__Online: true, Well2__Online: false, Booster1__Online: true, Booster1_plc1__Online: true }
+      - given: { Well1__Online: true, Well2__Online: false, Booster1__Online: true, Booster1_FM1__Online: true }
         scans: 1
         expect: { SitesOnline: 2 }
       - given: { Well2__Online: true }
@@ -30,10 +30,10 @@ tests:
 
   - name: AnyPumpRunning follows any site's pump, guarded on __Online
     given: {
-      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_plc1__Online: true,
+      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_FM1__Online: true,
       Well1_Pump1.Run: false, Well2_Pump1.Run: false,
       Booster1_Pump1.Run: false, Booster1_Pump2.Run: false,
-      Booster1_plc1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
+      Booster1_FM1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
     }
     steps:
       - given: { Well1_Pump1.Run: true }
@@ -54,27 +54,27 @@ tests:
 
   - name: SystemDemandLps forwards the flow meter, guarded on the device's own __Online
     given: {
-      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_plc1__Online: true,
+      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_FM1__Online: true,
       Well1_Pump1.Run: false, Well2_Pump1.Run: false,
       Booster1_Pump1.Run: false, Booster1_Pump2.Run: false,
       Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
     }
     steps:
-      - given: { Booster1_plc1_FM1_FlowLps: 12.5 }
+      - given: { Booster1_FM1_FM1_FlowLps: 12.5 }
         scans: 1
         expect: { SystemDemandLps: 12.5 }
       # A device attached to a node has its own __Online, distinct from
       # the node's — the flow meter can go dark while Booster1 stays up.
-      - given: { Booster1_plc1__Online: false }
+      - given: { Booster1_FM1__Online: false }
         scans: 1
         expect: { SystemDemandLps: 0.0 }
 
   - name: the tank rollup reads 0 (not the last-known level) once Booster1 goes dark
     given: {
-      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_plc1__Online: true,
+      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_FM1__Online: true,
       Well1_Pump1.Run: false, Well2_Pump1.Run: false,
       Booster1_Pump1.Run: false, Booster1_Pump2.Run: false,
-      Booster1_plc1_FM1_FlowLps: 0.0, CL1_ResidualPpm: 0.5,
+      Booster1_FM1_FM1_FlowLps: 0.0, CL1_ResidualPpm: 0.5,
     }
     steps:
       - given: { Booster1_TankLevel: 20.0 } # below TankLowSP (30)
@@ -88,10 +88,10 @@ tests:
 
   - name: chlorine residual low, from the plant's own local Modbus device
     given: {
-      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_plc1__Online: true,
+      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_FM1__Online: true,
       Well1_Pump1.Run: false, Well2_Pump1.Run: false,
       Booster1_Pump1.Run: false, Booster1_Pump2.Run: false,
-      Booster1_plc1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
+      Booster1_FM1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
     }
     steps:
       - given: { CL1_ResidualPpm: 0.1 } # below ResidualLowSP (0.2)
@@ -112,10 +112,10 @@ tests:
     # program racing it every scan would just fight the operator's write
     # on the very next tick.
     given: {
-      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_plc1__Online: true,
+      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_FM1__Online: true,
       Well1_Pump1.Run: false, Well2_Pump1.Run: false,
       Booster1_Pump1.Run: false, Booster1_Pump2.Run: false,
-      Booster1_plc1_FM1_FlowLps: 0.0, CL1_ResidualPpm: 0.5,
+      Booster1_FM1_FM1_FlowLps: 0.0, CL1_ResidualPpm: 0.5,
     }
     steps:
       - given: { Booster1_TankLevel: 80.0 } # above TankHighSP (70): tank is full, nobody called
@@ -151,10 +151,10 @@ tests:
     # this test would fail on the first `advance:` below, where a no-op
     # write-holds check alone would not have caught it.
     given: {
-      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_plc1__Online: true,
+      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_FM1__Online: true,
       Well1_Pump1.Run: false, Well2_Pump1.Run: false,
       Booster1_Pump1.Run: false, Booster1_Pump2.Run: false,
-      Booster1_plc1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
+      Booster1_FM1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
     }
     steps:
       - given: { Well1_Pump1_SpeedSP: 50.0 }
@@ -172,10 +172,10 @@ tests:
 
   - name: a dark site suppresses its own pump-fault alarm instead of leaving it active
     given: {
-      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_plc1__Online: true,
+      Well1__Online: true, Well2__Online: true, Booster1__Online: true, Booster1_FM1__Online: true,
       Well1_Pump1.Run: false, Well1_Pump1.Fault: false,
       Well2_Pump1.Run: false, Booster1_Pump1.Run: false, Booster1_Pump2.Run: false,
-      Booster1_plc1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
+      Booster1_FM1_FM1_FlowLps: 0.0, Booster1_TankLevel: 50.0, CL1_ResidualPpm: 0.5,
     }
     steps:
       - given: { Well1_Pump1.Fault: true }

@@ -82,6 +82,55 @@ type Controller struct {
 	Tags      []*Tag // controller-scoped
 	Programs  []*Program
 	Tasks     []*Task
+
+	// Modules are the project's I/O configuration, in the export's order:
+	// the controller's own Local module, the modules in its chassis, and
+	// adapters and the modules under them. ModulesXML is the <Modules>
+	// element exactly as the export has it, "" when there is none.
+	Modules    []*Module
+	ModulesXML string
+}
+
+// Module is one <Module>: its identity (the CIP key Logix Designer
+// matches the catalog on — Vendor, ProductType, ProductCode — and the
+// revision) and where it sits. Only what naming a rack point needs is
+// modelled; the configuration, connections and module tags stay in the
+// raw XML (Controller.ModulesXML).
+type Module struct {
+	Name          string
+	CatalogNumber string
+	Vendor        string
+	ProductType   string
+	ProductCode   string
+	Major, Minor  string
+	// ParentModule and ParentModPortID are the module it hangs off and
+	// that module's port: the Local module for a module in the
+	// controller's chassis, an adapter for a module in a remote one.
+	ParentModule    string
+	ParentModPortID string
+	Inhibited       bool
+	Ports           []ModulePort
+	Line            int // 1-based line of <Module> in the source
+}
+
+// ModulePort is one of a module's ports. The upstream port is the one
+// toward the controller; its Address is the slot on a backplane or the
+// IP address on a network.
+type ModulePort struct {
+	ID, Address, Type string
+	Upstream          bool
+}
+
+// Slot is the address of the module's upstream port: its slot in the
+// parent's chassis, or its IP address on the parent's network; "" for a
+// module with no upstream port (the controller itself).
+func (m *Module) Slot() string {
+	for _, p := range m.Ports {
+		if p.Upstream {
+			return p.Address
+		}
+	}
+	return ""
 }
 
 // Task is one <Task>: how the controller schedules its programs. A
@@ -260,7 +309,7 @@ func Parse(src []byte) (*File, error) {
 		f.ExportDate = attr(se, "ExportDate")
 		f.ExportOptions = attr(se, "ExportOptions")
 		f.ContainsContext = attr(se, "ContainsContext") == "true"
-		ctrl, err := parseController(dec, lines)
+		ctrl, err := parseController(dec, src, lines)
 		if err != nil {
 			return nil, err
 		}
@@ -275,7 +324,7 @@ func Parse(src []byte) (*File, error) {
 
 // parseController consumes the children of <RSLogix5000Content> up to its
 // end, filling the controller it finds.
-func parseController(dec *xml.Decoder, lines *lineIndex) (*Controller, error) {
+func parseController(dec *xml.Decoder, src []byte, lines *lineIndex) (*Controller, error) {
 	c := &Controller{}
 	seen := false
 	err := walk(dec, func(se xml.StartElement) error {
@@ -317,6 +366,25 @@ func parseController(dec *xml.Decoder, lines *lineIndex) (*Controller, error) {
 					c.AOIs = append(c.AOIs, aoi)
 					return nil
 				})
+			case "Modules":
+				// The element is kept as the export has it, for a writer
+				// that carries the I/O configuration unchanged (#275).
+				start := bytes.LastIndex(src[:dec.InputOffset()], []byte("<Modules"))
+				err := walk(dec, func(se xml.StartElement) error {
+					if se.Name.Local != "Module" {
+						return skip(dec)
+					}
+					m, err := parseModule(dec, se, lines.at(dec.InputOffset()))
+					if err != nil {
+						return err
+					}
+					c.Modules = append(c.Modules, m)
+					return nil
+				})
+				if err == nil && start >= 0 {
+					c.ModulesXML = string(src[start:dec.InputOffset()])
+				}
+				return err
 			case "Tags":
 				tags, err := parseTags(dec, "")
 				c.Tags = append(c.Tags, tags...)
@@ -371,6 +439,35 @@ func parseController(dec *xml.Decoder, lines *lineIndex) (*Controller, error) {
 		return nil, fmt.Errorf("L5X has no <Controller> element")
 	}
 	return c, nil
+}
+
+func parseModule(dec *xml.Decoder, se xml.StartElement, line int) (*Module, error) {
+	m := &Module{
+		Name:            attr(se, "Name"),
+		CatalogNumber:   attr(se, "CatalogNumber"),
+		Vendor:          attr(se, "Vendor"),
+		ProductType:     attr(se, "ProductType"),
+		ProductCode:     attr(se, "ProductCode"),
+		Major:           attr(se, "Major"),
+		Minor:           attr(se, "Minor"),
+		ParentModule:    attr(se, "ParentModule"),
+		ParentModPortID: attr(se, "ParentModPortId"),
+		Inhibited:       attr(se, "Inhibited") == "true",
+		Line:            line,
+	}
+	err := walk(dec, func(se xml.StartElement) error {
+		if se.Name.Local != "Ports" {
+			return skip(dec)
+		}
+		return walk(dec, func(se xml.StartElement) error {
+			if se.Name.Local == "Port" {
+				m.Ports = append(m.Ports, ModulePort{ID: attr(se, "Id"), Address: attr(se, "Address"),
+					Type: attr(se, "Type"), Upstream: attr(se, "Upstream") == "true"})
+			}
+			return skip(dec)
+		})
+	})
+	return m, err
 }
 
 func parseDataType(dec *xml.Decoder, se xml.StartElement) (*DataType, error) {

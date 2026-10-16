@@ -1,22 +1,45 @@
 package alarm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
+// The log notifier writes one Info record per event carrying what an
+// operator searching the log needs: which alarm, what happened, how bad,
+// where, and who.
 func TestLogNotifier(t *testing.T) {
-	n := NewLogNotifier(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err := n.Notify(context.Background(), ev(1000, "A", "active")); err != nil {
+	var buf bytes.Buffer
+	n := NewLogNotifier(slog.New(slog.NewJSONHandler(&buf, nil)))
+	e := ev(1000, "FIT_001.HH", "ack")
+	e.By = "operator1"
+	if err := n.Notify(context.Background(), e); err != nil {
 		t.Fatal(err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("want one JSON log record, got %q: %v", buf.String(), err)
+	}
+	for k, want := range map[string]any{
+		"level": "INFO", "msg": "alarm",
+		"id": "FIT_001.HH", "name": "FIT_001.HH", "kind": "ack", "priority": "high",
+		"site": "RTU9", "state": "unack-active", "by": "operator1", "ts": 1000.0,
+	} {
+		if rec[k] != want {
+			t.Errorf("log record %s = %v, want %v (record %s)", k, rec[k], want, buf.String())
+		}
+	}
+	if lines := strings.Count(buf.String(), "\n"); lines != 1 {
+		t.Errorf("logged %d records for one event, want 1", lines)
 	}
 }
 
@@ -99,10 +122,28 @@ func (c *countingNotifier) len() int {
 	return len(c.seen)
 }
 
+// blockingNotifier records each event, says it has one, and then blocks
+// until the test releases it: a notifier stuck on a dead endpoint.
+type blockingNotifier struct {
+	countingNotifier
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingNotifier) Notify(ctx context.Context, e Event) error {
+	_ = b.countingNotifier.Notify(ctx, e)
+	b.arrived <- struct{}{}
+	<-b.release
+	return nil
+}
+
 // TestEngineNotifiesOffTheScanGoroutine — the engine must hand events over
-// and keep scanning, never await a notifier.
+// and keep scanning, never await a notifier. The notifier here blocks on
+// every event until the test lets it go, so an engine that delivered on
+// the scan goroutine would hang in Evaluate.
 func TestEngineNotifiesOffTheScanGoroutine(t *testing.T) {
-	clk, tg, n := newClock(), tags{}, &countingNotifier{}
+	clk, tg := newClock(), tags{}
+	n := &blockingNotifier{arrived: make(chan struct{}, 2), release: make(chan struct{})}
 	e, err := New(Options{
 		Defs: []Def{def("A", "A")}, Read: tg.read, Now: clk.now,
 		Journal: NewRing(10), Notify: []Notifier{n},
@@ -110,11 +151,41 @@ func TestEngineNotifiesOffTheScanGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	released := false
+	release := func() {
+		if !released {
+			close(n.release)
+			released = true
+		}
+	}
+	defer release()
+	// evaluate runs one Evaluate and fails if it does not come back while
+	// the notifier is blocked. The deadline only bounds how long a
+	// synchronous engine is given to show itself.
+	evaluate := func(what string) {
+		t.Helper()
+		done := make(chan struct{})
+		go func() { e.Evaluate(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			release()
+			<-done
+			t.Fatalf("%s: Evaluate waited on a blocked notifier", what)
+		}
+	}
+
 	tg["A"] = true
-	e.Evaluate()
+	evaluate("active")
+	select {
+	case <-n.arrived: // the notifier holds the event and is now blocked in it
+	case <-time.After(10 * time.Second):
+		t.Fatal("the notifier never received the active event")
+	}
 	tg["A"] = false
 	clk.advance(time.Second)
-	e.Evaluate()
+	evaluate("return to normal") // with the notifier still blocked
+	release()
 
 	// Close drains the queue, so this is deterministic without a sleep.
 	if err := e.Close(); err != nil {

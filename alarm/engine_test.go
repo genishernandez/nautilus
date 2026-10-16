@@ -98,12 +98,12 @@ func TestLifecycleActiveAckRTN(t *testing.T) {
 	eq(t, "state", r.state(t, "HH"), UnackActive)
 	eq(t, "count", r.Records()[0].Count, 1)
 
-	n, err := r.Ack([]string{"HH"}, "rchon")
+	n, err := r.Ack([]string{"HH"}, "operator1")
 	if err != nil || n != 1 {
 		t.Fatalf("Ack = %d, %v", n, err)
 	}
 	eq(t, "state", r.state(t, "HH"), AckActive)
-	eq(t, "ackBy", r.Records()[0].AckBy, "rchon")
+	eq(t, "ackBy", r.Records()[0].AckBy, "operator1")
 
 	r.tags["FIT.HH"] = false
 	r.Evaluate()
@@ -503,10 +503,10 @@ func TestRetainedAckSurvivesRestart(t *testing.T) {
 	r := newRig(t, def("A", "A"), def("B", "B"))
 	r.tags["A"], r.tags["B"] = true, true
 	r.Evaluate()
-	if _, err := r.Ack([]string{"A"}, "rchon"); err != nil {
+	if _, err := r.Ack([]string{"A"}, "operator1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Shelve("B", r.clk.at(time.Hour), "rchon"); err != nil {
+	if err := r.Shelve("B", r.clk.at(time.Hour), "operator1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -514,7 +514,7 @@ func TestRetainedAckSurvivesRestart(t *testing.T) {
 	if len(snap) != 2 {
 		t.Fatalf("snapshot = %+v, want the acked and the shelved", snap)
 	}
-	if !snap["A"].Acked || snap["A"].AckBy != "rchon" {
+	if !snap["A"].Acked || snap["A"].AckBy != "operator1" {
 		t.Errorf("snapshot A = %+v", snap["A"])
 	}
 	if snap["B"].ShelfUntilMs == 0 {
@@ -539,7 +539,7 @@ func TestRetainedAckSurvivesRestart(t *testing.T) {
 		recs[rec.ID] = rec
 	}
 	eq(t, "A after restore", recs["A"].State, AckActive)
-	eq(t, "A ackBy", recs["A"].AckBy, "rchon")
+	eq(t, "A ackBy", recs["A"].AckBy, "operator1")
 	eq(t, "B after restore", recs["B"].State, Shelved)
 	eq(t, "unacked after restore", e2.Summary().Unacked, 0)
 
@@ -593,5 +593,40 @@ func TestRecordJSONShape(t *testing.T) {
 		if !strings.Contains(b, want) {
 			t.Errorf("Record JSON missing %s: %s", want, b)
 		}
+	}
+}
+
+// TestRenameNamesWhatFollows: a name set before the evaluation that
+// activates an alarm is the one its activation is journalled under, its
+// record and the banner read it, a change bumps Rev, and "" returns to the
+// definition's own.
+func TestRenameNamesWhatFollows(t *testing.T) {
+	r := newRig(t, def("W", "NODE1_Alerts.AnyWarning"))
+	r.tags["NODE1_Alerts.AnyWarning"] = false
+	r.Evaluate()
+
+	rev := r.Rev()
+	if err := r.Rename("W", "node1: DefenderSignaturesStale"); err != nil {
+		t.Fatal(err)
+	}
+	if r.Rev() == rev {
+		t.Error("a rename did not bump Rev")
+	}
+	rev = r.Rev()
+	_ = r.Rename("W", "node1: DefenderSignaturesStale")
+	eq(t, "rev after renaming to the same", r.Rev(), rev)
+
+	r.tags["NODE1_Alerts.AnyWarning"] = true
+	r.Evaluate()
+	evs, _ := r.Journal(time.Time{}, time.Time{}, Filter{})
+	eq(t, "journalled as", evs[0].Name, "node1: DefenderSignaturesStale")
+	eq(t, "record", r.Records()[0].Name, "node1: DefenderSignaturesStale")
+	eq(t, "banner", r.Summary().Newest.Name, "node1: DefenderSignaturesStale")
+
+	eq(t, "the definition itself", r.inst[0].def.Name, "W")
+	_ = r.Rename("W", "")
+	eq(t, "restored", r.Records()[0].Name, "W")
+	if err := r.Rename("nope", "x"); err == nil {
+		t.Error("renamed an alarm that does not exist")
 	}
 }

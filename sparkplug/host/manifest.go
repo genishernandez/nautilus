@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/joyautomation/nautilus/lang/ir"
+	"github.com/joyautomation/nautilus/sparkplug"
 	"github.com/joyautomation/nautilus/sparkplug/spb"
 	"gopkg.in/yaml.v3"
 )
@@ -86,6 +87,45 @@ func scalarType(name string) (*ir.Type, bool) {
 	return nil, false
 }
 
+// checkArray validates the array half of a field or binding: arraylen: n
+// (n > 0) over an ELEMENT datatype, the way eip_manifest.yaml spells an
+// ARRAY [0..n-1] OF DINT. The wire carries the array datatype (Int32Array);
+// the manifest names the element and the length, which is what a definition
+// alone cannot say and what the generated ARRAY declaration needs. what names
+// the field or binding for the error.
+func checkArray(what, typ string, arrayLen int) error {
+	if dt, isDT := datatypeOf(typ); isDT && sparkplug.IsArrayDatatype(dt) {
+		elem, _ := sparkplug.ArrayElem(dt)
+		return fmt.Errorf("host: %s: type %s — name the element and its length instead "+
+			"(type: %v, arraylen: N)", what, typ, elem)
+	}
+	switch {
+	case arrayLen < 0:
+		return fmt.Errorf("host: %s: arraylen %d is negative", what, arrayLen)
+	case arrayLen == 0:
+		return nil
+	}
+	if dt, isDT := datatypeOf(typ); isDT {
+		if _, ok := sparkplug.ArrayOf(dt); !ok {
+			return fmt.Errorf("host: %s: Sparkplug has no array of %v", what, dt)
+		}
+		if _, ok := scalarType(typ); !ok {
+			return fmt.Errorf("host: %s: Sparkplug datatype %v is not representable as a nautilus value", what, dt)
+		}
+		return nil
+	}
+	return fmt.Errorf("host: %s: an array of %s — Sparkplug has no array of templates", what, typ)
+}
+
+// arrayOf wraps elem as the ir array type a manifest arraylen: declares —
+// zero-based, as the generated ST spells it.
+func arrayOf(elem *ir.Type, arrayLen int) *ir.Type {
+	if arrayLen <= 0 {
+		return elem
+	}
+	return &ir.Type{Kind: ir.TypeArray, Elem: elem, ArrLen: arrayLen}
+}
+
 // ── Indexes ──────────────────────────────────────────────────────────────
 
 // typeIndex resolves manifest types by name.
@@ -145,7 +185,7 @@ func MemberPath(member string) []string { return strings.Split(member, MemberSep
 // the metric's own tag name plus the sanitized member path.
 //
 //	MemberTagName("W6", "", "Pump1", "Speed")     → "W6_Pump1_Speed"
-//	MemberTagName("W6", "", "LVL", "CTL1.HSP")    → "W6_LVL_CTL1_HSP"
+//	MemberTagName("W6", "", "LVL", "HI.SP")       → "W6_LVL_HI_SP"
 func MemberTagName(prefix, device, metric, member string) string {
 	base := TagName(prefix, device, metric)
 	if member == "" {
@@ -195,7 +235,8 @@ func (m Manifest) ResolveMember(root, member string) (FieldDef, []string, error)
 			return FieldDef{}, nil, fmt.Errorf("type %q has no member %q (in path %q)", td.Name, seg, member)
 		}
 		if f.ArrayLen > 0 {
-			return FieldDef{}, nil, fmt.Errorf("member %q is an array; arrays unsupported",
+			// A member binding is a write (see Binding.Member).
+			return FieldDef{}, nil, fmt.Errorf("member %q is an array; array writes are not supported",
 				strings.Join(segs[:i+1], MemberSep))
 		}
 		last := i == len(segs)-1
@@ -276,8 +317,8 @@ func (m Manifest) validateTypes() (map[string]bool, error) {
 			if f.Type == "" {
 				return nil, fmt.Errorf("host: type %q field %q: type is required", t.Name, f.Name)
 			}
-			if f.ArrayLen > 0 {
-				return nil, fmt.Errorf("host: type %q field %q: arrays unsupported", t.Name, f.Name)
+			if err := checkArray(fmt.Sprintf("type %q field %q", t.Name, f.Name), f.Type, f.ArrayLen); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -333,8 +374,15 @@ func (m Manifest) validateBindings(types map[string]bool, nodes map[string]Node,
 		}
 		byName[b.Name] = true
 
-		if b.ArrayLen > 0 {
-			return fmt.Errorf("host: binding %q: arrays unsupported", b.Name)
+		if err := checkArray(fmt.Sprintf("binding %q", b.Name), b.Type, b.ArrayLen); err != nil {
+			return err
+		}
+		if b.ArrayLen > 0 && b.Writable {
+			// Refused here, at load, rather than at the first write: the
+			// driver does not send array commands, and an output tag that
+			// can never go out is worse than no output tag.
+			return fmt.Errorf("host: binding %q: an array binding cannot be writable — "+
+				"array writes are not supported", b.Name)
 		}
 
 		n, ok := nodes[b.Node]
@@ -458,11 +506,11 @@ func (m Manifest) structDefs() (map[string]*ir.StructDef, error) {
 	var build func(name string, stack []string) (*ir.StructDef, error)
 
 	irType := func(owner string, f FieldDef, stack []string) (*ir.Type, error) {
-		if f.ArrayLen > 0 {
-			return nil, fmt.Errorf("host: type %q field %q: arrays unsupported", owner, f.Name)
+		if err := checkArray(fmt.Sprintf("type %q field %q", owner, f.Name), f.Type, f.ArrayLen); err != nil {
+			return nil, err
 		}
 		if elem, ok := scalarType(f.Type); ok {
-			return elem, nil
+			return arrayOf(elem, f.ArrayLen), nil
 		}
 		// Not a representable scalar: either another types: entry (recurse as
 		// a struct) or a datatype the IR has no shape for.
@@ -514,11 +562,12 @@ func (m Manifest) structDefs() (map[string]*ir.StructDef, error) {
 	return defs, nil
 }
 
-// bindingType is the ir.Type one binding delivers: a scalar for a datatype
-// name, a struct for a types: reference. defs is the map structDefs built.
+// bindingType is the ir.Type one binding delivers: a scalar (or, with
+// arraylen:, an array of it) for a datatype name, a struct for a types:
+// reference. defs is the map structDefs built.
 func bindingType(b Binding, defs map[string]*ir.StructDef) (*ir.Type, error) {
 	if t, ok := scalarType(b.Type); ok {
-		return t, nil
+		return arrayOf(t, b.ArrayLen), nil
 	}
 	sd, ok := defs[b.Type]
 	if !ok {

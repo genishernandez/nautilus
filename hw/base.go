@@ -61,7 +61,8 @@ type SourceConfig struct {
 	RetryMin time.Duration // backoff floor (default 1s)
 	RetryMax time.Duration // backoff ceiling (default 60s)
 	// StaleAfter: a source whose last complete poll is older than this
-	// reports Stale even in the connected state (default 3×Interval).
+	// reports Stale even in the connected state (default 3× the interval
+	// of the fastest scan class the source polls).
 	StaleAfter time.Duration
 	// Enable names an optional BOOL tag: false parks the source. It is a
 	// synthesized OUTPUT (the runtime hands its value to WriteOutputs).
@@ -328,9 +329,6 @@ func NewBase(c Config) (*Base, error) {
 		if sc.Interval <= 0 {
 			sc.Interval = rates[DefaultClass]
 		}
-		if sc.StaleAfter <= 0 {
-			sc.StaleAfter = 3 * sc.Interval
-		}
 		s := &Source{
 			cfg:       sc,
 			values:    map[string]ir.Value{},
@@ -433,6 +431,19 @@ func NewBase(c Config) (*Base, error) {
 	}
 	for _, s := range b.sources {
 		sort.Slice(s.classes, func(i, j int) bool { return s.classes[i].name < s.classes[j].name })
+		// Default StaleAfter: three periods of the fastest class this source
+		// actually polls — any class's good poll refreshes lastPoll, so that
+		// is the cadence __Online sees. The default class's interval would
+		// flap a source whose members all sit in a slower class.
+		if s.cfg.StaleAfter <= 0 {
+			cadence := s.cfg.Interval
+			for i, c := range s.classes {
+				if i == 0 || c.interval < cadence {
+					cadence = c.interval
+				}
+			}
+			s.cfg.StaleAfter = 3 * cadence
+		}
 	}
 
 	// Writes.
@@ -1111,6 +1122,34 @@ type SourceHealth struct {
 	Tags           int    `json:"tags"`
 	BadTags        int    `json:"badTags"`
 	QueuedWrites   int    `json:"queuedWrites"`
+}
+
+// Connections lists each source and the tags it delivers — its bound tags
+// and its __Online and __LastPollMs companions (io.ConnectionReporter).
+func (b *Base) Connections() []nio.Connection {
+	bySrc := map[*Source][]string{}
+	for name, t := range b.tags {
+		bySrc[t.src] = append(bySrc[t.src], name)
+	}
+	out := make([]nio.Connection, 0, len(b.sources))
+	for _, s := range b.sources {
+		inputs := append(bySrc[s], OnlineTagName(s.cfg.ID), LastPollTagName(s.cfg.ID))
+		sort.Strings(inputs)
+		out = append(out, nio.Connection{ID: s.cfg.ID, Inputs: inputs})
+	}
+	return out
+}
+
+// ConnectionUp is the source's __Online verdict: connected and heard from
+// within StaleAfter.
+func (b *Base) ConnectionUp(id string) bool {
+	s, ok := b.bySource[id]
+	if !ok {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.freshLocked(b.now())
 }
 
 // Health returns the current per-source states and counters.

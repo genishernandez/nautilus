@@ -50,6 +50,13 @@ export interface TopoLink {
 	 * (a service port a visitor plugs a laptop into). Down is then as
 	 * declared, and link on it is the surprise. Absent: up. */
 	expect?: 'up' | 'down';
+	/** On a `ring` link: the ERPS ring's protection link (RPL), held
+	 * blocked while the rest of its ring carries. */
+	rpl?: boolean;
+	/** On a `ring` link: which ring, where a site has rings that share a
+	 * switch. Absent, ring links joined through shared devices are one
+	 * ring (vlan.ts `ringsOf`). */
+	ring?: string;
 	[k: string]: unknown;
 }
 

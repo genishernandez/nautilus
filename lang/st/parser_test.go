@@ -1,8 +1,24 @@
 package st
 
 import (
+	"strings"
 	"testing"
 )
+
+func TestTrailingAfterEndProgram(t *testing.T) {
+	for _, tail := range []string{"\ngarbage garbage ;", "\nFUNCTION_BLOCK X\nEND_FUNCTION_BLOCK\n"} {
+		if _, err := Parse("PROGRAM P\nVAR a : INT; END_VAR\na := 1;\nEND_PROGRAM" + tail); err == nil {
+			t.Errorf("no error for trailing %q", tail)
+		} else if !strings.Contains(err.Error(), "line 5") {
+			t.Errorf("error for trailing %q does not name line 5: %v", tail, err)
+		}
+	}
+	for _, tail := range []string{"", "\n", "\n(* done *)\n", "\n// done\n"} {
+		if _, err := Parse("PROGRAM P\nVAR a : INT; END_VAR\na := 1;\nEND_PROGRAM" + tail); err != nil {
+			t.Errorf("trailing %q: %v", tail, err)
+		}
+	}
+}
 
 func mustParse(t *testing.T, src string) *Program {
 	t.Helper()
@@ -96,15 +112,26 @@ func TestParseTimePrefixAliasesToTimeLit(t *testing.T) {
 // ─── Time literals ─────────────────────────────────────────────────────────
 
 func TestParseTimeLiterals(t *testing.T) {
-	cases := []string{"5s", "100ms", "1h30m", "2d4h"}
-	for _, raw := range cases {
-		prog := mustParse(t, "delay := T#"+raw+";")
+	cases := []struct {
+		raw string
+		ms  int
+	}{
+		{"5s", 5000},
+		{"100ms", 100},
+		{"1h30m", 5400000},
+		{"2d4h", 187200000},
+	}
+	for _, c := range cases {
+		prog := mustParse(t, "delay := T#"+c.raw+";")
 		tl, ok := prog.Statements[0].(*AssignStmt).Value.(*TimeLit)
 		if !ok {
-			t.Fatalf("T#%s: want TimeLit, got %T", raw, prog.Statements[0].(*AssignStmt).Value)
+			t.Fatalf("T#%s: want TimeLit, got %T", c.raw, prog.Statements[0].(*AssignStmt).Value)
 		}
-		if tl.Raw != raw {
-			t.Errorf("T#%s: raw=%q, want %q", raw, tl.Raw, raw)
+		if tl.Raw != c.raw {
+			t.Errorf("T#%s: raw=%q, want %q", c.raw, tl.Raw, c.raw)
+		}
+		if got := ParseTimeMs(tl.Raw); got != c.ms {
+			t.Errorf("T#%s: %d ms, want %d", c.raw, got, c.ms)
 		}
 	}
 }

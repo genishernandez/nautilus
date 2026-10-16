@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
+	"io/fs"
 	"log/slog"
 	"strings"
 	"testing"
@@ -208,6 +209,177 @@ func TestDriverWithoutItsRecording(t *testing.T) {
 	}
 }
 
+// SeekS is a pulse: the driver jumps on a change, and 0 re-arms it, so
+// T, 0, T jumps to T twice. Outputs arrive as a whole set whenever any one
+// changes, so an unchanged SeekS beside a new Speed is not a seek.
+func TestDriverSeekPulse(t *testing.T) {
+	m, _ := ParseManifest([]byte(manifest))
+	now := time.Unix(0, 0)
+	d, err := New(m, fstest.MapFS{"rec.json.gz": {Data: gz(t, recording)}}, WithClock(func() time.Time { return now }), WithLogger(quiet()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Start(context.Background())
+	at := func() int64 {
+		t.Helper()
+		v, err := d.ReadInputs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v[TagAt].(int64)
+	}
+	step := func(vals nio.Values, wall time.Duration) int64 {
+		t.Helper()
+		if err := d.WriteOutputs(vals); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(wall)
+		return at()
+	}
+	at()
+	if got := step(nio.Values{TagSeek: int64(1100), TagSpeed: 10.0}, 2*time.Second); got != 1120 {
+		t.Fatalf("seek to 1100, then 2 s at 10×: %v", got)
+	}
+	if got := step(nio.Values{TagSeek: int64(1100), TagSpeed: 20.0}, time.Second); got != 1140 {
+		t.Fatalf("an unchanged SeekS beside a new Speed must not jump: %v", got)
+	}
+	if got := step(nio.Values{TagSeek: int64(0), TagSpeed: 20.0}, 0); got != 1140 {
+		t.Fatalf("0 is idle, not a seek: %v", got)
+	}
+	if got := step(nio.Values{TagSeek: int64(1100), TagSpeed: 20.0}, 0); got != 1100 {
+		t.Fatalf("T, 0, T must jump to T again: %v", got)
+	}
+}
+
+// A recording that is absent at start is picked up once it appears: the
+// driver looks again every retryEvery, without a restart.
+func TestDriverRetriesAFailedLoad(t *testing.T) {
+	m, _ := ParseManifest([]byte(manifest))
+	now := time.Unix(0, 0)
+	fsys := fstest.MapFS{}
+	d, _ := New(m, fsys, WithClock(func() time.Time { return now }), WithLogger(quiet()))
+	d.Start(context.Background())
+	if h := d.Health(); h.Loaded || h.LastError == "" {
+		t.Fatalf("absent: health %+v", h)
+	}
+
+	fsys["rec.json.gz"] = &fstest.MapFile{Data: []byte("not a recording"), ModTime: time.Unix(1, 0)}
+	now = now.Add(retryEvery / 2)
+	if _, err := d.ReadInputs(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(d.Health().LastError, "does not exist") {
+		t.Fatalf("looked again before retryEvery: %+v", d.Health())
+	}
+	now = now.Add(retryEvery)
+	d.ReadInputs()
+	if h := d.Health(); h.Loaded || strings.Contains(h.LastError, "does not exist") {
+		t.Fatalf("a recording that appeared must be read: %+v", h)
+	}
+	if d.Quality()["Rec_SW1_Port25"] != nio.NotConnected {
+		t.Fatal("a corrupt recording leaves the tags NotConnected")
+	}
+
+	// Fixed in place: read again once it has changed.
+	fsys["rec.json.gz"] = &fstest.MapFile{Data: gz(t, recording), ModTime: time.Unix(2, 0)}
+	now = now.Add(retryEvery)
+	v, _ := d.ReadInputs()
+	if h := d.Health(); !h.Loaded || h.LastError != "" || v[TagAt] != int64(1060) {
+		t.Fatalf("after the fix: health %+v, at %v", h, v[TagAt])
+	}
+	if q := d.Quality(); q != nil {
+		t.Fatalf("loaded: quality %v", q)
+	}
+}
+
+// A file that has not changed since it failed is not parsed again.
+func TestDriverDoesNotRereadAnUnchangedFailure(t *testing.T) {
+	m, _ := ParseManifest([]byte(manifest))
+	now := time.Unix(0, 0)
+	opens := 0
+	fsys := countingFS{MapFS: fstest.MapFS{"rec.json.gz": {Data: []byte("{"), ModTime: time.Unix(1, 0)}}, opens: &opens}
+	d, _ := New(m, fsys, WithClock(func() time.Time { return now }), WithLogger(quiet()))
+	d.Start(context.Background())
+	for i := 0; i < 5; i++ {
+		now = now.Add(retryEvery)
+		d.ReadInputs()
+	}
+	if opens != 1 {
+		t.Fatalf("an unchanged corrupt recording was opened %d times", opens)
+	}
+}
+
+type countingFS struct {
+	fstest.MapFS
+	opens *int
+}
+
+func (c countingFS) Open(name string) (fs.File, error) {
+	*c.opens++
+	return c.MapFS.Open(name)
+}
+
+func (c countingFS) Stat(name string) (fs.FileInfo, error) { return c.MapFS.Stat(name) }
+
+// A loop window that comes out empty — from: past the recording's end,
+// to: before it is complete — is an error with the numbers that explain
+// it, not a clock that runs off the end and holds the last sample forever.
+func TestDriverEmptyWindowIsAnError(t *testing.T) {
+	for name, bounds := range map[string]string{
+		"from past the end":     "from: 1970-01-01T00:30:00Z\n", // 1800 > End 1180
+		"to before complete":    "to: 1970-01-01T00:17:10Z\n",   // 1030 < 1060, InBps's first sample
+		"from and to too early": "from: 1970-01-01T00:00:10Z\nto: 1970-01-01T00:00:20Z\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, err := ParseManifest([]byte(strings.Replace(manifest, "tags:\n", bounds+"tags:\n", 1)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Unix(0, 0)
+			d, _ := New(m, fstest.MapFS{"rec.json.gz": {Data: gz(t, recording)}}, WithClock(func() time.Time { return now }), WithLogger(quiet()))
+			d.Start(context.Background())
+			v, err := d.ReadInputs()
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := d.Health()
+			if h.Loaded || !strings.Contains(h.LastError, "loop window is empty") || !strings.Contains(h.LastError, "1970-01-01T00:17:40Z") {
+				t.Fatalf("health %+v", h)
+			}
+			if v[TagAt] != int64(0) || d.Quality()["Rec_SW1_Port25"] != nio.NotConnected {
+				t.Fatalf("an empty window plays nothing: at %v, quality %v", v[TagAt], d.Quality())
+			}
+		})
+	}
+}
+
+// A tag the recording holds no series for delivers its constants and
+// zeros — at Bad quality, not as a Good reading; its recorded siblings
+// stay Good.
+func TestDriverUnrecordedTagIsBad(t *testing.T) {
+	m, err := ParseManifest([]byte(manifest + `  - name: Rec_SW9_Port01
+    type: SwitchPort
+    series: SW9_Port01
+    const: { Index: 1 }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := New(m, fstest.MapFS{"rec.json.gz": {Data: gz(t, recording)}}, WithLogger(quiet()))
+	d.Start(context.Background())
+	v, _ := d.ReadInputs()
+	if member(t, v["Rec_SW9_Port01"], "Index").I != 1 {
+		t.Fatal("constants are still delivered, so a program reading the tag does not fault")
+	}
+	q := d.Quality()
+	if q["Rec_SW9_Port01"] != nio.Bad || len(q) != 1 {
+		t.Fatalf("quality %v: want Rec_SW9_Port01 Bad and nothing else", q)
+	}
+	if h := d.Health(); !h.Loaded || h.Matched != 1 || h.Tags != 2 {
+		t.Fatalf("health %+v", h)
+	}
+}
+
 func TestManifestErrors(t *testing.T) {
 	for _, bad := range []string{
 		"tags: []",                    // no history
@@ -227,3 +399,28 @@ func TestManifestErrors(t *testing.T) {
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// A recording handed over directly (WithHistory) is judged once: an empty
+// window is reported, and not re-derived (and re-logged) on every read.
+func TestDriverGivenHistoryEmptyWindow(t *testing.T) {
+	m, err := ParseManifest([]byte(strings.Replace(manifest, "tags:\n", "from: 1970-01-01T00:30:00Z\ntags:\n", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, _ := LoadHistory(strings.NewReader(recording))
+	var logged bytes.Buffer
+	d, _ := New(m, nil, WithHistory(h), WithLogger(slog.New(slog.NewTextHandler(&logged, nil))))
+	d.Start(context.Background())
+	for i := 0; i < 3; i++ {
+		v, _ := d.ReadInputs()
+		if v[TagAt] != int64(0) || member(t, v["Rec_SW1_Port25"], "InBps").F != 0 {
+			t.Fatalf("an empty window delivers constants only: %v", v)
+		}
+	}
+	if n := strings.Count(logged.String(), "loop window is empty"); n != 1 {
+		t.Fatalf("logged %d times:\n%s", n, logged.String())
+	}
+	if h := d.Health(); h.Loaded || h.Series != 3 {
+		t.Fatalf("health %+v", h)
+	}
+}

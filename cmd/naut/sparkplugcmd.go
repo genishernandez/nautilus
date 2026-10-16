@@ -118,7 +118,7 @@ Writing template members:
   sparkplug_manifest.yaml.
 
   writable: true marks a SCALAR metric an output. A Template metric takes a
-  list of dotted member paths instead — writable: [START, LVL.CTL1HSP] — one
+  list of dotted member paths instead — writable: [START, LVL.HSP] — one
   output tag per member; init: applies only to the whole-metric form.
 
   desc: is optional and purely descriptive. It rides into the generated tag

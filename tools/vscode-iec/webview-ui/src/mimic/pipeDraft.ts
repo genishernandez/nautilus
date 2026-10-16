@@ -92,3 +92,19 @@ export function resolveDraftFinish(
 		...(to ? { to } : {})
 	};
 }
+
+/** The candidate nearest to `p` within `radius` (Math.hypot), so two ports
+ * closer together than the snap radius don't hand the hit to whichever one
+ * comes first in file order. */
+export function nearestPort(p: [number, number], ports: NamedPort[], radius: number): NamedPort | null {
+	let best: NamedPort | null = null;
+	let bestD = radius;
+	for (const port of ports) {
+		const d = Math.hypot(port.x - p[0], port.y - p[1]);
+		if (d <= bestD) {
+			best = port;
+			bestD = d;
+		}
+	}
+	return best;
+}

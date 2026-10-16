@@ -1,7 +1,9 @@
 # st-partial-access — IEC 61131-3 partial access to an integer (#222):
-# w.%X3 is bit 3 (a BOOL), w.%B1 the second byte, w.%W0 the low word, read
-# and written, beside the Logix spelling w.3. Bounded by the declared type
-# (a DINT has bits 0..31). ST, LD (a contact and a coil on a bit) and FBD.
+# w.%X3 is bit 3 (a BOOL), w.%B1 the second byte, w.%W0 the low word, w.%D1
+# the high double word, w.%L0 all 64 bits, read (unsigned) and written,
+# beside the Logix spelling w.3. Bounded by the declared type (a DINT has
+# bits 0..31). ST, LD (contacts and coils on a bit in both spellings, a
+# byte as a function contact's argument) and FBD.
 #
 #   go test ./lang/conformance/ -run 'TestConformance/st-partial-access'
 #   go run ./cmd/naut test lang/conformance/st-partial-access
@@ -20,17 +22,32 @@ tasks:
 tags:
   # Shared input: an alarm word, as a PLC packs one.
   - { name: Alarms, role: state, init: 0, desc: "Alarm word (DINT)" }
+  - { name: Small,  role: state, init: 0, desc: "A small LINT (its %D0 goes into a high double word)" }
+  - { name: Wide,   role: state, init: 0, desc: "A LINT read whole through %L0" }
 
   # Outputs, one set per language.
   - { name: st_Bit3,   role: state, init: false }
   - { name: st_Bit3L,  role: state, init: false }
   - { name: st_Byte1,  role: state, init: 0 }
   - { name: st_Packed, role: state, init: 0 }
+  - { name: st_HiByte, role: state, init: 0 }
+  - { name: st_HiWord, role: state, init: 0 }
+  - { name: st_Dw0,    role: state, init: 0 }
+  - { name: st_L0,     role: state, init: 0 }
+  - { name: st_Mix,    role: state, init: 0 }
   - { name: ld_Bit3,   role: state, init: false }
+  - { name: ld_Bit3L,  role: state, init: false }
   - { name: ld_Packed, role: state, init: 0 }
+  - { name: ld_PackedL, role: state, init: 0 }
+  - { name: ld_HiByteGt, role: state, init: false }
   - { name: fbd_Bit3,  role: state, init: false }
   - { name: fbd_Byte1, role: state, init: 0 }
   - { name: fbd_Packed, role: state, init: 0 }
+  - { name: fbd_HiByte, role: state, init: 0 }
+  - { name: fbd_HiWord, role: state, init: 0 }
+  - { name: fbd_Dw0,    role: state, init: 0 }
+  - { name: fbd_L0,     role: state, init: 0 }
+  - { name: fbd_Mix,    role: state, init: 0 }
 
 driver:
   type: memory

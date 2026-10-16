@@ -2,6 +2,8 @@ package cip
 
 import (
 	"bytes"
+	"context"
+	"net"
 	"testing"
 )
 
@@ -122,5 +124,37 @@ func TestMRRequestDecode(t *testing.T) {
 	parsed, _, _ := ParsePath(req.Path)
 	if parsed.Class != uint32(ClassIdentity) || parsed.Instance != 1 || parsed.Attribute != 7 {
 		t.Fatalf("path: %+v", parsed)
+	}
+}
+
+// Listen on port 0 binds the TCP and UDP sockets to one real, reported port
+// before Run starts; an explicit port already taken is an error, not a retry.
+func TestListenPortZeroBindsBothOnOnePort(t *testing.T) {
+	s := NewServer("127.0.0.1:0", nil)
+	if err := s.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	addr := s.BoundAddr()
+	if _, p, _ := net.SplitHostPort(addr); p == "0" || p == "" {
+		t.Fatalf("bound address %q has no real port", addr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("tcp %s: %v", addr, err)
+	}
+	_ = c.Close()
+	if _, err := net.ListenPacket("udp", addr); err == nil {
+		t.Errorf("udp %s should already be bound by the server", addr)
+	}
+	// A second server on that exact port must fail loudly.
+	if err := NewServer(addr, nil).Listen(); err == nil {
+		t.Errorf("listening on the taken port %s should fail", addr)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("run: %v", err)
 	}
 }

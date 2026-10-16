@@ -15,7 +15,7 @@ shows `Receive`'s four rungs exactly as the controller would export them.
 ## What `Receive` does
 
 ```
-Rung 0   LES(Line_TankLevel,80.0)OTE(Line_Ready);
+Rung 0   LT(Line_TankLevel,80.0)OTE(Line_Ready);
 Rung 1   XIC(Line_Request)XIC(Line_Ready)XIO(Line_Fault)TON(AcceptTmr,?,?);
 Rung 2   XIC(AcceptTmr.DN)OTE(Line_Accept);
 Rung 3   XIC(Line_Fault)OTE(Line_Status.Alarm);

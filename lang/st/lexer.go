@@ -107,6 +107,8 @@ func (l *Lexer) lex() {
 			l.emit(TokenDot, ".", 1)
 		case ch == '#':
 			l.emit(TokenHash, "#", 1)
+		case ch == '^':
+			l.emit(TokenCaret, "^", 1)
 		case ch == '%' && isPartialPrefix(l.peek(1)) && isDigit(l.peek(2)):
 			l.lexPartial()
 		case ch == '\'':

@@ -1,0 +1,17 @@
+# Hand-written (not gen.py): a synthetic fixture for the N-supply load sharing,
+# psu_lab.st. LAB1 has one supply, LAB4 four. Not part of the recorded cluster.
+- { name: LAB1, role: state, type: Server, init: { Online: true, PowerOn: true, PowerW: 200, PsuCount: 1, FanCount: 0, TempCount: 0, Model: "SYS-LAB", Serial: "SIM-LAB1" }, desc: "LAB1 as the fixture reports it" }
+- { name: Sim_LAB1, role: state, type: SimServer, desc: "LAB1 fault inputs (SIMULATION)" }
+- { name: LAB1_PSU1, role: state, type: PSU, init: { CapacityW: 860, InputOk: true, InputV: 230, Name: "Bay 1", Present: true }, desc: "LAB1_PSU1 as the fixture reports it" }
+- { name: Sim_LAB1_PSU1, role: state, type: SimPSU, desc: "LAB1_PSU1 fault inputs (SIMULATION)" }
+- { name: LAB4, role: state, type: Server, init: { Online: true, PowerOn: true, PowerW: 200, PsuCount: 4, FanCount: 0, TempCount: 0, Model: "SYS-LAB", Serial: "SIM-LAB4" }, desc: "LAB4 as the fixture reports it" }
+- { name: Sim_LAB4, role: state, type: SimServer, desc: "LAB4 fault inputs (SIMULATION)" }
+- { name: LAB4_PSU1, role: state, type: PSU, init: { CapacityW: 860, InputOk: true, InputV: 230, Name: "Bay 1", Present: true }, desc: "LAB4_PSU1 as the fixture reports it" }
+- { name: Sim_LAB4_PSU1, role: state, type: SimPSU, desc: "LAB4_PSU1 fault inputs (SIMULATION)" }
+- { name: LAB4_PSU2, role: state, type: PSU, init: { CapacityW: 860, InputOk: true, InputV: 230, Name: "Bay 2", Present: true }, desc: "LAB4_PSU2 as the fixture reports it" }
+- { name: Sim_LAB4_PSU2, role: state, type: SimPSU, desc: "LAB4_PSU2 fault inputs (SIMULATION)" }
+- { name: LAB4_PSU3, role: state, type: PSU, init: { CapacityW: 860, InputOk: true, InputV: 230, Name: "Bay 3", Present: true }, desc: "LAB4_PSU3 as the fixture reports it" }
+- { name: Sim_LAB4_PSU3, role: state, type: SimPSU, desc: "LAB4_PSU3 fault inputs (SIMULATION)" }
+- { name: LAB4_PSU4, role: state, type: PSU, init: { CapacityW: 860, InputOk: true, InputV: 230, Name: "Bay 4", Present: true }, desc: "LAB4_PSU4 as the fixture reports it" }
+- { name: Sim_LAB4_PSU4, role: state, type: SimPSU, desc: "LAB4_PSU4 fault inputs (SIMULATION)" }
+- { name: Sim_Room, role: state, type: SimRoom, desc: "The room (SIMULATION)" }

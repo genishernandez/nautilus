@@ -224,7 +224,11 @@ The **+ add** palette inserts statements: networks, block-to-wire (its
 function field offers the project's own `FUNCTION`s by name, beside the
 standard ones), function blocks from the picker (every required input an
 open `_` pin; an input with a declared default stays unbound), coil, timer,
-counter, comment, bare reference chips, and variable declarations.
+counter, comment, bare reference chips, and variable declarations. An
+insert lands one column to the right of the selected element, or wherever
+you double-click on empty canvas (which opens the palette there), moving
+down to the first clear place if that spot is taken; with nothing selected
+it goes where auto-layout puts it.
 
 Each network draws as a numbered band with its title, and every statement
 carries a small badge with its execution order in the network. Click a
@@ -245,7 +249,13 @@ name.
 Layout is computed from topology by default. Drag a node to pin it and the
 position is stored in a `(* @layout *)` comment that the compiler skips,
 right after `END_FBD` so it never sits between statements; **auto layout**
-clears every pin.
+clears every pin. Once you have dragged anything in a network, an insert
+leaves that network's blocks where they are; a network you never arranged
+re-flows around a new block.
+
+The editor opens fitted to the window when the whole diagram is readable
+that way. A bigger one opens at a readable zoom on its first network;
+Ctrl+0 or the fit button shows everything.
 
 <Clip id="fbd_move_node" />
 

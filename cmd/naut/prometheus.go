@@ -14,6 +14,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -207,17 +208,18 @@ func scrapeOnce(url string, timeout time.Duration) ([]byte, error) {
 		return nil, fmt.Errorf("cannot reach %s: %w", url, err)
 	}
 	defer resp.Body.Close()
-	buf := make([]byte, 0, 64*1024)
-	tmp := make([]byte, 32*1024)
-	for {
-		n, err := resp.Body.Read(tmp)
-		buf = append(buf, tmp[:n]...)
-		if err != nil {
-			break
-		}
-	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
+	}
+	// The body must END, not merely stop: a read cut off by the timeout (or
+	// a dropped connection) is a truncated scrape, and a manifest generated
+	// from half of /metrics silently leaves out every metric past the cut.
+	buf, err := io.ReadAll(resp.Body)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("%s: the scrape did not finish within %s (%d bytes read) — raise --timeout: %w", url, timeout, len(buf), err)
+		}
+		return nil, fmt.Errorf("%s: the scrape was cut off after %d bytes: %w", url, len(buf), err)
 	}
 	return buf, nil
 }

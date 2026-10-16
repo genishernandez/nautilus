@@ -1,0 +1,302 @@
+//go:build unix
+
+package main
+
+// `naut logix serve` end to end: the command as a user runs it, against the
+// in-process emulator, with its flags and environment. The facade package
+// tests prove the facade; these prove the command hands it what the page
+// says (the --tags globs, the --l5x descriptions, NAUTILUS_TOKEN).
+//
+// The command runs until SIGINT, so the helper stops it the way a user
+// does. Unix only for that reason (syscall.Kill); CI runs these on Linux.
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"sort"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/joyautomation/nautilus/eip/logixserver"
+)
+
+var catchInterrupts sync.Once
+
+// running is every in-process `naut logix serve` not yet seen to exit. One
+// SIGINT stops all of them, so a cleanup that finds none left must send none:
+// a signal sent to nobody is delivered late, to whichever test's instance
+// started next, and stops it before it answers.
+var (
+	runningMu sync.Mutex
+	running   []chan struct{}
+)
+
+// stopServers sends one SIGINT if any instance is still up and waits for
+// every one that was up to exit.
+func stopServers(t *testing.T) {
+	t.Helper()
+	runningMu.Lock()
+	var live []chan struct{}
+	for _, c := range running {
+		select {
+		case <-c:
+		default:
+			live = append(live, c)
+		}
+	}
+	running = live
+	runningMu.Unlock()
+	if len(live) == 0 {
+		return
+	}
+	// The command's own signal handler takes this; it is registered before
+	// the API can answer, so it is in place by now. The test binary's own
+	// catcher keeps a signal that finds none from killing the run.
+	_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	for _, c := range live {
+		select {
+		case <-c:
+		case <-time.After(10 * time.Second):
+			t.Error("naut logix serve did not stop on SIGINT")
+		}
+	}
+}
+
+// serveLogix runs `naut logix serve` in-process with args (plus --listen on
+// a free loopback port) and returns the API's base URL once it answers.
+func serveLogix(t *testing.T, args ...string) string {
+	t.Helper()
+	catchInterrupts.Do(func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGINT)
+		go func() {
+			for range c {
+			}
+		}()
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	done := make(chan int, 1)
+	exited := make(chan struct{})
+	runningMu.Lock()
+	running = append(running, exited)
+	runningMu.Unlock()
+	go func() { done <- runLogixServe(append(args, "--listen", addr)); close(exited) }()
+	base := "http://" + addr
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		res, err := http.Get(base + "/api/meta")
+		if err == nil {
+			res.Body.Close()
+			break
+		}
+		select {
+		case code := <-done:
+			t.Fatalf("naut logix serve exited %d before answering", code)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("naut logix serve never answered")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Cleanup(func() { stopServers(t) })
+	return base
+}
+
+func emulateSpec(t *testing.T, spec *logixserver.TagSurfaceSpec) (host, port string, em *logixEmulator) {
+	t.Helper()
+	em, err := startLogixEmulate(&logixSurface{spec: spec, source: "test"}, "127.0.0.1:0", nil, false, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(em.Stop)
+	host, port = hostPort(t, em)
+	return host, port, em
+}
+
+func servedTags(t *testing.T, base string) []string {
+	t.Helper()
+	var frame struct {
+		Tags map[string]any `json:"tags"`
+	}
+	waitUntil(t, "a polled frame", func() bool {
+		res, err := http.Get(base + "/api/state")
+		if err != nil {
+			return false
+		}
+		defer res.Body.Close()
+		frame.Tags = nil
+		return json.NewDecoder(res.Body).Decode(&frame) == nil && len(frame.Tags) > 0
+	})
+	var names []string
+	for n := range frame.Tags {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// A controller with module I/O beside its user tags: a module-defined
+// input structure under "Local:1:I", the way a 1756 input card's tag
+// browses, a controller-scope REAL and a program with two tags.
+func moduleIOController() *logixserver.TagSurfaceSpec {
+	return &logixserver.TagSurfaceSpec{
+		ControllerName: "Line1",
+		Templates: []logixserver.TemplateSpec{
+			{Name: "AB:1756_DI:I:0", Members: []logixserver.MemberSpec{
+				{Name: "Fault", Datatype: "DINT"},
+				{Name: "Data", Datatype: "DINT"},
+			}},
+		},
+		Symbols: []logixserver.SymbolSpec{
+			{Name: "Local:1:I", Datatype: "AB:1756_DI:I:0"},
+			{Name: "Speed", Datatype: "REAL"},
+			{Name: "Program:MainProgram", Program: true},
+			{Name: "Motor", Scope: "Program:MainProgram", Datatype: "DINT"},
+			{Name: "Count", Scope: "Program:MainProgram", Datatype: "DINT"},
+		},
+		Tags: []logixserver.TagSpec{
+			{Path: "Local:1:I.Fault", Datatype: "DINT"},
+			{Path: "Local:1:I.Data", Datatype: "DINT"},
+			{Path: "Speed", Datatype: "REAL"},
+			{Path: "Program:MainProgram.Motor", Datatype: "DINT"},
+			{Path: "Program:MainProgram.Count", Datatype: "DINT"},
+		},
+	}
+}
+
+// LGX-010: by default every user tag is served and module I/O is left out.
+func TestLogixServeLeavesModuleIOOut(t *testing.T) {
+	host, port, _ := emulateSpec(t, moduleIOController())
+	got := servedTags(t, serveLogix(t, "--host", host, "--port", port, "--poll", "30ms"))
+	want := []string{"MainProgram_Count", "MainProgram_Motor", "Speed"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("default serve = %v, want %v (every user tag, no module I/O)", got, want)
+	}
+	// The emulator does serve the module tag: a selection that asks for it
+	// gets it, so leaving it out by default is the command's choice.
+	asked := servedTags(t, serveLogix(t, "--host", host, "--port", port, "--poll", "30ms", "--tags", "Local:*"))
+	if len(asked) != 1 || !strings.HasPrefix(asked[0], "Local") {
+		t.Errorf("--tags 'Local:*' served %v, want only the module tag", asked)
+	}
+}
+
+// LGX-010: --tags narrows what is served, with globs.
+func TestLogixServeTagsGlobNarrows(t *testing.T) {
+	host, port, _ := emulateSpec(t, moduleIOController())
+	got := servedTags(t, serveLogix(t, "--host", host, "--port", port, "--poll", "30ms",
+		"--tags", "Program:MainProgram.*"))
+	want := []string{"MainProgram_Count", "MainProgram_Motor"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("--tags 'Program:MainProgram.*' served %v, want %v", got, want)
+	}
+	got = servedTags(t, serveLogix(t, "--host", host, "--port", port, "--poll", "30ms",
+		"--tags", "Speed,Program:MainProgram.Mot*"))
+	want = []string{"MainProgram_Motor", "Speed"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("--tags 'Speed,Program:MainProgram.Mot*' served %v, want %v", got, want)
+	}
+}
+
+// LGX-011: --l5x supplies the descriptions a browse cannot read, under the
+// served names (a program tag as <Program>_<Tag>).
+func TestLogixServeL5XSuppliesDescriptions(t *testing.T) {
+	fixture := l5xFixture("DemoProgram.L5X")
+	em := emulateL5X(t, fixture, nil, false)
+	host, port := hostPort(t, em)
+
+	meta := func(base string) map[string]struct{ Desc string } {
+		res, err := http.Get(base + "/api/meta")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var m struct {
+			Tags map[string]struct{ Desc string } `json:"tags"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&m); err != nil {
+			t.Fatal(err)
+		}
+		return m.Tags
+	}
+
+	// Without --l5x the browse has no documentation to give.
+	if d := meta(serveLogix(t, "--host", host, "--port", port))["MainProgram_StartPB"].Desc; d != "" {
+		t.Fatalf("a bare browse served a description %q; the --l5x case would prove nothing", d)
+	}
+	tags := meta(serveLogix(t, "--host", host, "--port", port, "--l5x", fixture))
+	for name, want := range map[string]string{
+		"MainProgram_StartPB":   "P-101 start pushbutton, field-wired NO",
+		"MainProgram_HiLevelSP": "LAH-101 high-level alarm setpoint",
+	} {
+		if got := tags[name].Desc; got != want {
+			t.Errorf("/api/meta %s desc = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// LGX-015: with NAUTILUS_TOKEN set, a write needs the bearer token; without
+// it, a write from a non-browser client is open.
+func TestLogixServeNautilusTokenGuardsWrites(t *testing.T) {
+	host, port, em := emulateSpec(t, moduleIOController())
+	write := func(base, token string, v float64) int {
+		req, _ := http.NewRequest("POST", base+"/api/tags",
+			bytes.NewBufferString(fmt.Sprintf(`{"name": "Speed", "value": %g}`, v)))
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	held := func() string { _, v, _ := em.Store.Resolve("Speed"); return fmt.Sprint(v) }
+
+	t.Run("without NAUTILUS_TOKEN writes are open", func(t *testing.T) {
+		t.Setenv("NAUTILUS_TOKEN", "")
+		base := serveLogix(t, "--host", host, "--port", port)
+		if code := write(base, "", 11); code != http.StatusNoContent {
+			t.Fatalf("open write = %d, want 204", code)
+		}
+		if held() != "11" {
+			t.Errorf("controller holds %s, want 11", held())
+		}
+	})
+	t.Run("with NAUTILUS_TOKEN a write needs it", func(t *testing.T) {
+		t.Setenv("NAUTILUS_TOKEN", "s3cret")
+		base := serveLogix(t, "--host", host, "--port", port)
+		if code := write(base, "", 22); code != http.StatusUnauthorized {
+			t.Errorf("write without the token = %d, want 401", code)
+		}
+		if code := write(base, "wrong", 22); code != http.StatusUnauthorized {
+			t.Errorf("write with a wrong token = %d, want 401", code)
+		}
+		if held() == "22" {
+			t.Fatal("an unauthenticated write reached the controller")
+		}
+		if code := write(base, "s3cret", 33); code != http.StatusNoContent {
+			t.Fatalf("write with the token = %d, want 204", code)
+		}
+		if held() != "33" {
+			t.Errorf("controller holds %s, want 33", held())
+		}
+	})
+}

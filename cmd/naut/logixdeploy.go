@@ -32,15 +32,24 @@ through logixd, and then — on request — puts it on the controller:
                program and finalize them, keeping the controller in its
                mode. Refused when the tag set changed, because an online
                edit cannot create tags.
-  --download   DOWNLOAD: stops the controller and resets its tags to
-               project values. Needs --yes. The controller must already be
-               in Program mode, or pass --program-mode.
+  --download   DOWNLOAD: stops the controller and replaces its project.
+               Needs --yes. The controller must already be in Program
+               mode, or pass --program-mode. Tag values are KEPT: the
+               running controller is uploaded first and its values go into
+               the project before the build, for every tag whose name,
+               scope, type and dimensions are unchanged (a structure's or
+               Add-On Instruction's definition too) and that is not a
+               constant. A TIMER's or COUNTER's preset comes from the
+               project; its accumulator is kept. New tags and changed ones
+               start at the project's values, and each changed one is
+               reported. --reset-values starts every tag at the project's
+               value instead.
 
 Every path ends with a verification: the controller's program is uploaded
 again and its logic compared with what was sent (naut logix drift --logic).
 
 Flags:
-  --online, --download, --yes, --program-mode   as above
+  --online, --download, --yes, --program-mode, --reset-values   as above
   --comm-path   FactoryTalk Linx path to the controller (default: the
                 manifest's target.logix.comm-path)
   --agent       logixd URL (default: $NAUTILUS_LOGIXD_URL, then the
@@ -60,6 +69,12 @@ type logixProject struct {
 	slot, port   int
 	agent        string
 }
+
+// hardwareError is a target.logix.hardware file that cannot be read.
+type hardwareError struct{ err error }
+
+func (e *hardwareError) Error() string { return "target.logix.hardware: " + e.err.Error() }
+func (e *hardwareError) Unwrap() error { return e.err }
 
 // loadLogixProject reads nautilus.yaml and the one task program the v1
 // target takes.
@@ -86,7 +101,10 @@ func loadLogixProject(dir string) (*logixProject, error) {
 	}
 	_, libs, _ := stproject.PreludeSources(progPath, nil)
 	inits, descs, aliases := map[string]any{}, map[string]string{}, map[string]string{}
-	tags := logixTagTypes(m)
+	tags, err := logixTagTypes(m)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, project.ManifestName), err)
+	}
 	for _, tg := range m.Tags {
 		if tg.Init != nil {
 			inits[tg.Name] = tg.Init
@@ -98,17 +116,40 @@ func loadLogixProject(dir string) (*logixProject, error) {
 			aliases[tg.Name] = tg.Alias
 		}
 	}
+	var scoped []string
+	for _, cs := range tgt.ControllerScoped {
+		scoped = append(scoped, cs.Name)
+		if cs.Desc != "" {
+			descs[cs.Name] = cs.Desc
+		}
+	}
 	var side writer.Side
 	if tgt.Side != nil {
 		side.Heartbeat = tgt.Side.Heartbeat
+	}
+	var hw *writer.Hardware
+	if tgt.Hardware != "" {
+		path := filepath.Join(dir, filepath.FromSlash(tgt.Hardware))
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, &hardwareError{err}
+		}
+		if hw, err = writer.ParseHardware(tgt.Hardware, raw); err != nil {
+			return nil, &hardwareError{err}
+		}
+	}
+	period := int(time.Duration(task.Scan) / time.Millisecond)
+	if tgt.Continuous {
+		period = 0
 	}
 	return &logixProject{
 		dir: dir, program: progPath, source: string(src),
 		target: deploy.Target{
 			Controller: tgt.Controller, Processor: tgt.Processor, Revision: tgt.Revision,
 			Program: tgt.Program, Routine: tgt.Routine, Task: tgt.Task,
-			PeriodMs: int(time.Duration(task.Scan) / time.Millisecond),
+			PeriodMs: period,
 			CommPath: tgt.CommPath, Libs: libs, Inits: inits, Descs: descs, Aliases: aliases, Tags: tags, Side: side,
+			AllTags: tgt.AllTags, ControllerScoped: scoped, Hardware: hw,
 			Language: writer.Language(progPath),
 		},
 		host: tgt.Host, slot: tgt.Slot, port: tgt.Port, agent: tgt.Agent,
@@ -123,6 +164,7 @@ func runLogixDeploy(args []string) int {
 	download := fs.Bool("download", false, "download: stops the controller")
 	yes := fs.Bool("yes", false, "confirm a download")
 	programMode := fs.Bool("program-mode", false, "put the controller in Program mode before a download")
+	resetValues := fs.Bool("reset-values", false, "a download starts every tag at the project's value instead of keeping the controller's")
 	commPath := fs.String("comm-path", "", "FactoryTalk Linx path to the controller")
 	keep := fs.String("keep", "", "directory to keep artifacts in")
 	if err := fs.Parse(args); err != nil {
@@ -158,10 +200,14 @@ func runLogixDeploy(args []string) int {
 	if *download && !*yes {
 		fmt.Fprintf(os.Stderr,
 			"naut logix deploy: refusing a download without --yes.\n\n"+
-				"  A download STOPS the controller at %s and RESETS its tags to\n"+
-				"  project values. Re-run with --yes when you mean it; use --online\n"+
+				"  A download STOPS the controller at %s and replaces its project\n"+
+				"  (tag values are kept where the tag is unchanged; --reset-values\n"+
+				"  resets them all). Re-run with --yes when you mean it; use --online\n"+
 				"  for a rung change that keeps the controller running.\n", p.target.CommPath)
 		return 2
+	}
+	if w := writer.LocalModuleWarning(p.target.Processor); w != "" && p.target.Hardware == nil {
+		fmt.Fprintln(os.Stderr, "naut logix deploy: warning:", w)
 	}
 	mode := deploy.BuildOnly
 	switch {
@@ -171,7 +217,7 @@ func runLogixDeploy(args []string) int {
 		mode = deploy.Download
 	}
 	opts := deploy.Options{
-		Client: logixd.New(*agent, *token), Target: p.target, Mode: mode, ProgramMode: *programMode,
+		Client: logixd.New(*agent, *token), Target: p.target, Mode: mode, ProgramMode: *programMode, ResetValues: *resetValues,
 		Log: func(format string, a ...any) { fmt.Printf(format+"\n", a...) },
 	}
 	if *keep != "" {
@@ -223,11 +269,13 @@ func runLogixDeploy(args []string) int {
 // logixTagTypes is the manifest's tags with the IEC type each has in scope
 // in a program (runtime.ResolveTagScope's rule: type:, else what init:
 // implies), for writer.Options.Tags. A tag with neither is left out: the
-// compiler already refuses a program that names it undeclared.
-func logixTagTypes(m *project.Manifest) map[string]string {
+// compiler already refuses a program that names it undeclared. A manifest
+// the runtime would refuse (a tag with no role:, say) is an error naming
+// the tag, never a write with every manifest tag untyped.
+func logixTagTypes(m *project.Manifest) (map[string]string, error) {
 	defs, err := project.TagDefs(m)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	scope, _ := runtime.ResolveTagScope(defs, nil)
 	out := map[string]string{}
@@ -240,5 +288,5 @@ func logixTagTypes(m *project.Manifest) map[string]string {
 			out[d.Name] = t.String()
 		}
 	}
-	return out
+	return out, nil
 }

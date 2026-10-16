@@ -1,5 +1,7 @@
 # Partial access (#222). Alarms is a DINT; 16#8000_0A08 has bits 3, 9, 11
-# and 31 set, so its second byte is 16#0A. Each step asserts every language.
+# and 31 set, so its second byte is 16#0A. Each step asserts every language
+# that can express the access (ladder has no integer-valued output, so it
+# takes part through contacts, coils and a function contact's argument).
 tests:
   - name: a bit and a byte of a word read as BOOL and BYTE
     steps:
@@ -18,3 +20,35 @@ tests:
       - given: { Alarms: 0 }
         scans: 1
         expect: { st_Packed: 0, ld_Packed: 0, fbd_Packed: 0 }
+
+  # 16#8000_0A08: the top bit of byte 3, word 1 and double word 0 is set, so
+  # a signed read would be negative; each part reads unsigned at its width
+  # (ladder takes the byte as a function contact's argument: 128 > 100,
+  # where a signed -128 would not be). Small = 5 lands in the high double
+  # word (5 * 2^32) and Alarms' low word 16#0A08 in the low word, nothing
+  # else. Wide reads whole through %L0.
+  - name: byte, word, double word and whole-LINT parts read unsigned and write only their own bits, in every language
+    steps:
+      - given: { Alarms: -2147481080, Small: 5, Wide: 123456789012 }
+        scans: 1
+        expect:
+          st_HiByte: 128
+          fbd_HiByte: 128
+          ld_HiByteGt: true
+          st_HiWord: 32768
+          fbd_HiWord: 32768
+          st_Dw0: 2147486216
+          fbd_Dw0: 2147486216
+          st_L0: 123456789012
+          fbd_L0: 123456789012
+          st_Mix: 21474839048
+          fbd_Mix: 21474839048
+
+  - name: the Logix spelling w.3 is a ladder contact and w.15 a ladder coil, the same bits as %X
+    steps:
+      - given: { Alarms: -2147481080 }
+        scans: 1
+        expect: { ld_Bit3L: true, ld_PackedL: 32768, st_Bit3L: true, st_Bit3: true }
+      - given: { Alarms: 2048 }
+        scans: 1
+        expect: { ld_Bit3L: false, ld_PackedL: 0, st_Bit3L: false, st_Bit3: false }

@@ -68,6 +68,34 @@ func TestSceneInitGeneratesACheckedScene(t *testing.T) {
 	}
 }
 
+// A --kind that does not fit its UDT fails the check before anything is
+// written, so the corrected rerun needs no --force.
+func TestSceneInitBadKindWritesNothing(t *testing.T) {
+	dir := sceneProject(t, nil)
+	out := captureStdoutOf(t, func() int {
+		if code := runScene([]string{"init", "--kind", "Motor=tank", dir}); code == 0 {
+			t.Error("a Motor drawn as a tank must fail the check")
+		}
+		return 0
+	})
+	if !strings.Contains(out, "error:") {
+		t.Fatalf("no check error printed:\n%s", out)
+	}
+	path := filepath.Join(dir, "scenetest.scene.json")
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("a scene that fails its check was written")
+	}
+	captureStdoutOf(t, func() int {
+		if code := runScene([]string{"init", dir}); code != 0 {
+			t.Errorf("the corrected rerun = %d, want 0 without --force", code)
+		}
+		return 0
+	})
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCheckHoldsASceneToTheTags(t *testing.T) {
 	out, code := checkIn(t, map[string]string{
 		"nautilus.yaml": sceneTestManifest, "types.st": sceneTestTypes, "main.st": sceneTestProgram,

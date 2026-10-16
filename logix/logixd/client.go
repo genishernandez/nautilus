@@ -182,6 +182,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) ([]
 		}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, c.unauthorized()
+	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, &Error{Kind: "unreachable", Message: err.Error(), Fatal: true}
@@ -210,6 +213,21 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) ([]
 		}
 	}
 	return env.Events, nil
+}
+
+// TokenFile is where the logixd installer writes the agent's bearer
+// token, on the agent's machine.
+const TokenFile = `%ProgramData%\logixd\logixd.token`
+
+// unauthorized is the agent's 401 in words: which agent refused, and
+// where the token it wants comes from. The agent's own reply body
+// ({"error":"unauthorized"}) says none of that.
+func (c *Client) unauthorized() *Error {
+	msg := fmt.Sprintf("%s refused the token; check --token or NAUTILUS_LOGIXD_TOKEN against %s on the agent's machine", c.BaseURL, TokenFile)
+	if c.Token == "" {
+		msg = fmt.Sprintf("%s wants a token and none was sent; set --token or NAUTILUS_LOGIXD_TOKEN from %s on the agent's machine", c.BaseURL, TokenFile)
+	}
+	return &Error{Kind: "unauthorized", Message: msg, Status: http.StatusUnauthorized, Fatal: true}
 }
 
 func truncate(s string, n int) string {
@@ -666,6 +684,9 @@ func (c *Client) PutFile(ctx context.Context, relPath string, content []byte) er
 		return &Error{Kind: "unreachable", Message: err.Error(), Fatal: true}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return c.unauthorized()
+	}
 	raw, _ := io.ReadAll(resp.Body)
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil || !env.OK {
@@ -693,6 +714,9 @@ func (c *Client) GetFile(ctx context.Context, relPath string) ([]byte, error) {
 		return nil, &Error{Kind: "unreachable", Message: err.Error(), Fatal: true}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, c.unauthorized()
+	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, &Error{Kind: "unreachable", Message: err.Error(), Fatal: true}

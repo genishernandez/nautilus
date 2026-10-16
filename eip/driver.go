@@ -40,7 +40,7 @@ type Driver struct {
 
 	// leafMode marks struct bindings whose root reads the controller refuses
 	// (AOI access restrictions); they poll member-by-member instead. Touched
-	// only from the run goroutine.
+	// only from the run goroutine; Health reads leafModeN (under mu) instead.
 	leafMode  map[string]bool
 	leafCache map[string][]leafDesc
 	// deadLeaves records members the controller permanently refuses to serve
@@ -50,6 +50,15 @@ type Driver struct {
 	mu        sync.Mutex
 	snapshot  nio.Values // latest polled values (nautilus tag name -> value)
 	connected bool
+	// primed is set once every scan class has completed a poll on the
+	// current connection, and cleared when the connection changes. The
+	// snapshot fills tag by tag during a poll, so before this a reader can
+	// see some of the first poll's tags and not the rest.
+	primed bool
+	// leafModeN is len(leafMode), kept under mu for Health: the map itself
+	// belongs to the run goroutine, and Health is called from others (a
+	// Sparkplug device's health check, every tick).
+	leafModeN int
 	lastErr   error
 	stats     driverStats
 
@@ -314,6 +323,10 @@ type Health struct {
 	Reconnects uint64 `json:"reconnects"` // transport reconnects
 	SinceMs    int64  `json:"sinceMs"`    // last connect/disconnect (epoch ms)
 	LastPollMs int64  `json:"lastPollMs"` // last successful poll (epoch ms)
+	// Primed: every scan class has completed a poll since this connection
+	// came up — the snapshot holds a whole read, not the first part of one.
+	// A tag that failed its read does not hold this back.
+	Primed bool `json:"primed"`
 }
 
 // Health returns the current connection health and poll counters.
@@ -322,10 +335,11 @@ func (d *Driver) Health() Health {
 	defer d.mu.Unlock()
 	h := Health{
 		Connected:  d.connected,
+		Primed:     d.primed,
 		Host:       d.host,
 		Slot:       d.slot,
 		Tags:       len(d.inputs),
-		LeafMode:   len(d.leafMode),
+		LeafMode:   d.leafModeN,
 		Polls:      d.stats.polls,
 		PollErrors: d.stats.pollErrors,
 		Reconnects: d.stats.reconnects,
@@ -419,6 +433,7 @@ func (d *Driver) run(ctx context.Context) {
 		backoff = time.Second
 		d.mu.Lock()
 		d.connected, d.lastErr = true, nil
+		d.primed = false
 		d.stats.sinceMs = time.Now().UnixMilli()
 		if everConnected {
 			d.stats.reconnects++
@@ -432,6 +447,7 @@ func (d *Driver) run(ctx context.Context) {
 		_ = sess.ctrl.Close()
 		d.mu.Lock()
 		d.connected = false
+		d.primed = false
 		d.stats.sinceMs = time.Now().UnixMilli()
 		d.mu.Unlock()
 	}
@@ -543,6 +559,9 @@ func (d *Driver) serve(ctx context.Context, sess *session) {
 		}
 		c.next = time.Now().Add(c.rate)
 	}
+	d.mu.Lock()
+	d.primed = true
+	d.mu.Unlock()
 	for {
 		wake := time.Duration(time.Hour)
 		now := time.Now()
@@ -649,6 +668,9 @@ func (d *Driver) pollClass(ctx context.Context, sess *session, bindings []TagBin
 			}
 			if !isElem && b.Type != "STRING" && b.ArrayLen == 0 {
 				d.leafMode[b.Name] = true
+				d.mu.Lock()
+				d.leafModeN = len(d.leafMode)
+				d.mu.Unlock()
 				leafBindings = append(leafBindings, b)
 				d.log.Info("eip: struct root read refused; switching to member reads",
 					"tag", b.Name, "device", b.Device, "error", err)

@@ -29,6 +29,7 @@ func TestFileStoreSaveLoadRoundTrip(t *testing.T) {
 		Programs: map[string]string{
 			"Main": "PROGRAM Main\nEND_PROGRAM\n",
 		},
+		ProgramBases: map[string]string{"Main": "0123456789ab"},
 	}
 
 	if err := store.Save(want); err != nil {
@@ -239,6 +240,7 @@ func TestConfigMapStoreRoundTrip(t *testing.T) {
 		Programs: map[string]string{
 			"Main": "PROGRAM Main\nEND_PROGRAM\n",
 		},
+		ProgramBases: map[string]string{"Main": "0123456789ab"},
 	}
 	if err := store.Save(want); err != nil {
 		t.Fatalf("Save: %v", err)

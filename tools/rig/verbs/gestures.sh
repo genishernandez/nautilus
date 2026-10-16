@@ -38,8 +38,12 @@
 #         ld_add_coil <rung> <tag> [set|reset] · ld_add_block <rung> <TYPE> [inst] [args]
 #         ld_rename_block <rung> <old> <new> · ld_declare <name> [VAR_EXTERNAL|VAR]
 #         ld_add_branch <rung> <around-tag> [leg-tag]
+#         ld_or_select <rung> <tag> <tag> [tag…]   (Ctrl-click, O: one N-leg OR)
+#         ld_branch_or_leg <rung> [path]           (click the branch's rails, O: + leg)
 #         ld_move_element <rung> <element> <target-rung> [before-element]   (drag)
 #   FBD   fbd_add_block <FN|FB TYPE> <name> [inputs|args] [x y] · fbd_zoom_to <node> [notches]
+#         fbd_add_block_at <FN> <name> <x y|auto> [inputs]   (double-click canvas → palette → there)
+#         fbd_open_zoom [min] · fbd_fit_all [max]   (the readable opening frame; Ctrl+0 still fits)
 #         fbd_wire <node.PIN> <node.PIN> · fbd_add_tag_ref <tag> [node.PIN]
 #         fbd_add_comment <text> · fbd_move_node <node> <dx> <dy>   (drag; pins it)
 #         fbd_add_function <FN> <name> [inputs]   (block → wire, any FUNCTION name)
@@ -326,8 +330,8 @@ diagram_zoom() {
 }
 
 # fbd_zoom_to <node> [notches, default 3] — wheel-zoom the FBD about a node
-# (xyflow zooms toward the pointer): the open view fits the WHOLE program,
-# pins ~4 px — too small to see a wire land, or to aim a take at.
+# (xyflow zooms toward the pointer): closer than the opening frame, which
+# is at least READABLE_ZOOM (0.9, #79) — still small for a take's close-up.
 fbd_zoom_to() {
   local p i
   p=$(el_settled "$(fbd_node_el "$1")") || { g_err "no FBD node $1"; return 1; }
@@ -1108,6 +1112,97 @@ fbd_add_block() {
   fi
 }
 
+# _fbd_empty_point — "x y": a WINDOW point of empty FBD canvas with room
+# for a block below-right of it (the pane is the hit all over a 240×150
+# CSS px box there). Found in the webview's own coordinates, then mapped through
+# the pane's box (el_box) — client → window is a scale and an offset.
+_fbd_empty_point() {
+  local c cx cy pl pt pw b wx wy ww wh v
+  c=$(js '(() => {
+    const pane = doc.querySelector(".svelte-flow__pane"); if (!pane) return "";
+    const r = pane.getBoundingClientRect();
+    const free = (x, y) => doc.elementFromPoint(x, y) === pane;
+    // the whole 240×150 box below-right of the point, every 15 px
+    const room = (x, y) => { for (let dy = -10; dy <= 150; dy += 15) for (let dx = -10; dx <= 240; dx += 15) if (!free(x + dx, y + dy)) return false; return true; };
+    for (let y = r.top + r.height * 0.55; y > r.top + 30; y -= 12)
+      for (let x = r.left + r.width * 0.55; x > r.left + 30; x -= 12)
+        if (x + 250 < r.right && y + 160 < r.bottom && room(x, y)) return [x, y, r.left, r.top, r.width].map(Math.round).join(" ");
+    return "";
+  })()' | tr -d '"')
+  [[ -n $c ]] || return 1
+  read -r cx cy pl pt pw <<<"$c"
+  b=$(el_box 'doc.querySelector(".svelte-flow__pane")') || return 1
+  read -r wx wy ww wh v <<<"$b"
+  awk -v cx="$cx" -v cy="$cy" -v pl="$pl" -v pt="$pt" -v pw="$pw" -v wx="$wx" -v wy="$wy" -v ww="$ww" \
+    'BEGIN { k = ww / pw; printf "%d %d\n", wx + (cx - pl) * k, wy + (cy - pt) * k }'
+}
+
+# fbd_add_block_at <FUNCTION> <name> <x|auto> [y] [inputs] — a double-click on
+# EMPTY canvas at window point x,y (auto: _fbd_empty_point) opens the "+ add" palette there, and the
+# block → wire inserted from it lands there (#78, gesture finding 18): the
+# new elements (the block, its open-pin chips) keep their auto-layout
+# arrangement with its top-left at the click, pinned in (* @layout *). Read
+# back: the block is pinned in the file, and on screen it sits right of /
+# below the click, within its group — not wherever auto-layout had room.
+fbd_add_block_at() {
+  local fn=$1 name=$2 x=$3 y=${4:-} inputs=${5:-_, _} b bx by w h v f i
+  G_WHAT="block $name = $fn at $x,$y"
+  if [[ $x == auto ]]; then
+    read -r x y <<<"$(_fbd_empty_point)"
+    [[ -n $y ]] || { g_err "no empty canvas to double-click"; return 1; }
+  fi
+  g_dclick "$x" "$y"
+  wait_js '[...doc.querySelectorAll("button.item")].some(b => !b.closest(".suggest"))' 3 \
+    || { g_err "a double-click on the canvas at $x,$y did not open the palette (not empty canvas?)"; return 1; }
+  _fbd_palette "block → wire" "name=$name" "function=$fn" "inputs=$inputs" || return 1
+  fbd_wait "$(fbd_node_el "$name")" || return 1
+  sleep 1.5   # the placement's setLayout round-trips
+  b=$(el_box "$(fbd_node_el "$name")") || return 1
+  read -r bx by w h v <<<"$b"
+  (( bx >= x - 12 && bx <= x + 420 && by >= y - 12 && by <= y + 400 )) \
+    || { g_err "$name is at $bx,$by on screen, not at/after the double-click $x,$y"; return 1; }
+  f=$G_FILE; [[ $f == /* ]] || f=$PROJ/$f
+  for i in 1 2 3; do
+    g_save
+    grep -Eq "^ *b:w\.$name [0-9-]+,[0-9-]+" "$f" && return 0
+    sleep 1
+  done
+  g_err "$name is not pinned in the (* @layout *) block of $f"
+}
+
+# fbd_open_zoom [min, default 0.9] — the FBD editor's opening frame (#79,
+# gesture finding 19): fitted only while that stays readable, else the
+# readable floor (READABLE_ZOOM, viewFit.ts) on the diagram's top-left. Run
+# right after ed_open_diagram: the viewport's scale must be ≥ <min>, and a
+# pin handle at least 6 CSS px on screen.
+fbd_open_zoom() {
+  local min=${1:-0.9} vp tx ty k hw
+  G_WHAT="FBD opening zoom ≥ $min"
+  wait_js 'doc.querySelector(".svelte-flow__viewport")' 10 || { g_err "no FBD canvas"; return 1; }
+  sleep 1
+  vp=$(js "$_FBD_VP_JS" | tr -d '"')
+  read -r tx ty k <<<"$vp"
+  python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) - 1e-3 else 1)' "$k" "$min" \
+    || { g_err "the FBD opened at zoom $k, under the readable $min"; return 1; }
+  hw=$(js '(() => { const h = doc.querySelector(".svelte-flow__node .svelte-flow__handle"); return h ? h.getBoundingClientRect().width : 0; })()' | tr -d '"')
+  python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= 6 else 1)' "$hw" \
+    || { g_err "a pin handle is $hw px on screen at the opening zoom"; return 1; }
+}
+
+# fbd_fit_all [max, default 0.9] — Ctrl+0 (with focus on empty canvas):
+# the fit command still fits the WHOLE program, below the opening floor
+# on a big one. The viewport's scale must end under <max>.
+fbd_fit_all() {
+  local max=${1:-0.9} p tx ty k
+  G_WHAT="Ctrl+0 fits all (< $max)"
+  p=$(_fbd_empty_point) || { g_err "no empty canvas to focus"; return 1; }
+  g_click $p
+  g_key ctrl+0; sleep 1
+  read -r tx ty k <<<"$(js "$_FBD_VP_JS" | tr -d '"')"
+  python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) < float(sys.argv[2]) else 1)' "$k" "$max" \
+    || { g_err "after Ctrl+0 the FBD is at zoom $k, not under $max"; return 1; }
+}
+
 # _fbd_add_fb <TYPE> <inst> [args] — "+ add" → "function block" → the picker.
 _fbd_add_fb() {
   local typ=$1 inst=$2 args=${3:-} item
@@ -1149,6 +1244,9 @@ fbd_wire() {
 # _fbd_assert_pin <node.PIN> <source spec> — save, then check the pin's
 # argument in the node's statement names the source (its last name part:
 # a wire "low", a tag "PumpRun", an instance output "a1.Q" → "a1.Q").
+# Only a call matches (NODE := FN(args)). A bare coil assignment with no
+# function, `SpeedRef := lic.CV`, has no pin to find: check it with
+# assert_file_contains "$G_FILE" 'SpeedRef *:= *lic\.CV' (it saves first).
 _fbd_assert_pin() {
   local to=$1 from=$2 src
   src=$from
@@ -1426,6 +1524,14 @@ _mimic_json() {
     [[ -s $f ]] && python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null && break
     sleep 0.15
   done
+  # Still 0 bytes: nothing written yet, which the editor reads as the empty
+  # document (EMPTY_DOC), so hand the python that instead of crashing it.
+  if [[ ! -s $f ]]; then
+    local empty rc; empty=$(mktemp)
+    printf '{"canvas":{"width":960,"height":540},"equipment":[],"pipes":[]}\n' >"$empty"
+    python3 - "$empty" "$@"; rc=$?
+    rm -f "$empty"; return $rc
+  fi
   python3 - "$f" "$@"
 }
 mimic_ids() { _mimic_json <<'PY'
@@ -1715,11 +1821,9 @@ ld_wrap_branch() {
 # _ld_leg_spot <rung> — the ONE `g.spot` whose op is "leg" for <rung>: the
 # rendered "+ leg" hotspot (LadderView.svelte's `{#each lay.spots as s}`,
 # `<g class="spot" data-spot='{"rung":...,"spot":{"op":"leg",...}}'>`).
-# There is no DOM link from a branch's own contacts to this spot — legs
-# render as flat sibling g.node with no wrapping element at all
-# (ladderLayout.ts spreads each leg's nodes into the rung's flat arrays) —
-# so this assumes exactly ONE branch per rung, true for every rung this
-# file builds.
+# Since #91 a branch is its own element (g.branch > g.leg > g.node) and its
+# spot names it (data-branch="branch:<rung>:<path>"); this still takes the
+# rung's first leg spot, as every rung this file builds has ONE branch.
 _ld_leg_spot() {
   printf '[...doc.querySelectorAll("g.spot")].find(g => { try { const d = JSON.parse(g.dataset.spot); return d.rung === %s && d.spot?.op === "leg"; } catch { return false; } })' "$(_q "$1")"
 }
@@ -1733,6 +1837,57 @@ ld_add_leg() {
   n0=$(ld_count "$rung" contact _)
   click_el "$(_ld_leg_spot "$rung")" || { g_err "no add-leg hotspot on $rung"; return 1; }
   ld_wait "(() => { $_LD_JS return [...(rung($(_q "$rung"))?.querySelectorAll('g.node') ?? [])].filter(g => kind(g) === 'contact' && operand(g) === '_').length > $n0; })()" || return 1
+}
+
+# ld_branch_el <rung> [path] — a branch's own wrapper (#91):
+# <g class="branch" data-kind="branch" data-id="branch:<rung>:<path>">,
+# its legs <g class="leg"> inside it, their elements inside those. No path:
+# the rung's first (outermost, leftmost) branch.
+ld_branch_el() {
+  if [[ -n ${2:-} ]]; then printf 'doc.querySelector(%s)' "$(_q "[data-kind=\"branch\"][data-id=\"branch:$1:$2\"]")"
+  else printf 'doc.querySelector(%s)' "$(_q "[data-kind=\"branch\"][data-rung=\"$1\"]")"; fi
+}
+
+# ld_or_select <rung> <tag> <tag> [tag…] — the one-step multi-leg OR (#91,
+# gesture finding 50): click the first contact, Ctrl-click the others (one
+# series), press O — ONE wrapOr makes them a branch with a leg each,
+# `a b c` → `[ a | b | c ]`. Read back in the file and in the DOM: one
+# g.branch with that many g.leg, each holding its contact.
+ld_or_select() {
+  local rung=$1 first=$2 t legs; shift 2
+  G_WHAT="OR $first $* on $rung"
+  legs=$(( $# + 1 ))
+  ld_select_node "$rung" contact "$first" || return 1
+  for t in "$@"; do
+    local p; p=$(el_at "$(ld_node_el "$rung" contact "$t")") || { g_err "no contact $t on $rung"; return 1; }
+    g_move $p; _g_focus; xdotool keydown ctrl; sleep 0.1; xdotool click 1; sleep 0.1; xdotool keyup ctrl; sleep 0.4
+  done
+  wait_js "(() => { $_LD_JS return rung($(_q "$rung"))?.querySelectorAll('g.node.selected').length === $legs; })()" 3 \
+    || { g_err "Ctrl-click did not select $legs contacts on $rung"; return 1; }
+  g_key o
+  ld_wait "(() => { const g = $(ld_branch_el "$rung"); return !!g && g.querySelectorAll(':scope > g.leg').length === $legs; })()" || return 1
+  local re="\\[ *$first"
+  for t in "$@"; do re+=" *\\| *$t"; done
+  ld_assert_rung "$rung" "$re *\\]"
+}
+
+# ld_branch_or_leg <rung> [path] — click the branch's own rails (its
+# wrapper's hit area, left of every leg), press O: one more OR leg, a `_`
+# placeholder (#91). Read back: the wrapper's g.leg count grew by one.
+ld_branch_or_leg() {
+  local rung=$1 path=${2:-} el n0 fx
+  G_WHAT="O on the branch ${path:-first} of $rung"
+  el=$(ld_branch_el "$rung" "$path")
+  n0=$(js "($el)?.querySelectorAll(':scope > g.leg').length ?? 0")
+  [[ $n0 -gt 0 ]] || { g_err "no branch ${path:-at all} on $rung"; return 1; }
+  # 4 layout units in from the box's left edge: the strip outside the left
+  # rail that no leg element covers.
+  fx=$(js "(() => { const r = ($el).querySelector('rect.branch-hit'); return (4 / r.width.baseVal.value).toFixed(4); })()" | tr -d '"')
+  click_el "($el).querySelector('rect.branch-hit')" "$fx" 0.5 || return 1
+  wait_js "($el)?.classList.contains('selected')" 3 || { g_err "clicking its rails did not select the branch"; return 1; }
+  g_key o
+  ld_wait "(($el)?.querySelectorAll(':scope > g.leg').length ?? 0) > $n0" || return 1
+  ld_assert_rung "$rung" "\\| *_ *\\]"
 }
 
 # ld_toggle_nc <rung> <kind> <tag> — select the node, press N: flips Neg in

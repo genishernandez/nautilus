@@ -3,6 +3,7 @@ package ld
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/joyautomation/nautilus/lang/fbcatalog"
@@ -28,6 +29,8 @@ type EditOp struct {
 	Type string `json:"type"`
 	Rung string `json:"rung,omitempty"` // rung name
 	Path []int  `json:"path,omitempty"`
+	// Paths is wrapOr's selection: two or more elements of ONE series.
+	Paths [][]int `json:"paths,omitempty"`
 	Coil *int   `json:"coil,omitempty"`
 	// setRef / insert payloads
 	Ref    string `json:"ref,omitempty"`
@@ -299,6 +302,10 @@ func ApplyEdit(src string, op EditOp, libs ...string) ([]TextEdit, error) {
 			{wrapped},
 			{{Kind: "contact", Ref: "_"}},
 		}}
+	case "wrapOr":
+		if err := opWrapOr(r, op); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("ld edit: unknown op %q", op.Type)
 	}
@@ -497,6 +504,70 @@ func locate(r *Rung, op EditOp) (*Element, error) {
 		return nil, fmt.Errorf("ld edit: path %v addresses a series, not an element", op.Path)
 	}
 	return el, nil
+}
+
+// opWrapOr ORs a selection in one step: two or more elements of the same
+// series become the legs of ONE new branch, one element per leg, in
+// series order, and the branch takes the place of the first of them
+// (`A B C` with all three selected → `[ A | B | C ]`; a gap between the
+// selected elements closes up, since the elements it held stay in series
+// after the branch). wrapBranch is the one-element form (its leg two is a
+// `_` placeholder); addLeg grows an existing branch.
+func opWrapOr(r *Rung, op EditOp) error {
+	if len(op.Paths) < 2 {
+		return fmt.Errorf("ld edit: wrapOr needs two or more elements (one is wrapBranch)")
+	}
+	if op.Coil != nil {
+		return fmt.Errorf("ld edit: coils don't branch — power always reaches the coil zone")
+	}
+	parent := op.Paths[0]
+	if len(parent) == 0 {
+		return fmt.Errorf("ld edit: wrapOr: an empty path addresses no element")
+	}
+	parent = parent[:len(parent)-1]
+	idx := make([]int, 0, len(op.Paths))
+	seen := map[int]bool{}
+	for _, p := range op.Paths {
+		if len(p) != len(parent)+1 || !eqInts(p[:len(parent)], parent) {
+			return fmt.Errorf("ld edit: wrapOr: %v and %v are not in the same series", op.Paths[0], p)
+		}
+		i := p[len(p)-1]
+		if seen[i] {
+			continue
+		}
+		seen[i] = true
+		idx = append(idx, i)
+	}
+	if len(idx) < 2 {
+		return fmt.Errorf("ld edit: wrapOr needs two or more distinct elements")
+	}
+	series, err := locateSeries(r, parent)
+	if err != nil {
+		return err
+	}
+	sort.Ints(idx)
+	for _, i := range idx {
+		if i < 0 || i >= len(*series) {
+			return fmt.Errorf("ld edit: path %v out of range", append(append([]int{}, parent...), i))
+		}
+	}
+	legs := make([][]Element, 0, len(idx))
+	for _, i := range idx {
+		legs = append(legs, []Element{(*series)[i]})
+	}
+	out := make([]Element, 0, len(*series)-len(idx)+1)
+	for i, el := range *series {
+		switch {
+		case i == idx[0]:
+			out = append(out, Element{Kind: "branch", Legs: legs})
+		case seen[i]:
+			// pulled into the branch
+		default:
+			out = append(out, el)
+		}
+	}
+	*series = out
+	return nil
 }
 
 // locateSeries resolves Path to the series it names ([] = the rung root;

@@ -417,8 +417,9 @@ drivers:
 Reads fan out and merge, writes route to the driver whose bindings claim the
 tag, and ownership is disjoint by construction: a tag delivered by two
 drivers is a load error naming both, the same no-last-wins rule tag files
-keep. `/api/drivers` shows one row per driver, and a Sparkplug `device:`
-counts as healthy only when every child bus is. The `memory` loopback cannot
+keep. `/api/drivers` shows one row per driver, and on a `sparkplug:` edge
+node each field connection is its own device, born and killed by its own
+link. The `memory` loopback cannot
 join a list — it owns whatever is written to it, which is exactly what makes
 it unroutable next to another driver.
 
@@ -545,7 +546,8 @@ a shared Template) and the [Alarms guide](https://nautilus.joyautomation.com/gui
 
 Expose a controller's tags to a Sparkplug host (Ignition, any Sparkplug-aware
 SCADA) with the `sparkplug` package. The runtime is the edge node; each
-`io.Driver` becomes a device whose birth/death follows its link:
+field connection becomes a device whose birth/death follows its link, and
+the node is read-only unless told which tags a host may write:
 
 ```go
 node, _ := sparkplug.New(rt, sparkplug.Config{
@@ -556,6 +558,8 @@ node, _ := sparkplug.New(rt, sparkplug.Config{
     sparkplug.WithDefaultRBE(sparkplug.RBE{Deadband: 0.5, MaxInterval: 30 * time.Second}),
     sparkplug.WithPublishClass("fast", sparkplug.RBE{Deadband: 0.1, MaxInterval: 5 * time.Second}),
     sparkplug.WithMetricClass("fast", "PIT_*"),
+    // NCMD/DCMD writes reach only these; every other write is refused.
+    sparkplug.WithWritable("LevelSP", "Pump*.SpeedSP"),
     // The EtherNet/IP driver's tags become a device; DBIRTH/DDEATH track its health.
     sparkplug.WithDevice(sparkplug.Device{
         ID: "plc1", Tags: driver.InputNames(),
@@ -566,10 +570,11 @@ node.Start(ctx)
 ```
 
 Types map faithfully (BOOL→Boolean, integer→Int64, REAL→Double, UDT→Template),
-a SCADA host can write tags back via NCMD, and `Node Control/Rebirth` is
-honored. The node passes the **Sparkplug TCK edge-node profile** — CI runs the
+a SCADA host can write the writable tags back via NCMD/DCMD, and
+`Node Control/Rebirth` is honored. The node passes the **Sparkplug TCK edge-node profile** — CI runs the
 `joyautomation/sparkplug-tck-go` harness against a live node on every push. MQTT
-and protobuf live only in this package; the runtime core stays stdlib-only.
+and protobuf live only in this package; the runtime core's one dependency
+outside the Go standard library is `gopkg.in/yaml.v3`.
 
 #### Consuming Sparkplug B (host)
 
@@ -661,8 +666,10 @@ comes from a write, and there are exactly four writers:
 
 1. a **seed** in the Go composition (initial value, exists from scan one),
 2. a **driver** delivering it as an input each scan,
-3. an **operator** writing it through the HMI or `POST /api/tags` (a whole
-   tag, or one member of a UDT tag — see below),
+3. an **operator** writing a tag the project declares through the HMI or
+   `POST /api/tags` (a whole tag, or one member of a UDT tag — see below;
+   a name nothing declares, a CONSTANT's included, is refused with a 400
+   naming it, never created),
 4. the **program itself** assigning it (a coil write creates the tag).
 
 The one rule that bites: **writes create, reads fault.** Reading a tag
@@ -729,11 +736,11 @@ that for you — `name` takes a dotted member path, to any depth:
 
 ```sh
 curl -X POST localhost:8080/api/tags -d '{"name": "P101.START", "value": true}'
-curl -X POST localhost:8080/api/tags -d '{"name": "P101.LVL.CTL1HSP", "value": 60}'
+curl -X POST localhost:8080/api/tags -d '{"name": "P101.LVL.HSP", "value": 60}'
 ```
 
 `value` may also be an **object**, to set several members of one tag at
-once: `{"name": "P101", "value": {"START": true, "LVL": {"CTL1HSP": 60}}}`.
+once: `{"name": "P101", "value": {"START": true, "LVL": {"HSP": 60}}}`.
 That is a **merge** — members the object doesn't name keep their current
 values. (Deliberately unlike `init:` seeding, which zero-fills what its
 mapping omits: seeding builds a value from nothing, a write edits one the

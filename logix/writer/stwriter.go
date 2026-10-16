@@ -2,6 +2,7 @@ package writer
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -27,9 +28,13 @@ import (
 //	                         Reset, then CTUD(c)
 //	t.Q t.ET t.IN c.CV c.CU  t.DN t.ACC t.TimerEnable c.ACC c.CUEnable
 //	Q => y                   y := t.DN; after the call
-//	EXPT(a, b)               a ** b;   X_TO_Y(v), TO_Y(v) → v (Logix
-//	                         converts on assignment, rounding a REAL as
-//	                         IEC does)
+//	EXPT(a, b)               a ** b
+//	X_TO_Y(v), TO_Y(v)       Logix that computes the same, or refused
+//	                         (logix/conversion): narrowing as a wrap in
+//	                         integer arithmetic, int → REAL as v or
+//	                         (v * 1.0), BOOL → number as an IF; REAL →
+//	                         integer as a plain store of the whole
+//	                         right-hand side (convert.go)
 //	Run, Mode#Run            the enumeration member's value (enum.go)
 //
 // Refused by name: STRING and the string functions, MIN / MAX / LIMIT /
@@ -43,6 +48,17 @@ var stBlockTypes = map[string]string{"TON": "FBD_TIMER", "TOF": "FBD_TIMER", "CT
 var stMemberRewrite = map[string]map[string]string{
 	"FBD_TIMER":   {"Q": "DN", "ET": "ACC", "IN": "TimerEnable", "PT": "PRE"},
 	"FBD_COUNTER": {"Q": "DN", "CV": "ACC", "CU": "CUEnable", "PV": "PRE"},
+}
+
+// stOutputs are the outputs an ST call can capture with =>.
+var stOutputs = map[string]string{"FBD_TIMER": "Q and ET", "FBD_COUNTER": "Q and CV"}
+
+// stMembersOf lists the members an ST routine reads, and their Logix names.
+func stMembersOf(structType string) string {
+	if structType == "FBD_TIMER" {
+		return "Q (DN), ET (ACC), IN (TimerEnable), PT (PRE)"
+	}
+	return "Q (DN), CV (ACC), CU (CUEnable), PV (PRE)"
 }
 
 // stFuncs are the functions Logix ST spells the same way.
@@ -100,7 +116,8 @@ func lowerST(src string, opts Options) (*lowered, error) {
 		}
 	}
 	lw := &lowered{model: m, opts: opts, vars: map[string]ld.VarDecl{},
-		presetVars: map[string]bool{}, genNames: map[string]bool{}, st: true, aois: map[string]*aoiDef{}, src: src}
+		presetVars: map[string]bool{}, genNames: map[string]bool{}, st: true, aois: map[string]*aoiDef{}, src: src,
+		clocks: map[string]bool{}, clockUsed: map[string]bool{}}
 	if len(prog.FBDecls) > 0 || len(prog.TypeDecls) > 0 {
 		// Blocks and types declared beside an ST program are its own
 		// library.
@@ -123,6 +140,9 @@ func lowerST(src string, opts Options) (*lowered, error) {
 	for _, v := range append(m.Vars, implicit...) {
 		lw.declare(v)
 	}
+	lw.declareUnnamed()
+	lw.checkControllerScoped()
+	lw.checkHardware()
 	w := &stWriter{lw: lw}
 	w.block(prog.Statements, 0)
 	lw.stLines = w.lines
@@ -172,6 +192,18 @@ type stWriter struct {
 	lw    *lowered
 	lines []string
 	line  int // source line being rendered, for diagnostics
+	// rhs is the assignment's right-hand side being rendered and dest
+	// its target's type; realCtx marks an expression Logix may compute
+	// in REAL; beside an operand whose sibling is a REAL reference or
+	// literal; depth counts nested expr calls (convert.go). realKnown
+	// is realCtx for a REAL the writer can see: an integer / there is
+	// refused (#361).
+	rhs       st.Expression
+	dest      string
+	realCtx   bool
+	realKnown bool
+	beside    bool
+	depth     int
 }
 
 func (w *stWriter) emitf(depth int, format string, a ...any) {
@@ -198,7 +230,17 @@ func (w *stWriter) stmt(s st.Statement, depth int) {
 		} else {
 			lhs = w.ref(lhs)
 		}
-		w.emitf(depth, "%s := %s;", lhs, w.expr(v.Value))
+		if w.boolAssign(lhs, v.Value, depth) {
+			break
+		}
+		var target st.Expression = &st.IdentExpr{Name: v.Target}
+		if v.TargetExpr != nil {
+			target = v.TargetExpr
+		}
+		w.rhs, w.dest = v.Value, w.typeOf(target)
+		rhs := w.expr(v.Value)
+		w.rhs, w.dest = nil, ""
+		w.emitf(depth, "%s := %s;", lhs, rhs)
 	case *st.IfStmt:
 		w.line = v.Pos.Line
 		w.emitf(depth, "IF %s THEN", w.expr(v.Condition))
@@ -274,6 +316,15 @@ func (w *stWriter) call(c *st.CallExpr, depth int) {
 		return
 	}
 	typ := strings.ToUpper(strings.TrimSpace(v.Type))
+	if typ == localTimeType {
+		if len(c.Args) > 0 || len(c.NamedArgs) > 0 {
+			w.diag(ruleFBPin, w.line, "%s: LOCAL_TIME takes no inputs", c.Name)
+			return
+		}
+		w.lw.clockUsed[strings.ToLower(c.Name)] = true
+		w.emitf(depth, "%s;", gsvLocalTime(c.Name+"[0]"))
+		return
+	}
 	structType := stBlockTypes[typ]
 	if structType == "" {
 		if w.lw.blockSourceExists(v.Type) {
@@ -351,7 +402,7 @@ func (w *stWriter) call(c *st.CallExpr, depth int) {
 	for _, ob := range c.OutputBindings {
 		member, ok := stMemberRewrite[structType][strings.ToUpper(ob.Name)]
 		if !ok {
-			w.diag(ruleFBPin, w.line, "%s:%s: output %s has no Logix member", inst, typ, ob.Name)
+			w.diag(ruleFBPin, w.line, "%s:%s: output %s has no Logix member; the outputs are %s", inst, typ, ob.Name, stOutputs[structType])
 			return
 		}
 		w.emitf(depth, "%s := %s.%s;", w.expr(ob.Target), inst, member)
@@ -371,6 +422,17 @@ func (w *stWriter) ref(name string) string {
 // expr renders an expression. Every binary operation is parenthesized so
 // precedence never depends on the dialect.
 func (w *stWriter) expr(e st.Expression) string {
+	if w.depth == 0 {
+		// A statement's expression: REAL when it mixes one in, or when
+		// it is stored into one.
+		stored := e == w.rhs && isRealType(w.dest)
+		w.realCtx = w.numReal(e) || stored
+		w.realKnown = w.knownReal(e) || stored
+	}
+	w.depth++
+	defer func() { w.depth-- }()
+	beside := w.beside // for this node only
+	w.beside = false
 	switch v := e.(type) {
 	case *st.NumberLit:
 		return numberText(v)
@@ -385,7 +447,7 @@ func (w *stWriter) expr(e st.Expression) string {
 	case *st.TimeLit:
 		ms, ok := parseTime("T#" + v.Raw)
 		if !ok {
-			w.diag(ruleInit, w.line, "T#%s is not a TIME literal the writer reads", v.Raw)
+			w.diag(ruleInit, w.line, "T#%s is not a TIME literal the writer reads; write T#10S, T#1h30m or T#500ms", v.Raw)
 			return "0"
 		}
 		return strconv.FormatInt(ms, 10)
@@ -393,7 +455,7 @@ func (w *stWriter) expr(e st.Expression) string {
 		if id, ok := v.Inner.(*st.IdentExpr); ok && w.lw.enumOf(v.TypeName) != nil {
 			n, ok := w.lw.enumLiteral(v.TypeName + "#" + id.Name)
 			if !ok {
-				w.diag(ruleST, w.line, "%s#%s: %s has no member %s", v.TypeName, id.Name, w.lw.enumOf(v.TypeName).Name, id.Name)
+				w.diag(ruleST, w.line, "%s#%s: %s has no member %s (members: %s)", v.TypeName, id.Name, w.lw.enumOf(v.TypeName).Name, id.Name, enumMembers(w.lw.enumOf(v.TypeName)))
 				return "0"
 			}
 			return strconv.FormatInt(n, 10)
@@ -414,15 +476,40 @@ func (w *stWriter) expr(e st.Expression) string {
 		return w.member(v)
 	case *st.IndexExpr:
 		if len(v.Indices) != 1 {
-			w.diag(ruleArrayShape, w.line, "multi-dimensional arrays are not in the v1 subset")
+			w.diag(ruleArrayShape, w.line, "multi-dimensional arrays are not in the v1 subset; declare one array per dimension")
 			return "0"
 		}
-		return w.expr(v.Array) + "[" + w.expr(v.Indices[0]) + "]"
+		arr := w.expr(v.Array)
+		saved, savedKnown := w.realCtx, w.realKnown
+		w.realCtx = w.numReal(v.Indices[0]) // an index is a computation of its own
+		w.realKnown = w.knownReal(v.Indices[0])
+		idx := w.expr(v.Indices[0])
+		w.realCtx, w.realKnown = saved, savedKnown
+		return arr + "[" + idx + "]"
 	case *st.BinaryExpr:
-		return "(" + w.expr(v.Left) + " " + v.Op + " " + w.expr(v.Right) + ")"
+		saved, savedKnown := w.realCtx, w.realKnown
+		if isCompare(v.Op) {
+			// So are a comparison's operands.
+			w.realCtx = w.numReal(v.Left) || w.numReal(v.Right)
+			w.realKnown = w.knownReal(v.Left) || w.knownReal(v.Right)
+		}
+		if w.intDivision(v) {
+			w.realCtx, w.realKnown = saved, savedKnown
+			return "0"
+		}
+		mixes := isCompare(v.Op) || v.Op == "+" || v.Op == "-" || v.Op == "*" || v.Op == "/"
+		w.beside = mixes && w.realLeaf(v.Right)
+		l := w.expr(v.Left)
+		w.beside = mixes && w.realLeaf(v.Left)
+		r := w.expr(v.Right)
+		w.realCtx, w.realKnown = saved, savedKnown
+		return "(" + l + " " + v.Op + " " + r + ")"
 	case *st.UnaryExpr:
 		return v.Op + " (" + w.expr(v.Operand) + ")"
 	case *st.CallExpr:
+		if x, ok := w.conversion(v, beside); ok {
+			return x
+		}
 		return w.callExpr(v)
 	}
 	w.diag(ruleST, w.line, "expression %T is not in the Logix ST subset", e)
@@ -434,11 +521,17 @@ func (w *stWriter) member(m *st.MemberExpr) string {
 	base, ok := m.Object.(*st.IdentExpr)
 	if ok {
 		if v, declared := w.lw.vars[strings.ToLower(base.Name)]; declared {
+			if isLocalTime(v.Type) {
+				if s, ok := w.lw.localTimeMember(base.Name, m.Member, w.line, ""); ok {
+					return s
+				}
+				return "0"
+			}
 			if structType := stBlockTypes[strings.ToUpper(strings.TrimSpace(v.Type))]; structType != "" {
 				if to, ok := stMemberRewrite[structType][strings.ToUpper(m.Member)]; ok {
 					return w.ref(base.Name) + "." + to
 				}
-				w.diag(ruleMember, w.line, "%s.%s: %s has no %s member the Logix %s carries", base.Name, m.Member, v.Type, m.Member, structType)
+				w.diag(ruleMember, w.line, "%s.%s: %s has no %s member the Logix %s carries; the readable members are %s", base.Name, m.Member, v.Type, m.Member, structType, stMembersOf(structType))
 				return base.Name + "." + m.Member
 			}
 		}
@@ -453,15 +546,16 @@ func (w *stWriter) callExpr(c *st.CallExpr) string {
 		args = append(args, w.expr(a))
 	}
 	switch {
+	case isFirstScan(name, strings.Join(args, "")):
+		return firstScanFlag
 	case stFuncs[name]:
 		return name + "(" + strings.Join(args, ", ") + ")"
 	case name == "EXPT" && len(args) == 2:
 		return "(" + args[0] + " ** " + args[1] + ")"
-	case (strings.Contains(name, "_TO_") || strings.HasPrefix(name, "TO_")) && len(args) == 1:
-		// X_TO_Y, and the overloaded TO_Y (TO_INT of an enumeration, TO_Mode
-		// of an integer): Logix converts on assignment.
-		return args[0]
 	}
+	// No conversion reaches here: Logix converts only as it stores a
+	// value or mixes types, by rules of its own, so expr writes each one
+	// as Logix that computes nautilus's result or refuses it (convert.go).
 	if why, bad := stRejected[name]; bad {
 		w.diag(ruleST, w.line, "%s(): no Logix ST equivalent — %s", c.Name, why)
 		return "0"
@@ -470,7 +564,7 @@ func (w *stWriter) callExpr(c *st.CallExpr) string {
 		w.diag(ruleFB, w.line, "%s(): user functions and blocks are not in the Logix v1 subset; inline the logic", c.Name)
 		return "0"
 	}
-	w.diag(ruleST, w.line, "%s(): not a function the Logix ST subset knows", c.Name)
+	w.diag(ruleST, w.line, "%s(): not a function the Logix ST subset knows; it has ABS, SQRT, LN, LOG, EXP, SIN, COS, TAN, TRUNC, EXPT and the X_TO_Y conversions", c.Name)
 	return "0"
 }
 
@@ -489,10 +583,19 @@ func (w *stWriter) aoiCall(c *st.CallExpr, typ string, depth int) {
 	for _, na := range c.NamedArgs {
 		p := a.param(na.Name)
 		if p == nil || p.Usage == "Output" {
-			w.diag(ruleFBPin, w.line, "%s:%s: no input parameter %s", c.Name, typ, na.Name)
+			w.diag(ruleFBPin, w.line, "%s:%s: no input parameter %s (inputs: %s)", c.Name, typ, na.Name, a.paramNames("Input"))
 			return
 		}
-		bound[strings.ToLower(p.Name)] = w.expr(na.Value)
+		// The input is stored into the parameter, as an assignment stores
+		// into a tag: DINT_TO_REAL(a) is written as a.
+		w.rhs, w.dest = na.Value, p.DataType
+		arg, ok := w.aoiArg(na.Value)
+		w.rhs, w.dest = nil, ""
+		if !ok {
+			w.diag(ruleFBPin, w.line, "%s:%s: input %s is bound to an expression; a Logix ST call takes a tag or a literal for each input (an expression fails the build with RxSTX_E_UNEXPECTED_TOKEN), so compute it into a tag first (t := ...;) and bind the tag", c.Name, typ, na.Name)
+			return
+		}
+		bound[strings.ToLower(p.Name)] = arg
 	}
 	operands := []string{c.Name}
 	for _, p := range a.Params {
@@ -506,7 +609,7 @@ func (w *stWriter) aoiCall(c *st.CallExpr, typ string, depth int) {
 		case "InOut":
 			v, ok := bound[strings.ToLower(p.Name)]
 			if !ok {
-				w.diag(ruleFBPin, w.line, "%s:%s: VAR_IN_OUT %s must be bound", c.Name, typ, p.Name)
+				w.diag(ruleFBPin, w.line, "%s:%s: VAR_IN_OUT %s must be bound; add %s := a tag", c.Name, typ, p.Name, p.Name)
 				return
 			}
 			operands = append(operands, v)
@@ -516,9 +619,33 @@ func (w *stWriter) aoiCall(c *st.CallExpr, typ string, depth int) {
 	for _, ob := range c.OutputBindings {
 		p := a.param(ob.Name)
 		if p == nil || p.Usage != "Output" {
-			w.diag(ruleFBPin, w.line, "%s:%s: no output parameter %s", c.Name, typ, ob.Name)
+			w.diag(ruleFBPin, w.line, "%s:%s: no output parameter %s (outputs: %s)", c.Name, typ, ob.Name, a.paramNames("Output"))
 			return
 		}
 		w.emitf(depth, "%s := %s.%s;", w.expr(ob.Target), c.Name, p.Name)
 	}
+}
+
+// aoiOperand is what a Logix ST call takes for an input: a tag, a member
+// or element of one, or a number. Anything else, even (a) or -a, fails the
+// SDK build with RxSTX_E_UNEXPECTED_TOKEN (verified on v38, #368).
+var aoiOperand = regexp.MustCompile(`^(-?[0-9][0-9.]*([eE][-+]?[0-9]+)?|[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+|\[([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\])*)$`)
+
+// aoiArg renders an input bound in an ST call to a user block, and reports
+// whether Logix takes it as an operand. A negative number is written as
+// one (-5), not as a negation; an operator expression is refused without
+// rendering it, so the refusal is the call's, not the expression's.
+func (w *stWriter) aoiArg(e st.Expression) (string, bool) {
+	switch v := e.(type) {
+	case *st.UnaryExpr:
+		n, ok := v.Operand.(*st.NumberLit)
+		if !ok || v.Op != "-" {
+			return "", false
+		}
+		e = &st.NumberLit{Value: "-" + numberText(n), Base: 10, Pos: n.Pos}
+	case *st.BinaryExpr:
+		return "", false
+	}
+	s := w.expr(e)
+	return s, aoiOperand.MatchString(s)
 }

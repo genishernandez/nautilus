@@ -1,0 +1,27 @@
+# fb-r-trig — the standard R_TRIG (rising-edge detector) in ST, LD and FBD.
+# One task per language, outputs prefixed st_/ld_/fbd_ so one assertion
+# checks all three paths. In the ld column rung power drives CLK and
+# continues from Q.
+#
+#   go test ./lang/conformance/ -run 'TestConformance/fb-r-trig'
+name: fb-r-trig
+
+tasks:
+  - program: fb-r-trig.st
+    scan: 1ms
+  - name: ld
+    program: fb-r-trig.ld
+    scan: 1ms
+  - name: fbd
+    program: fb-r-trig.fbd
+    scan: 1ms
+
+tags:
+  - { name: CLK, role: state, init: false, desc: "Edge detector input (R_TRIG.CLK)" }
+
+  - { name: st_Q,  role: state, init: false }
+  - { name: ld_Q,  role: state, init: false }
+  - { name: fbd_Q, role: state, init: false }
+
+driver:
+  type: memory

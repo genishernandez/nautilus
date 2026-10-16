@@ -73,9 +73,10 @@ type Options struct {
 	// PeriodMs makes the task PERIODIC at this rate; 0 is CONTINUOUS.
 	PeriodMs int
 	// ProcessorType, MajorRev, MinorRev and SoftwareRevision identify the
-	// target. Defaults: 1756-L85E, 38, 11, 38.01 — what ECHO1 runs. A
-	// hardware.L5X merge replaces these in a later phase
-	// (logix-authoring.md §6, decision 1).
+	// target. Defaults: 1756-L85E, 38, 11 — what ECHO1 runs — and the
+	// software revision of the target's major revision
+	// (SoftwareRevisionFor). A Hardware configuration's Local module must
+	// agree with ProcessorType, MajorRev and MinorRev (logix/hardware).
 	ProcessorType    string
 	MajorRev         string
 	MinorRev         string
@@ -103,6 +104,28 @@ type Options struct {
 	// ST — that does gets the tag as a controller tag, typed from here, as
 	// if it had said VAR_EXTERNAL (uses.go).
 	Tags map[string]string
+	// AllTags writes every tag in Tags as a controller tag, whether or not
+	// the program names it (target.logix.all-tags): an imported project's
+	// tag file is the controller's tag set, and a tag only an external
+	// client reads or writes is still a tag the controller must have
+	// (#370). Off, a tag no program names is not written (LGA-001). An
+	// unnamed tag the Logix subset cannot carry (a STRING, a LINT) is not
+	// written either way, and a manifest tag with neither type: nor init:
+	// is not in Tags, so it has no type to write.
+	AllTags bool
+	// ControllerScoped names program variables (VAR) to write as
+	// controller tags instead of program tags
+	// (target.logix.controller-scoped): a block instance the import found
+	// at controller scope goes back there, so a client reading it by name
+	// (AcceptTmr.ACC) still finds it (#371). Each must be a VAR of the
+	// program; its description comes from Descs.
+	ControllerScoped []string
+	// Hardware is the project's I/O configuration (target.logix.hardware):
+	// its <Modules> section replaces the Local module the writer would
+	// generate, verbatim, and every alias of a rack point must name a
+	// module in it (hardware.go). nil: the Local module only, from the
+	// processor (localModules).
+	Hardware *Hardware
 	// Side is the side code: logic nautilus adds beside the user's
 	// program, in its own Logix program scheduled after it, for testing,
 	// verification and metrics. Nothing of it touches the user's routine.
@@ -135,9 +158,139 @@ func (o Options) withDefaults(program string) Options {
 	def(&o.ProcessorType, "1756-L85E")
 	def(&o.MajorRev, "38")
 	def(&o.MinorRev, "11")
-	def(&o.SoftwareRevision, "38.01")
+	def(&o.SoftwareRevision, SoftwareRevisionFor(o.MajorRev))
 	def(&o.ExportDate, "(pinned)")
 	return o
+}
+
+// SoftwareRevisionFor is the SoftwareRevision an export of a project at
+// this major firmware revision carries: the Logix Designer release that
+// wrote it, which shares the controller's major revision but not its
+// minor. A v38.11 controller's export says "38.01" (lang/l5x/testdata/
+// demoline.L5X, exported by ECHO1's Logix Designer), the only release a
+// real export in the repo shows; any other major gets its first release,
+// "<major>.00" — "36.00" for v36, which is what the batch-skid yardstick
+// (examples/batch-skid/line/Line.L5X, a stand-in export) says. Before
+// #373 every project claimed 38.01, whatever its target.
+func SoftwareRevisionFor(major string) string {
+	major = strings.TrimSpace(major)
+	if major == "" || major == "38" {
+		return "38.01"
+	}
+	return major + ".00"
+}
+
+// family is what a controller family's project carries around its Local
+// module, as Logix Designer exports it: the backplane port's type, which
+// of the Local module's ports are Ethernet, the controller's
+// <EthernetPorts> labels, and the <Controller> attributes that differ by
+// family. Taken from projects the SDK created for each processor on
+// Logix Designer v38 and exported to L5X (testdata/local, #373).
+type family struct {
+	Name string
+	// Backplane is the Local module's port 1 type.
+	Backplane string
+	// EthernetPortIDs are the Local module's Ethernet port ids.
+	EthernetPortIDs []int
+	// EthernetLabels are the controller's <EthernetPort> labels, port 1
+	// first.
+	EthernetLabels []string
+	// TimeSlice: the controller carries TimeSlice="20"
+	// ShareUnusedTimeSlice="1" after MinorRev and the redundancy pad
+	// percentages, and has no AutoDiagsEnabled or WebServerEnabled
+	// (CompactLogix 5370).
+	TimeSlice bool
+	// EtherNetIPMode is the controller's EtherNetIPMode attribute, ""
+	// for none.
+	EtherNetIPMode string
+}
+
+var (
+	controlLogix5580 = &family{Name: "ControlLogix 5580", Backplane: "ICP",
+		EthernetPortIDs: []int{2}, EthernetLabels: []string{"1"}}
+	compactLogix5370 = &family{Name: "CompactLogix 5370", Backplane: "Compact",
+		EthernetPortIDs: []int{2}, EthernetLabels: []string{"1", "2"}, TimeSlice: true}
+	compactLogix5380 = &family{Name: "CompactLogix 5380", Backplane: "5069",
+		EthernetPortIDs: []int{3, 4}, EthernetLabels: []string{"A1", "A2"},
+		EtherNetIPMode: "A1/A2: Dual-IP"}
+)
+
+// localModule is the controller's own entry under <Modules>: the identity
+// Logix Designer checks the processor against, and its ports.
+type localModule struct {
+	ProductType, ProductCode string
+	// BusSize is the backplane port's slot count.
+	BusSize int
+	Family  *family
+}
+
+// localModules are the Local modules Logix Designer itself writes, by
+// catalog number: each row is a project the SDK created for that
+// processor on Logix Designer v38 (ws-test), exported to L5X and kept
+// verbatim in testdata/local, which TestLocalModulesMatchExports checks
+// the writer against. The 1756-L85E's is also DemoLine's
+// (lang/l5x/testdata/demoline.L5X, ECHO1). A processor not here is not
+// guessed (#373): a CompactLogix 5370 L1/L2 (1769-L1x/L2x) has embedded
+// I/O modules the writer does not emit, a safety controller has a safety
+// partner, and v38 cannot create a CompactLogix 5480.
+var localModules = map[string]localModule{
+	"1756-L81E": {"14", "164", 17, controlLogix5580},
+	"1756-L82E": {"14", "165", 17, controlLogix5580},
+	"1756-L83E": {"14", "166", 17, controlLogix5580},
+	"1756-L84E": {"14", "167", 17, controlLogix5580},
+	"1756-L85E": {"14", "168", 17, controlLogix5580},
+
+	"1769-L30ER":     {"14", "106", 9, compactLogix5370},
+	"1769-L30ER-NSE": {"14", "109", 9, compactLogix5370},
+	"1769-L30ERM":    {"14", "156", 9, compactLogix5370},
+	"1769-L33ER":     {"14", "107", 17, compactLogix5370},
+	"1769-L33ERM":    {"14", "110", 17, compactLogix5370},
+	"1769-L36ERM":    {"14", "108", 31, compactLogix5370},
+
+	"5069-L306ER":     {"14", "196", 9, compactLogix5380},
+	"5069-L306ERM":    {"14", "189", 9, compactLogix5380},
+	"5069-L310ER":     {"14", "216", 9, compactLogix5380},
+	"5069-L310ER-NSE": {"14", "188", 9, compactLogix5380},
+	"5069-L310ERM":    {"14", "190", 9, compactLogix5380},
+	"5069-L320ER":     {"14", "217", 17, compactLogix5380},
+	"5069-L320ERM":    {"14", "192", 17, compactLogix5380},
+	"5069-L330ER":     {"14", "218", 32, compactLogix5380},
+	"5069-L330ERM":    {"14", "193", 32, compactLogix5380},
+	"5069-L340ER":     {"14", "219", 32, compactLogix5380},
+	"5069-L340ERM":    {"14", "194", 32, compactLogix5380},
+	"5069-L350ERM":    {"14", "195", 32, compactLogix5380},
+	"5069-L380ERM":    {"14", "228", 32, compactLogix5380},
+	"5069-L3100ERM":   {"14", "230", 32, compactLogix5380},
+}
+
+// fallbackLocal is what a project for a processor with no known Local
+// module gets: the 1756-L85E's, as every project did before #373, so
+// existing output is unchanged. LocalModuleWarning says so.
+var fallbackLocal = localModules["1756-L85E"]
+
+func localModuleFor(processor string) (localModule, bool) {
+	m, ok := localModules[strings.ToUpper(strings.TrimSpace(processor))]
+	if !ok {
+		return fallbackLocal, false
+	}
+	return m, true
+}
+
+// LocalModuleWarning is "" when the writer knows the processor's own Local
+// module (its identity and backplane, from Logix Designer's own export),
+// and otherwise the warning `naut logix write` and `naut logix deploy`
+// print: the project is written with the 1756-L85E's Local module and
+// only the catalog number changed, which Logix Designer may refuse or
+// misidentify. An empty processor is the default, the 1756-L85E.
+func LocalModuleWarning(processor string) string {
+	if strings.TrimSpace(processor) == "" {
+		return ""
+	}
+	if _, ok := localModuleFor(processor); ok {
+		return ""
+	}
+	return fmt.Sprintf("processor %s: nautilus has no verified Local module for it (it has them for the ControlLogix 5580 1756-L8xE, CompactLogix 5370 1769-L3x and CompactLogix 5380 5069-L3xx processors), so the project's Local module is the 1756-L85E's — ProductType %s, ProductCode %s, a %d-slot backplane — with only the catalog number changed; Logix Designer may refuse the project or misidentify the controller, so check that it opens before a download (#373)",
+		processor, fallbackLocal.ProductType, fallbackLocal.ProductCode, fallbackLocal.BusSize)
 }
 
 // Diag is one thing the writer cannot express, located in the source.
@@ -210,13 +363,18 @@ type lowered struct {
 	// call, literal index or not: a preset in the tag's data is set once,
 	// while a nautilus call binds PT each time — and a MOVE for the
 	// variable-indexed call would otherwise overwrite a literal-indexed
-	// element's preset for good (found on Echo, 2026-10-03).
+	// element's preset for good (found on Echo, 2026-10-03). A
+	// literal-indexed element still carries its preset in the tag's data
+	// too: that is its value from download until its first call.
 	computedIdx map[string]bool
 	genNames    map[string]bool
 	// types are the UDTs resolved so far (nil: known bad); rawTypes the
 	// TYPE declarations found in the libraries (types.go).
 	types    map[string]*udt
 	rawTypes map[string]*st.TypeDecl
+	// typeSrc is the library source each raw type is declared in, for
+	// its descriptions (types.go).
+	typeSrc map[string]*commentSrc
 	// enums are the enumerations the libraries declare, by ir.NameKey
 	// (enum.go): DINT tags, their members integers.
 	enums map[string]*ir.EnumDef
@@ -232,6 +390,14 @@ type lowered struct {
 	aois     map[string]*aoiDef
 	aoiOrder []*aoiDef
 	inAOI    bool
+	// libIx indexes what the libraries declare (aoi.go).
+	libIx *libIndex
+	// clocks are the LOCAL_TIME instances declared, clockUsed those a
+	// call or a member read needs as a tag (system.go).
+	clocks, clockUsed map[string]bool
+	// clockFold: the instances whose calls fold into a GSV into the
+	// import's array (planClocks).
+	clockFold map[string]bool
 }
 
 // blockType is the Logix structure behind a block instance: TIMER and
@@ -277,7 +443,8 @@ type rungOut struct {
 
 func lowerSrc(m *ld.Model, src string, opts Options) *lowered {
 	lw := &lowered{model: m, opts: opts, vars: map[string]ld.VarDecl{},
-		presetVars: map[string]bool{}, computedIdx: map[string]bool{}, genNames: map[string]bool{}, aois: map[string]*aoiDef{}}
+		presetVars: map[string]bool{}, computedIdx: map[string]bool{}, genNames: map[string]bool{}, aois: map[string]*aoiDef{},
+		clocks: map[string]bool{}, clockUsed: map[string]bool{}}
 	lw.loadTypes()
 	lw.src = src
 	for _, v := range m.Vars {
@@ -305,19 +472,31 @@ func lowerSrc(m *ld.Model, src string, opts Options) *lowered {
 	for _, v := range implicit {
 		lw.declare(v)
 	}
+	lw.declareUnnamed()
+	lw.checkControllerScoped()
+	lw.checkHardware()
 	notes := lw.notesByLine()
+	lw.planClocks(m.Rungs)
 	for _, r := range m.Rungs {
 		if r.POU != "" {
 			continue
 		}
 		lw.rung(r, notes[r.Line])
 	}
+	lw.dropUnusedClocks()
 	lw.side()
 	return lw
 }
 
 func (lw *lowered) diag(rule string, line int, rung, format string, a ...any) {
-	lw.diags = append(lw.diags, Diag{Rule: rule, Line: line, Rung: rung, Message: fmt.Sprintf(format, a...)})
+	d := Diag{Rule: rule, Line: line, Rung: rung, Message: fmt.Sprintf(format, a...)}
+	// An operand checked twice on its way through a lowering reports once.
+	for _, prev := range lw.diags {
+		if prev == d {
+			return
+		}
+	}
+	lw.diags = append(lw.diags, d)
 }
 
 // notesByLine maps a rung's header line to the `//` note run that sits
@@ -370,10 +549,16 @@ func (lw *lowered) declare(v ld.VarDecl) {
 	case "VAR_EXTERNAL":
 	case "VAR":
 		scope = lw.opts.Program
+		if lw.controllerScoped(v.Name) {
+			scope = ""
+		}
 	default:
 		lw.diag(ruleVarSection, v.Line, "", "%s %s: only VAR (program tags) and VAR_EXTERNAL (controller tags) have a Logix home; a program takes no parameters", v.Section, v.Name)
 		return
 	}
+	// The manifest seeds a controller tag the program declares
+	// VAR_EXTERNAL, never a program variable written at controller scope.
+	external := strings.EqualFold(v.Section, "VAR_EXTERNAL")
 	if !lw.checkName(v.Name, v.Line, "") {
 		return
 	}
@@ -403,7 +588,7 @@ func (lw *lowered) declare(v ld.VarDecl) {
 		return
 	}
 	init := v.Init
-	if init == "" && scope == "" {
+	if init == "" && external {
 		if iv, _, ok := ir.Lookup(lw.opts.Inits, v.Name); ok && iv != nil {
 			init = fmt.Sprint(iv)
 		}
@@ -434,6 +619,13 @@ func (lw *lowered) declare(v ld.VarDecl) {
 			}
 		}
 		lw.addTag(tagDef{Name: v.Name, DataType: "DINT", Value: strconv.FormatInt(ms, 10), Scope: scope, Line: v.Line})
+	case u == localTimeType:
+		if dim > 0 {
+			lw.diag(ruleArrayShape, v.Line, "", "%s: an array of LOCAL_TIME is not in the subset; one instance reads the clock for every use", v.Name)
+			return
+		}
+		lw.clocks[strings.ToLower(v.Name)] = true
+		lw.addTag(tagDef{Name: v.Name, DataType: "DINT", Dim: 7, Scope: scope, Line: v.Line})
 	case lw.blockType(u) != "":
 		if v.Init != "" {
 			lw.diag(ruleInit, v.Line, "", "%s: a %s instance takes no initializer; the preset comes from the rung (PT := / PV :=)", v.Name, u)
@@ -443,7 +635,7 @@ func (lw *lowered) declare(v ld.VarDecl) {
 	case lw.enumOf(typ) != nil:
 		val, ok := lw.enumInit(lw.enumOf(typ), init)
 		if !ok {
-			lw.diag(ruleInit, v.Line, "", "%s: initial value %q is not a member of %s", v.Name, init, lw.enumOf(typ).Name)
+			lw.diag(ruleInit, v.Line, "", "%s: initial value %q is not a member of %s (members: %s)", v.Name, init, lw.enumOf(typ).Name, enumMembers(lw.enumOf(typ)))
 			return
 		}
 		lw.addTag(tagDef{Name: v.Name, DataType: "DINT", Dim: dim, Value: val, Scope: scope, Line: v.Line})
@@ -457,7 +649,7 @@ func (lw *lowered) declare(v ld.VarDecl) {
 			return
 		}
 		var init any
-		if scope == "" {
+		if external {
 			init, _, _ = ir.Lookup(lw.opts.Inits, v.Name)
 		}
 		lw.addTag(tagDef{Name: v.Name, DataType: udt.Name, Dim: dim, Scope: scope, Line: v.Line, Struct: udt, Init: init})
@@ -504,15 +696,36 @@ func (lw *lowered) addTag(t tagDef) {
 func (lw *lowered) checkName(name string, line int, rung string) bool {
 	switch {
 	case !nameRe.MatchString(name):
-		lw.diag(ruleName, line, rung, "%s: a Logix tag name is letters, digits and underscores, starting with a letter or underscore", name)
+		lw.diag(ruleName, line, rung, "%s: a Logix tag name is letters, digits and underscores, starting with a letter or underscore; rename it", name)
 	case len(name) > 40:
-		lw.diag(ruleName, line, rung, "%s: a Logix tag name is at most 40 characters, this one is %d", name, len(name))
+		lw.diag(ruleName, line, rung, "%s: a Logix tag name is at most 40 characters, this one is %d; rename it shorter", name, len(name))
 	case strings.Contains(name, "__") || strings.HasSuffix(name, "_"):
-		lw.diag(ruleName, line, rung, "%s: a Logix tag name cannot have consecutive or trailing underscores", name)
+		lw.diag(ruleName, line, rung, "%s: a Logix tag name cannot have consecutive or trailing underscores; rename it, e.g. %s", name, tidyUnderscores(name))
 	default:
 		return true
 	}
 	return false
+}
+
+// tidyUnderscores is name with each run of underscores collapsed to one and
+// the trailing ones dropped: the rename a logix/name diagnostic suggests.
+func tidyUnderscores(name string) string {
+	for strings.Contains(name, "__") {
+		name = strings.ReplaceAll(name, "__", "_")
+	}
+	if t := strings.TrimRight(name, "_"); t != "" {
+		return t
+	}
+	return name
+}
+
+// enumMembers lists an enumeration's members, for a diagnostic.
+func enumMembers(e *ir.EnumDef) string {
+	names := make([]string, len(e.Members))
+	for i, m := range e.Members {
+		names[i] = m.Name
+	}
+	return strings.Join(names, ", ")
 }
 
 // genTag declares a generated program tag (edge storage, edge output). The

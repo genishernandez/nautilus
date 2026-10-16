@@ -1,0 +1,62 @@
+PROGRAM OpsFbd
+(* The operator blocks by name, each wired to its fbd_ tag. *)
+VAR_EXTERNAL
+    A, B, C : BOOL;
+    X, Y, Z : INT;
+    R, RX, RY : REAL;
+    T1, T2 : TIME;
+    S : STRING;
+    D1, D2 : DINT;
+    fbd_AND, fbd_OR, fbd_XOR, fbd_NOT, fbd_AND3, fbd_OR3, fbd_XOR3, fbd_MOVEB, fbd_GT, fbd_GE, fbd_LT, fbd_LE, fbd_EQ, fbd_NE, fbd_RGT, fbd_RGE, fbd_RLT, fbd_RLE, fbd_REQ, fbd_RNE, fbd_TGT, fbd_TGE, fbd_TLT, fbd_TLE, fbd_TEQ, fbd_TNE : BOOL;
+    fbd_ADD3, fbd_MUL3, fbd_SUB, fbd_DIV, fbd_MOD, fbd_MOVEI : INT;
+    fbd_ADDR, fbd_MULR, fbd_SUBR, fbd_MOVER : REAL;
+    fbd_MOVES : STRING;
+    fbd_ADDD : DINT;
+    fbd_ADDDEQ : BOOL;
+    fbd_ADDDINT : INT;
+    fbd_ADDDLINT : LINT;
+END_VAR
+FBD
+  fbd_AND  := AND(A, B)
+  fbd_OR   := OR(A, B)
+  fbd_XOR  := XOR(A, B)
+  fbd_NOT  := NOT(A)
+  fbd_AND3 := AND(A, B, C)
+  fbd_OR3  := OR(A, B, C)
+  fbd_XOR3 := XOR(A, B, C)
+  fbd_ADD3 := ADD(X, Y, Z)
+  fbd_MUL3 := MUL(X, Y, Z)
+  fbd_SUB  := SUB(X, Y)
+  fbd_DIV  := DIV(X, Y)
+  fbd_MOD  := MOD(X, Y)
+  fbd_ADDR := ADD(X, R)
+  fbd_MULR := MUL(X, R)
+  fbd_SUBR := SUB(X, R)
+  fbd_MOVEB := MOVE(A)
+  fbd_MOVEI := MOVE(X)
+  fbd_MOVER := MOVE(R)
+  fbd_MOVES := MOVE(S)
+  fbd_GT := GT(X, Y)
+  fbd_GE := GE(X, Y)
+  fbd_LT := LT(X, Y)
+  fbd_LE := LE(X, Y)
+  fbd_EQ := EQ(X, Y)
+  fbd_NE := NE(X, Y)
+  fbd_RGT := GT(RX, RY)
+  fbd_RGE := GE(RX, RY)
+  fbd_RLT := LT(RX, RY)
+  fbd_RLE := LE(RX, RY)
+  fbd_REQ := EQ(RX, RY)
+  fbd_RNE := NE(RX, RY)
+  fbd_TGT := GT(T1, T2)
+  fbd_TGE := GE(T1, T2)
+  fbd_TLT := LT(T1, T2)
+  fbd_TLE := LE(T1, T2)
+  fbd_TEQ := EQ(T1, T2)
+  fbd_TNE := NE(T1, T2)
+  fbd_ADDD     := ADD(D1, D2)
+  fbd_ADDDEQ   := EQ(ADD(D1, D2), 80000)
+  fbd_ADDDINT  := TO_INT(ADD(D1, D2))
+  fbd_ADDDLINT := TO_LINT(ADD(D1, D2))
+END_FBD
+END_PROGRAM

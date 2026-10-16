@@ -141,17 +141,23 @@ for sw_ in switches:
         vs[int(w["Id"])] = (lst(w.get("Ports")), lst(w.get("Untagged")))
     sp = [p for p in ports if p.startswith(sw_ + "_")]
     vlan_cfg[sw_] = {"vlans": vs, "pvid": {pos_of(p): int(walks[p].get("Pvid") or 1) for p in sp}, "ports": [pos_of(p) for p in sp]}
+# Each correction reads the RECORDED config, like series: (a port plays the
+# recording, never another correction), so their order does not matter:
+# g0/1 takes what g0/23 was recorded with even when g0/23 is itself
+# corrected first.
+as_recorded = {sw_: {"vlans": {vid: (set(m), set(u)) for vid, (m, u) in c["vlans"].items()}, "pvid": dict(c["pvid"])}
+               for sw_, c in vlan_cfg.items()}
 for dst, src in corrections.items():
     sw_, s_ = dst.split("_")[0], src.split("_")[0]
     if sw_ != s_ or dst not in types or src not in types:
         raise SystemExit(f"baseline.yaml vlans: {dst} takes {src}: both ports of one switch")
-    c, d, f = vlan_cfg[sw_], pos_of(dst), pos_of(src)
+    c, r, d, f = vlan_cfg[sw_], as_recorded[sw_], pos_of(dst), pos_of(src)
     for vid, (mem, unt) in c["vlans"].items():
-        for st_ in (mem, unt):
+        for st_, rec_ in zip((mem, unt), r["vlans"][vid]):
             st_.discard(d)
-            if f in st_:
+            if f in rec_:
                 st_.add(d)
-    c["pvid"][d] = c["pvid"][f]
+    c["pvid"][d] = r["pvid"][f]
 csv = lambda xs: ",".join(str(x) for x in sorted(xs))
 
 
@@ -292,13 +298,25 @@ def live(n):
 
 
 def end_faults(t):
-    """What takes this end of a cable down, besides the cable itself."""
+    """What takes this end of a cable down, besides the cable itself. A
+    BMC runs on standby power: host off, its port keeps link; only a
+    server with no power at all (every supply down) takes it down."""
     root = t.split("_")[0]
     if types[t] == "SwitchPort":
         return f"Sim_{t}.Down OR Sim_{t}.AdminDown OR {root}_M.Down"
-    return f"Sim_{t}.Down OR {root}_M.Off"
+    return f"Sim_{t}.Down OR {root}_M.{'Dead' if t.endswith('_Nic_BMC') else 'Off'}"
 
 
+def link_mbps(a, b):
+    """A cable's speed override from both ends' faults (the slower), or None
+    when neither end is a switch port (nothing to override)."""
+    over = [f"Sim_{e}.SpeedMbps" for e in (a, b) if types[e] == "SwitchPort"]
+    if not over:
+        return None
+    return over[0] if len(over) == 1 else f"SlowerMbps(A := {over[0]}, B := {over[1]})"
+
+
+body.append("  Clearing := ClearFaults;")
 body.append("  IF ClearFaults THEN")
 body.append("    Sim_Room.InletDeltaC := 0.0;")
 body.append("    Sim_Net.BroadcastPps := 0.0;")
@@ -318,8 +336,9 @@ body.append("  END_IF;")
 body.append("  (* the chassis first: dark, off, rebooting, the thermal model *)")
 for s in switches:
     fbs.append(f"  {s}_M : SwitchPlant;")
-    body.append(f"  {s}_M(Dt := PlantDtS, F := Sim_{s}, P := {s});")
+    body.append(f"  {s}_M(Dt := PlantDtS, Clear := Clearing, F := Sim_{s}, P := {s});")
 for node in servers:
+    psus = children(node, "PSU")
     fans = children(node, "Fan")
     cpu = [t for t in children(node, "TempSensor") if t.endswith("_Temp_CPU")]
     fbs.append(f"  {node}_M : ServerPlant;")
@@ -327,19 +346,26 @@ for node in servers:
     rise = f"{cpu[0]}_M.Rise" if cpu else "0.0"
     inlet = [t for t in children(node, "TempSensor") if weight(t) == 0.0]
     over = f"{cpu[0]}_M.Base - {inlet[0]}_M.Base" if cpu and inlet else "35.0"
+    # every supply down: no power at all (none modelled: never)
+    unpowered = " AND ".join(f"(Sim_{p}.InputLost OR Sim_{p}.Fail)" for p in psus) or "FALSE"
     body.append(f"  {node}_M(Rec := {rec(node)}, F := Sim_{node}, Room := Sim_Room, FansFailed := {failed}, CpuRiseNow := {rise}, "
-                f"CpuOverInlet := {over}, Live := {live(node)}, P := {node});")
+                f"CpuOverInlet := {over}, Live := {live(node)}, Unpowered := {unpowered}, P := {node});")
 
-body.append("  (* every cable, from both ends' faults: down at one end is down at both *)")
+body.append("  (* every cable, from both ends' faults: down at one end is down at both,")
+body.append("     and a speed override at one end is the link's *)")
+mbps = {name: link_mbps(a, b) for name, a, b in cables}
 for name, a, b in cables:
     body.append(f"  {name} := NOT (Sim_{name}.Pulled OR {end_faults(a)} OR {end_faults(b)});")
+    if mbps[name]:
+        fbs.append(f"  {name}_Mbps : REAL;")
+        body.append(f"  {name}_Mbps := {mbps[name]};")
 
 body.append("  (* the switches: the recording bent by the faults, lib/switch.st *)")
 for s in switches:
     body.append(f"  {s}.PortsUp := 0;")
     for p in [p for p in ports if p.startswith(s + "_")]:
         fbs.append(f"  {p}_M : PortPlant;")
-        link = f", LinkOk := {peer[p]}" if p in peer else ""
+        link = f", LinkOk := {peer[p]}, LinkMbps := {peer[p]}_Mbps" if p in peer else ""
         body.append(f"  {p}_M(Rec := {rec(p)}, F := Sim_{p}, Dark := {s}_M.Down, Live := {live(p)}{link}, Net := Sim_Net, Dt := PlantDtS, P := {p});")
         body.append(f"  IF {p}.OperUp THEN {s}.PortsUp := {s}.PortsUp + 1; END_IF;")
 
@@ -379,7 +405,18 @@ for node in servers:
             mx = f"MAX({mx}, {t}.Value)"
         body.append(f"  {node}.MaxTempC := {mx};")
     psus = children(node, "PSU")
-    if len(psus) == 2:
+    if len(psus) == 1:
+        fbs.append(f"  {node}_Psu_M : PsuSingle;")
+        body.append(f"  {node}_Psu_M(Rec := {rec(psus[0])}, F := Sim_{psus[0]}, LoadW := {m}.LoadW, Live := {live(psus[0])}, P := {psus[0]});")
+    elif len(psus) > 2:
+        # N supplies share the draw equally across the ones that are up: the
+        # up-count is worked out here, in this scan, before any unit runs
+        fbs.append(f"  {node}_PsuUp : DINT;")
+        body.append(f"  {node}_PsuUp := " + " + ".join(f"BOOL_TO_INT(NOT (Sim_{p}.InputLost OR Sim_{p}.Fail))" for p in psus) + ";")
+        for p in psus:
+            fbs.append(f"  {p}_M : PsuUnit;")
+            body.append(f"  {p}_M(Rec := {rec(p)}, F := Sim_{p}, LoadW := {m}.LoadW, UpCount := {node}_PsuUp, Live := {live(p)}, P := {p});")
+    elif len(psus) == 2:
         fbs.append(f"  {node}_Psu_M : PsuPair;")
         a, b = psus
         body.append(f"  {node}_Psu_M(Rec1 := {rec(a)}, Rec2 := {rec(b)}, F1 := Sim_{a}, F2 := Sim_{b}, LoadW := {m}.LoadW, Live := {live(a)} AND {live(b)}, P1 := {a}, P2 := {b});")
@@ -388,11 +425,8 @@ for node in servers:
         body.append(f"  {d}_M(F := Sim_{d}, P := {d});")
     for nic in children(node, "NetPort"):
         fbs.append(f"  {nic}_M : NicPlant;")
-        ok = peer.get(nic, f"NOT (Sim_{nic}.Down OR {m}.Off)")
-        speed = "0.0"
-        far = next((y if x == nic else x for c, x, y in cables if c == peer.get(nic)), None)
-        if far and types[far] == "SwitchPort":
-            speed = f"Sim_{far}.SpeedMbps / 1000.0"
+        ok = peer.get(nic, f"NOT ({end_faults(nic)})")
+        speed = f"{peer[nic]}_Mbps / 1000.0" if mbps.get(peer.get(nic)) else "0.0"
         body.append(f"  {nic}_M(Rec := {rec(nic)}, LinkOk := {ok}, SpeedGbps := {speed}, Live := {live(nic)}, P := {nic});")
 
 nl = "\n"
@@ -411,6 +445,7 @@ VAR_EXTERNAL
 END_VAR
 VAR
   Live : BOOL;
+  Clearing : BOOL; (* ClearFaults this scan: it is reset before the plants run *)
 {nl.join(fbs)}
 END_VAR
   Live := Replay_At > 0;
@@ -450,9 +485,18 @@ for sc in spec:
     if not re.match(r"^[a-z][a-z0-9-]*$", n) or n == "normal" or n in names:
         problems.append(f"scenario {n!r}: a unique lowercase name, not 'normal'")
     names.add(n)
-    if ("set" in sc) == ("steps" in sc):
+    timeline = "steps" in sc
+    if ("set" in sc) == timeline:
         problems.append(f"scenario {n}: set: or steps:, one of them")
     sc["steps"] = sc.get("steps") or [{"at": 0, "set": sc.get("set") or {}}]
+    ats = [st.get("at") for st in sc["steps"]]
+    if any(isinstance(a, bool) or not isinstance(a, (int, float)) or a < 0 for a in ats):
+        problems.append(f"scenario {n}: every step needs at: seconds, 0 or more")
+    elif "repeat" in sc:
+        r = sc["repeat"]
+        if not timeline or isinstance(r, bool) or not isinstance(r, (int, float)) or r <= max(ats):
+            # a step at or past repeat: would never run (the cycle wraps first)
+            problems.append(f"scenario {n}: repeat: needs steps:, and more seconds than the last at: ({max(ats)}), got {r!r}")
     for st in sc["steps"]:
         for key, v in (st.get("set") or {}).items():
             tag, _, member = key.partition(".")
@@ -483,7 +527,8 @@ ext = sorted(f"  {t} : {typ};" for t, typ in used)
 flags, resets, select, run = [], [], [], []
 for i, sc in enumerate(spec, 1):
     select.append(f"  ELSIF Scenario = '{sc['name']}' THEN\n    Active := {i};")
-    body = [f"  {'IF' if i == 1 else 'ELSIF'} Active = {i} THEN (* {sc['name']}: {sc.get('about', '')} *)"]
+    about = re.sub(r"\(\*|\*\)", lambda m: " ".join(m.group(0)), str(sc.get("about", "")))  # never closes the comment
+    body = [f"  {'IF' if i == 1 else 'ELSIF'} Active = {i} THEN (* {sc['name']}: {about} *)"]
     for j, st in enumerate(sc["steps"], 1):
         f = f"S{i}_{j}"
         flags.append(f"  {f} : BOOL;")
@@ -499,10 +544,12 @@ nl = "\n"
 st = f"""(* scenarios.st: compiled by gen.py from scenarios.yaml. Do not edit:
    add or change a scenario there. Writing Scenario starts it: a set: at
    once, a timeline step by step (Phase, seconds from the write, wrapping
-   every repeat:). "normal" clears every fault. *)
+   every repeat:). "normal" clears every fault. ScenarioRestart (a pulse)
+   runs the one written again from its start: writing the same name twice
+   is no change, so it alone cannot. *)
 PROGRAM Scenarios
 VAR_EXTERNAL
-  Scenario : STRING; ClearFaults : BOOL; ScenarioUnknown : BOOL;
+  Scenario : STRING; ClearFaults : BOOL; ScenarioUnknown : BOOL; ScenarioRestart : BOOL;
   ScenarioCatalog : STRING; (* for the scenario panel: every name and what it does *)
   ScenarioS : REAL; ScenarioDtS : REAL;
 {nl.join(ext)}
@@ -513,8 +560,9 @@ VAR
   Phase  : REAL; (* seconds into its cycle *)
 {nl.join(flags)}
 END_VAR
-IF Scenario <> Last THEN
+IF Scenario <> Last OR ScenarioRestart THEN
   Last := Scenario;
+  ScenarioRestart := FALSE;
   ScenarioS := 0.0;
   Phase := 0.0;
   ScenarioUnknown := FALSE;
@@ -541,6 +589,7 @@ with open(os.path.join(HERE, "tags", "faults.yaml"), "a") as fh:
     fh.write(f"- {{ name: ScenarioCatalog, role: state, init: {json.dumps(catalog)}, desc: \"Every named scenario and what it does, as JSON (scenarios.yaml)\" }}\n")
     fh.write("- { name: ScenarioS, role: state, init: 0.0, desc: \"Seconds since the Scenario was written\" }\n")
     fh.write("- { name: ScenarioUnknown, role: state, init: false, desc: \"The Scenario written is not one of scenarios.yaml's\" }\n")
+    fh.write("- { name: ScenarioRestart, role: state, init: false, desc: \"A pulse: run the Scenario written again from its start\" }\n")
 
 link = os.path.join(HERE, "data")
 if not os.path.lexists(link):

@@ -173,9 +173,11 @@ func (f *Facade) Handler() http.Handler {
 	if f.prog != nil {
 		mux.HandleFunc("GET /api/program", f.prog.get)
 		mux.HandleFunc("PUT /api/program", f.prog.put)
+		mux.HandleFunc("POST /api/logix/deploy", f.prog.deployStream)
 	} else {
 		mux.HandleFunc("GET /api/program", programGone)
 		mux.HandleFunc("PUT /api/program", programLocked)
+		mux.HandleFunc("POST /api/logix/deploy", noProject)
 	}
 	mux.HandleFunc("GET /api/program/history", programGone)
 	mux.HandleFunc("POST /api/program/rollback", programLocked)
@@ -191,6 +193,8 @@ const (
 	msgNoEdit = "this is a Logix controller, which nautilus does not warm-swap. " +
 		"Edit rungs online with `naut logix push --comm-path`, or download a " +
 		"project with `naut logix download`."
+	msgNoProject = "this `naut logix serve` has no project to deploy: restart it with " +
+		"`--project <dir>` (a nautilus project with a target: logix section)"
 )
 
 func programGone(w http.ResponseWriter, _ *http.Request) {
@@ -199,6 +203,10 @@ func programGone(w http.ResponseWriter, _ *http.Request) {
 
 func programLocked(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusForbidden, msgNoEdit)
+}
+
+func noProject(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusNotFound, msgNoProject)
 }
 
 func writeJSON(w http.ResponseWriter, code int, msg string) {
@@ -243,18 +251,33 @@ func (f *Facade) driverStatus() []server.DriverStatus {
 // writer sends tag writes to the controller over its own connection, so a
 // write never waits behind a poll cycle and a slow write never stalls the
 // polls. It dials lazily and redials after the connection breaks.
+//
+// Writes are rare and the connection carries nothing between them, so the
+// far end closes it: the Forward Open asks for a 32 s connection timeout,
+// and a controller (or `naut logix emulate`, at 30 s) drops a session that
+// has been quiet that long. The writer only finds out by writing, so a
+// connection idle past writerIdle is replaced before the write, and a write
+// that still fails in transport is retried once on a fresh connection.
+// Retrying is safe: a write sets a value, so sending it twice is the same
+// as sending it once.
 type writer struct {
 	o     Options
 	byTag map[string]eip.TagBinding // nautilus name → binding
 	types map[string]eip.TypeDef
+	idle  time.Duration // replace the connection after this long unused
 
-	mu   sync.Mutex
-	ctrl *logix.Controller
-	err  string
+	mu       sync.Mutex
+	ctrl     *logix.Controller
+	lastUsed time.Time
+	err      string
 }
 
+// writerIdle is under both the 32 s connection timeout serve asks for and
+// the emulator's 30 s session timeout.
+const writerIdle = 20 * time.Second
+
 func newWriter(o Options, m eip.Manifest) *writer {
-	w := &writer{o: o, byTag: map[string]eip.TagBinding{}, types: map[string]eip.TypeDef{}}
+	w := &writer{o: o, byTag: map[string]eip.TagBinding{}, types: map[string]eip.TypeDef{}, idle: writerIdle}
 	for _, b := range m.Tags {
 		w.byTag[b.Name] = b
 	}
@@ -287,29 +310,53 @@ func (w *writer) write(name string, value any) error {
 	defer w.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if w.ctrl == nil || w.ctrl.Broken() {
-		if w.ctrl != nil {
-			_ = w.ctrl.Close()
+	stale := w.ctrl != nil && w.idle > 0 && time.Since(w.lastUsed) > w.idle
+	for attempt := 0; ; attempt++ {
+		if w.ctrl == nil || w.ctrl.Broken() || stale {
+			stale = false
+			if err := w.redial(ctx); err != nil {
+				return err
+			}
 		}
-		w.ctrl, err = dial(ctx, w.o)
-		if err != nil {
-			w.ctrl = nil
-			w.err = err.Error()
-			return fmt.Errorf("connect to %s: %w", w.o.Host, err)
+		err := w.ctrl.WriteTag(ctx, device, code, 1, data)
+		if err == nil {
+			w.lastUsed = time.Now()
+			w.err = ""
+			return nil
 		}
-	}
-	if err := w.ctrl.WriteTag(ctx, device, code, 1, data); err != nil {
 		w.err = fmt.Sprintf("write %s: %v", device, err)
 		var cipErr *logix.CIPError
-		if errors.As(err, &cipErr) && cipErr.Permanent() {
-			// The controller understood and refused: a constant, a
-			// read-only tag, a type it will not take. Not a transport
-			// failure, so it says nothing about the connection.
-			return badRequest(fmt.Sprintf("the controller refused %s: %v", device, err))
+		if errors.As(err, &cipErr) {
+			if cipErr.Permanent() {
+				// The controller understood and refused: a constant, a
+				// read-only tag, a type it will not take. Not a transport
+				// failure, so it says nothing about the connection.
+				return badRequest(fmt.Sprintf("the controller refused %s: %v", device, err))
+			}
+			return err
 		}
-		return err
+		if attempt > 0 || ctx.Err() != nil {
+			return err
+		}
+		// A transport failure: the connection went away under us. Once
+		// more, on a new one.
+		stale = true
 	}
-	w.err = ""
+}
+
+// redial replaces the write connection. Called with w.mu held.
+func (w *writer) redial(ctx context.Context) error {
+	if w.ctrl != nil {
+		_ = w.ctrl.Close()
+	}
+	ctrl, err := dial(ctx, w.o)
+	if err != nil {
+		w.ctrl = nil
+		w.err = err.Error()
+		return fmt.Errorf("connect to %s: %w", w.o.Host, err)
+	}
+	w.ctrl = ctrl
+	w.lastUsed = time.Now()
 	return nil
 }
 

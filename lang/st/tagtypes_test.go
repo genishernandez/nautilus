@@ -1,6 +1,7 @@
 package st
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -92,9 +93,42 @@ func TestResolveTypeName(t *testing.T) {
 			t.Errorf("%s → %v, %v; want %v", name, got, err, kind)
 		}
 	}
-	for _, bad := range []string{"Widget", "TON", "", "INT;"} {
+	for _, bad := range []string{"Widget", "TON", "", "INT;", "ARRAY[1..2] OF TON"} {
 		if _, err := ResolveTypeName(bad, types); err == nil {
 			t.Errorf("%q resolved", bad)
+		}
+	}
+}
+
+// A function block, or a type holding one at any depth, is refused with
+// an error errors.Is finds as ErrFunctionBlockType; the scalar message is
+// the one it always was.
+func TestResolveTypeNameRefusesFunctionBlocksInside(t *testing.T) {
+	prog, err := Parse("TYPE Station : STRUCT\n    Delay : TOF;\nEND_STRUCT;\nEND_TYPE\n" +
+		"FUNCTION_BLOCK Sequencer\nEND_FUNCTION_BLOCK\nPROGRAM P\nEND_PROGRAM\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	types, err := Types(prog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"TON":                                  "TON is a function block — an instance is program state, not a tag",
+		"Sequencer":                            "Sequencer is a function block — an instance is program state, not a tag",
+		"ARRAY[1..2] OF TON":                   "ARRAY[1..2] OF TON — TON is a function block; an instance is program state, not a tag",
+		"ARRAY[0..1] OF Sequencer":             "ARRAY[0..1] OF Sequencer — Sequencer is a function block; an instance is program state, not a tag",
+		"ARRAY[1..2] OF ARRAY[1..2] OF R_TRIG": "ARRAY[1..2] OF ARRAY[1..2] OF R_TRIG — R_TRIG is a function block; an instance is program state, not a tag",
+		"Station":                              "Station — member Delay is a TOF, a function block; an instance is program state, not a tag",
+		"ARRAY[1..2] OF Station":               "ARRAY[1..2] OF Station — member Delay is a TOF, a function block; an instance is program state, not a tag",
+	} {
+		_, err := ResolveTypeName(name, types)
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: err = %v, want %q", name, err, want)
+			continue
+		}
+		if !errors.Is(err, ErrFunctionBlockType) {
+			t.Errorf("%s: errors.Is(err, ErrFunctionBlockType) is false", name)
 		}
 	}
 }

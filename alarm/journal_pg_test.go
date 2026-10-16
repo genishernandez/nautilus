@@ -36,7 +36,7 @@ func TestPGJournal(t *testing.T) {
 	base := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
 	events := []Event{
 		{TS: base.UnixMilli(), ID: "RTU9_FIT.HH", Name: "Flow High High", Kind: KindActive, Priority: High, Site: "RTU9", State: "unack-active"},
-		{TS: base.Add(time.Minute).UnixMilli(), ID: "RTU9_FIT.HH", Name: "Flow High High", Kind: KindAck, Priority: High, Site: "RTU9", State: "ack-active", By: "rchon"},
+		{TS: base.Add(time.Minute).UnixMilli(), ID: "RTU9_FIT.HH", Name: "Flow High High", Kind: KindAck, Priority: High, Site: "RTU9", State: "ack-active", By: "operator1"},
 		{TS: base.Add(2 * time.Minute).UnixMilli(), ID: "RTU12_INT_YA", Name: "Intrusion", Kind: KindActive, Priority: Critical, Site: "RTU12", State: "unack-active"},
 	}
 	for _, e := range events {
@@ -73,7 +73,7 @@ func TestPGJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(byKind) != 1 || byKind[0].By != "rchon" {
+	if len(byKind) != 1 || byKind[0].By != "operator1" {
 		t.Fatalf("kind filter returned %+v", byKind)
 	}
 	inRange, err := j.Query(base.Add(90*time.Second), time.Now(), Filter{})
@@ -92,8 +92,11 @@ func TestPGJournal(t *testing.T) {
 		t.Fatalf("Span = %v, %v, %d", first, last, count)
 	}
 
-	// Prune keeps the retention window, drops the rest.
-	if err := j.Prune(59 * time.Minute); err != nil {
+	// Prune keeps the retention window, drops the rest. The cutoff sits
+	// half-way between the first event (an hour old) and the second (59
+	// minutes old): at exactly 59 minutes the second event's survival
+	// depended on the milliseconds between Append and Prune.
+	if err := j.Prune(59*time.Minute + 30*time.Second); err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
 	after, err := j.Query(time.Time{}, time.Time{}, Filter{})

@@ -31,7 +31,7 @@ client*:
 // first frame
 {"ts":1770000000000,"seq":1,"full":true,"tags":{ /* all 10,000 */ },"scan":{…}}
 // every frame after
-{"ts":1770000000250,"seq":2,"tags":{"RTU9_WEL15_LIT_001":4.31},"scan":{…}}
+{"ts":1770000000250,"seq":2,"tags":{"RTU9_ZONE15_LIT_001":4.31},"scan":{…}}
 ```
 
 Two fields make it a protocol rather than a trick:
@@ -272,8 +272,8 @@ Frames now carry a `quality` map:
 ```jsonc
 {
   "ts": 1770000000000,
-  "tags": {"RTU9_WEL15_LIT_001": 4.31, "TempSP": 65},
-  "quality": {"RTU9_WEL15_LIT_001": "stale", "RTU4_FIT_002": "notConnected"}
+  "tags": {"RTU9_ZONE15_LIT_001": 4.31, "TempSP": 65},
+  "quality": {"RTU9_ZONE15_LIT_001": "stale", "RTU4_FIT_002": "notConnected"}
 }
 ```
 
@@ -353,11 +353,11 @@ const rt = new RealtimeClient<NautilusFrame>({
 rt.start();
 
 // frame.tags is always COMPLETE — the client merges deltas for you
-rt.frame?.tags.RTU9_WEL15_LIT_001;
+rt.frame?.tags.RTU9_ZONE15_LIT_001;
 
 // and now a screen can stop guessing
-rt.isGood('RTU9_WEL15_LIT_001');            // false when stale/bad/absent-source
-rt.quality('RTU9_WEL15_LIT_001.CTL1HSP');   // 'stale' — resolves to the root tag
+rt.isGood('RTU9_ZONE15_LIT_001');            // false when stale/bad/absent-source
+rt.quality('RTU9_ZONE15_LIT_001.HSP');   // 'stale' — resolves to the root tag
 ```
 
 `quality()` resolves a dotted member path to its root tag: quality belongs

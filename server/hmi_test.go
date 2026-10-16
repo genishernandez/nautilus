@@ -4,9 +4,52 @@ import (
 	"bytes"
 	"io/fs"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
+
+// An /api/ path no route matches is a JSON 404, with or without server.hmi:
+// the SPA fallback is for the HMI's own client-side routes, and answering a
+// typo'd endpoint with index.html (200, text/html) hides the mistake from the
+// client (#301). A GET on a POST-only route is the same: no route for it.
+func TestUnmatchedAPIPathIs404(t *testing.T) {
+	for name, opts := range map[string]Options{
+		"with an HMI": {HMI: testHMI()},
+		"no HMI":      {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := New(newTestRuntime(t), opts).Handler()
+			for _, p := range []string{"/api/nope", "/api/nope/deeper", "/api/", "/api/tags"} {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+				if rec.Code != 404 {
+					t.Errorf("GET %s = %d, want 404", p, rec.Code)
+				}
+				if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+					t.Errorf("GET %s Content-Type = %q, want application/json", p, ct)
+				}
+				if body := rec.Body.String(); !strings.Contains(body, `"error"`) || !strings.Contains(body, p) || strings.Contains(body, "hmi shell") {
+					t.Errorf("GET %s body = %q, want a JSON error naming the path", p, body)
+				}
+			}
+		})
+	}
+}
+
+// The fallback itself is untouched: a non-/api path the build has no file
+// for still gets the HMI's index.html (TestHMISPAFallback), including one
+// that only looks like the API.
+func TestHMISPAFallbackSurvivesAPI404(t *testing.T) {
+	h := New(newTestRuntime(t), Options{HMI: testHMI()}).Handler()
+	for _, p := range []string{"/apis", "/api-docs", "/tanks/api/x"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+		if rec.Code != 200 || rec.Body.String() != "<html>hmi shell</html>" {
+			t.Errorf("GET %s = %d %q, want the SPA fallback", p, rec.Code, rec.Body.String())
+		}
+	}
+}
 
 // Options.HMI turns the controller into a one-process HMI deploy: a built
 // SPA takes "/" (with SPA-fallback routing for client-side routes), and the

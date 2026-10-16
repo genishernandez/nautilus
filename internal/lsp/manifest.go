@@ -47,6 +47,10 @@ type manifestEntry struct {
 	files []string // the tag-files it composed, whose modtimes join mod
 	tags  []ProjectTag
 	defs  []runtime.TagDef // the same tags as the compiler scopes them
+	// logix: the manifest declares `target: logix`, so the project's
+	// programs are checked against the Logix writer's rules as they are
+	// typed, the same rules `naut check` runs for such a project.
+	logix bool
 }
 
 // modOf is the newest modtime among the manifest and its tag-files: a
@@ -117,6 +121,13 @@ func projectTagDefs(path string) []runtime.TagDef {
 	return nil
 }
 
+// logixTarget reports whether the manifest governing path declares a
+// Logix deploy target.
+func logixTarget(path string) bool {
+	e := manifestFor(path)
+	return e != nil && e.logix
+}
+
 func manifestFor(path string) *manifestEntry {
 	mpath, ok := findManifest(path)
 	if !ok {
@@ -128,7 +139,7 @@ func manifestFor(path string) *manifestEntry {
 	if hadPrev && prev.mod == modOf(mpath, prev.files) {
 		return prev
 	}
-	tags, defs, files, err := readTags(mpath)
+	tags, defs, files, logix, err := readTags(mpath)
 	if err != nil {
 		// A manifest being edited is invalid for most of the keystrokes it
 		// takes to add a tag. Serving the last good answer beats completion
@@ -139,7 +150,7 @@ func manifestFor(path string) *manifestEntry {
 		}
 		return nil
 	}
-	e := &manifestEntry{mod: modOf(mpath, files), files: files, tags: tags, defs: defs}
+	e := &manifestEntry{mod: modOf(mpath, files), files: files, tags: tags, defs: defs, logix: logix}
 	manifests.entries[mpath] = e
 	return e
 }
@@ -178,11 +189,11 @@ func manifestTagLocation(uri, name string) (Location, bool) {
 
 // readTags returns the manifest's composed tags and the tag-files they came
 // from (as paths, for the cache's modtime check).
-func readTags(mpath string) ([]ProjectTag, []runtime.TagDef, []string, error) {
+func readTags(mpath string) ([]ProjectTag, []runtime.TagDef, []string, bool, error) {
 	dir := filepath.Dir(mpath)
 	m, err := project.ReadManifest(os.DirFS(dir), "")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, false, err
 	}
 	defs, _ := project.TagDefs(m)
 	files := make([]string, 0, len(m.TagFiles))
@@ -210,7 +221,7 @@ func readTags(mpath string) ([]ProjectTag, []runtime.TagDef, []string, error) {
 			Desc: t.Desc,
 		})
 	}
-	return out, defs, files, nil
+	return out, defs, files, m.Target != nil && m.Target.Logix != nil, nil
 }
 
 // iecTypeOf infers a tag's IEC type from its declared initial value. The

@@ -25,7 +25,9 @@
 		insts = [],
 		taken = new Set<string>(),
 		net = undefined,
-		tags = []
+		tags = [],
+		ghostSpot = () => ({ x: 40, y: 40 }),
+		post = postOp
 	}: {
 		open?: boolean;
 		vars?: VarDecl[];
@@ -44,6 +46,10 @@
 		/** The network a band-header click picked (n:K): inserts land at its
 		 * end, a new network goes after it. Unset: the end of the body. */
 		net?: string;
+		/** Where a new ghost chip goes: visible, clear of other ghosts. */
+		ghostSpot?: () => { x: number; y: number };
+		/** Where every op goes (the editor arms an insert's placement). */
+		post?: (op: FbdEditOp) => void;
 	} = $props();
 
 	// What a field completes against: declared tags (optionally comma-lists),
@@ -124,7 +130,7 @@
 			fields: [{ key: 'name', def: 'Tag1', kind: 'tags' }],
 			// A ghost layout entry: the chip exists on the canvas only until a
 			// wire makes it real netlist text.
-			op: (f) => ({ type: 'setLayout', entries: [{ node: 'g:in.' + f.name, x: 40, y: 40 }] })
+			op: (f) => ({ type: 'setLayout', entries: [{ node: 'g:in.' + f.name, ...ghostSpot() }] })
 		},
 		{
 			// With a source (an FB output: lic.CV) it is the coil, written in
@@ -217,7 +223,7 @@
 		// An emptied args field still gets the open pins — a call needs an
 		// argument list to be a block at all.
 		const args = v.args || (known ? openArgs(known) : '');
-		postOp(into({ type: 'insertStatement', text: `${v.inst} : ${v.type}(${args})` }));
+		post(into({ type: 'insertStatement', text: `${v.inst} : ${v.type}(${args})` }));
 		open = false;
 		active = null;
 	}
@@ -235,7 +241,7 @@
 
 	function commit() {
 		if (!active || active.picker) return;
-		postOp(into(active.op ? active.op(values) : { type: 'insertStatement', text: active.build!(values) }));
+		post(into(active.op ? active.op(values) : { type: 'insertStatement', text: active.build!(values) }));
 		open = false;
 		active = null;
 	}

@@ -48,6 +48,6 @@ export { RACK_U_MM, uY, placeDevice, toRack, portMouth, endInRack, cablePath, LA
 export type { RackLayout, RackDevice, Placement } from './rack.js';
 export { meshLayout } from './mesh.js';
 export type { MeshNode, MeshEdge } from './mesh.js';
-export { parseList, portPosition, vlanTable, readPortVlans, vlanText, declaredText, checkVlans, checkAllVlans, vlanFacts, vlanColors, siteVlans, vlanDomains, islandsOf, domainDevices, vlanFloors, VLAN_MARK, VLAN_COLORS, DEFAULT_VLAN_COLOR } from './vlan.js';
+export { parseList, portPosition, vlanTable, readPortVlans, vlanText, declaredText, checkVlans, checkAllVlans, vlanFacts, vlanColors, siteVlans, vlanDomains, ringsOf, islandsOf, domainDevices, vlanFloors, VLAN_MARK, VLAN_COLORS, DEFAULT_VLAN_COLOR } from './vlan.js';
 export type { VlanRow, PortVlans, VlanVerdict, VlanEnd, VlanCheck, DomainLink, VlanDomain, VlanFloor } from './vlan.js';
 export { default as VlanFloors } from './VlanFloors.svelte';

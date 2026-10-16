@@ -257,7 +257,7 @@ func TestWriteStringOnlyToStringTag(t *testing.T) {
 	if rec := postTag(t, srv, `{"name":"SP","value":"fast"}`); rec.Code != 422 {
 		t.Fatalf("string to REAL: %d", rec.Code)
 	}
-	if rec := postTag(t, srv, `{"name":"Nope","value":"x"}`); rec.Code != 422 {
+	if rec := postTag(t, srv, `{"name":"Nope","value":"x"}`); rec.Code != 400 {
 		t.Fatalf("string to no tag: %d", rec.Code)
 	}
 	if got := rt.Tags().All()["SP"]; got != 65.0 {

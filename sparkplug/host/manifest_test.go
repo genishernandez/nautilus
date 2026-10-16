@@ -233,18 +233,40 @@ nodes:
 `,
 		want: `already declares`,
 	}, {
-		name: "arrays unsupported in a binding",
+		name: "writable array binding",
 		src: `
 nodes: [{edgenode: W6}]
-tags: [{ name: W6_A, node: W6, metric: A, type: Double, arraylen: 4 }]
+tags: [{ name: W6_A, node: W6, metric: A, type: Double, arraylen: 4, writable: true }]
 `,
-		want: "arrays unsupported",
+		want: "array writes are not supported",
 	}, {
-		name: "arrays unsupported in a type",
+		name: "array datatype named as the type",
 		src: `
-types: [{name: Motor, fields: [{name: Speeds, type: Double, arraylen: 4}]}]
+nodes: [{edgenode: W6}]
+tags: [{ name: W6_A, node: W6, metric: A, type: Int32Array, arraylen: 4 }]
 `,
-		want: "arrays unsupported",
+		want: "type: Int32, arraylen: N",
+	}, {
+		name: "negative arraylen",
+		src: `
+nodes: [{edgenode: W6}]
+tags: [{ name: W6_A, node: W6, metric: A, type: Double, arraylen: -1 }]
+`,
+		want: "negative",
+	}, {
+		name: "array of templates in a type",
+		src: `
+types:
+  - {name: Motor, fields: [{name: Run, type: Boolean}]}
+  - {name: Line, fields: [{name: Motors, type: Motor, arraylen: 4}]}
+`,
+		want: "no array of templates",
+	}, {
+		name: "array of an unarrayable datatype",
+		src: `
+types: [{name: Motor, fields: [{name: Ids, type: UUID, arraylen: 4}]}]
+`,
+		want: "no array of UUID",
 	}, {
 		name: "duplicate node",
 		src: `
@@ -533,9 +555,9 @@ types:
 		src:  `types: [{name: A, fields: [{name: b, type: DataSet}]}]`,
 		want: "not representable",
 	}, {
-		name: "array member",
-		src:  `types: [{name: A, fields: [{name: b, type: Double, arraylen: 3}]}]`,
-		want: "arrays unsupported",
+		name: "array of templates",
+		src:  `types: [{name: A, fields: [{name: b, type: B, arraylen: 3}]}, {name: B, fields: [{name: x, type: Boolean}]}]`,
+		want: "no array of templates",
 	}}
 
 	for _, tc := range cases {

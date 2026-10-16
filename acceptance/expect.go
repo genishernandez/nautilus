@@ -306,8 +306,8 @@ type Externals map[string]string
 // only the manifest seeds. A struct-typed (UDT/Template) tag declares as
 // its own TYPE name rather than being left out: the project's library .st
 // already declares that TYPE, exprSource composes those libraries ahead of
-// the generated POU, so `WEL15_FIT_001.VALUE < X + 5.0` compiles exactly
-// the way `WEL15_FIT_001.VALUE: {gt: 800}` (the matcher form) already
+// the generated POU, so `ZONE15_FIT_001.VALUE < X + 5.0` compiles exactly
+// the way `ZONE15_FIT_001.VALUE: {gt: 800}` (the matcher form) already
 // worked. Arrays and FB instances still have no place in a VAR_EXTERNAL
 // block generated this way, so they stay left out.
 func ExternalsOf(rt *runtime.Runtime) Externals {

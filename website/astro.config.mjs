@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import { RUNTIME_LISTED } from './src/lib/runtime-listed.mjs';
 
 // The VS Code extension's TextMate grammars, reused as-is so IEC code blocks
 // highlight the way they do in the editor. Fence tags: iecst, iecld, iecfbd,
@@ -88,6 +89,7 @@ export default defineConfig({
             { label: 'Component', link: '/verified/component/' },
             { label: 'Commands', link: '/verified/commands/' },
             { label: 'Other claims', link: '/verified/other/' },
+            ...(RUNTIME_LISTED ? [{ label: 'Runtime', link: '/verified/runtime/' }] : []),
           ],
         },
       ],

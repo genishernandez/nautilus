@@ -236,7 +236,7 @@ func runCheck(args []string) int {
 			}
 			return 1
 		}
-		res := compileFile(source, prelude, segs, tags)
+		res := compileFile(source, prelude, segs, tags, project.PeersFor(f, nil, libSources)...)
 		if res.failed {
 			if res.inLib {
 				libErrs = append(libErrs, res.lib)
@@ -261,6 +261,15 @@ func runCheck(args []string) int {
 			fmt.Printf("%s:%d:%d: warning: local %s shadows the project tag %s — "+
 				"this program reads and writes its own %s, not the tag; rename it, "+
 				"or drop the declaration to use the tag\n", f, line, col, vd.Name, vd.Name, vd.Name)
+		}
+		// An FB instance named like a FUNCTION hides it in that POU (#336).
+		for _, sh := range st.InstancesShadowingFunctions(res.prog, res.composed) {
+			blankWarns++
+			line, col := mapLine(sh.Decl.Pos.Line), sh.Decl.Pos.Col
+			if lineMap != nil {
+				col = 1
+			}
+			fmt.Printf("%s:%d:%d: warning: %s\n", f, line, col, sh.Message())
 		}
 		// The target's rules run on a file that compiles: the same
 		// lowering `naut logix write` uses, so what passes here writes.
@@ -321,19 +330,19 @@ func runCheck(args []string) int {
 
 // checkLogixTarget reports every construct in one source file that the
 // Allen-Bradley writer (logix/writer) cannot express, in the same
-// gcc-style lines as a compile error. Only ladder is in the v1 subset; a
-// file in another language is one diagnostic naming the phase that adds
-// it. Returns true when anything was reported.
+// gcc-style lines as a compile error. Ladder and ST programs are in the
+// subset; a program in another language is one diagnostic naming the
+// phase that adds it. Returns true when anything was reported. The editor
+// runs the same check (internal/lsp/logix.go); the two must agree.
 func checkLogixTarget(f, source string, libs []string) bool {
+	// A library, in any language, is checked where a program uses it: the
+	// writer checks the types and blocks a program actually reaches.
+	if !stproject.DeclaresProgram(source) {
+		return false
+	}
 	if writer.Language(f) == "" {
 		fmt.Printf("%s: logix target: only ladder (.ld) and structured text (.st) programs are in the Logix subset; FBD and SFC come later\n", f)
 		return true
-	}
-	// A library of TYPE declarations (and constants) is fine: the writer
-	// checks the types a program actually uses. A library of blocks is
-	// refused where a program uses one.
-	if strings.EqualFold(filepath.Ext(f), ".st") && !stproject.DeclaresProgram(source) {
-		return false
 	}
 	diags, err := writer.CheckProgram(f, source, libs...)
 	if err != nil {
@@ -604,6 +613,9 @@ type checkResult struct {
 	inLib bool
 	lib   libErr
 	prog  *st.Program // the file's own parse, when it compiled
+	// composed is the library prelude and the file parsed together (prog
+	// when there is no prelude).
+	composed *st.Program
 }
 
 // compileFile runs the same parse+lower pipeline as the LSP: the prelude
@@ -611,7 +623,10 @@ type checkResult struct {
 // the project's tags are in scope as the runtime puts them there
 // (runtime.ResolveTagScope). Positions in src are reported in src's
 // coordinates; an error inside the prelude is attributed to its library.
-func compileFile(src, prelude string, segs []stproject.Segment, tags []runtime.TagDef) checkResult {
+//
+// peers are the project's programs (project.PeersFor): a reference to
+// another task's variable is then explained, as runtime.New explains it.
+func compileFile(src, prelude string, segs []stproject.Segment, tags []runtime.TagDef, peers ...st.PeerProgram) checkResult {
 	prog, err := st.Parse(src)
 	if err != nil {
 		// Anchor on the parser-reported position (shared with the LSP via
@@ -634,6 +649,7 @@ func compileFile(src, prelude string, segs []stproject.Segment, tags []runtime.T
 		scope, _ := runtime.ResolveTagScope(tags, types)
 		opts = scope.LowerOpts()
 	}
+	opts.Peers = peers
 	if _, err := st.LowerWithOpts(lowerProg, opts); err != nil {
 		pos := st.Pos{Line: 1, Col: 1}
 		msg := err.Error()
@@ -658,7 +674,7 @@ func compileFile(src, prelude string, segs []stproject.Segment, tags []runtime.T
 		}
 		return checkResult{failed: true, msg: msg, pos: pos}
 	}
-	return checkResult{prog: prog}
+	return checkResult{prog: prog, composed: lowerProg}
 }
 
 // inLibDir reports whether f lies under the lib/ directory of a manifest

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/joyautomation/nautilus/lang/l5x"
 	"github.com/joyautomation/nautilus/lang/ld"
 )
 
@@ -180,8 +181,17 @@ func captureStdout(t *testing.T, fn func() int) string {
 // the Logix target, which is the point of a brownfield import.
 func TestLogixImportProject(t *testing.T) {
 	dir := t.TempDir()
-	if code := runLogixImport([]string{"--project", dir, filepath.Join("..", "..", "lang", "l5x", "testdata", "demoline.L5X")}); code != 0 {
+	var code int
+	out := captureStdout(t, func() int {
+		code = runLogixImport([]string{"--project", dir, filepath.Join("..", "..", "lang", "l5x", "testdata", "demoline.L5X")})
+		return code
+	})
+	if code != 0 {
 		t.Fatalf("exit %d", code)
+	}
+	// The summary counts in words: one routine is not "1 ladder routines".
+	if want := "1 ladder routine, 1 complete; 2 rungs, 2 carried\n"; !strings.Contains(out, want) {
+		t.Errorf("summary: want %q in\n%s", want, out)
 	}
 	for _, name := range []string{"nautilus.yaml", "tags/logix.yaml", "MainProgram.ld"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
@@ -194,5 +204,80 @@ func TestLogixImportProject(t *testing.T) {
 	}
 	if code := runCheck([]string{"--target", "logix", dir}); code != 0 {
 		t.Errorf("naut check --target logix exit %d", code)
+	}
+}
+
+// LGA-053: the round trip with the rack. `naut logix import --project`
+// of an export with I/O modules writes hardware.L5X and names it in the
+// manifest; `naut logix write` of the project carries the export's
+// <Modules> back unchanged with the alias tags on them; a module the
+// hardware lacks stops the write naming it, and a hardware file that
+// cannot be read stops it too.
+func TestLogixImportHardwareRoundTrip(t *testing.T) {
+	export := filepath.Join("..", "..", "lang", "l5x", "testdata", "ioline.L5X")
+	dir := t.TempDir()
+	var code int
+	captureStdout(t, func() int {
+		code = runLogixImport([]string{"--project", dir, export})
+		return code
+	})
+	if code != 0 {
+		t.Fatalf("import: exit %d", code)
+	}
+	man, _ := os.ReadFile(filepath.Join(dir, "nautilus.yaml"))
+	if !strings.Contains(string(man), "hardware: hardware.L5X") {
+		t.Fatalf("manifest:\n%s", man)
+	}
+	out := filepath.Join(t.TempDir(), "back.L5X")
+	prog := filepath.Join(dir, "MainProgram.ld")
+	msg, code := captureStderr(t, func() int { return runLogixWrite([]string{"-o", out, prog}) })
+	if code != 0 {
+		t.Fatalf("write: exit %d\n%s", code, msg)
+	}
+	if strings.Contains(msg, "warning") {
+		t.Errorf("a project with hardware should not warn about its Local module:\n%s", msg)
+	}
+	orig, err := l5x.ParseFile(export)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := l5x.ParseFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Controller.ModulesXML != strings.ReplaceAll(orig.Controller.ModulesXML, "\r\n", "\n") {
+		t.Errorf("<Modules> did not survive the round trip:\n%s", back.Controller.ModulesXML)
+	}
+	alias := map[string]string{}
+	for _, tg := range back.Controller.Tags {
+		alias[tg.Name] = tg.AliasFor
+	}
+	for _, tg := range orig.Controller.Tags {
+		if tg.AliasFor != "" && alias[tg.Name] != tg.AliasFor {
+			t.Errorf("%s aliases %q, want %q", tg.Name, alias[tg.Name], tg.AliasFor)
+		}
+	}
+
+	// An alias moved to a slot the rack does not have.
+	tags := filepath.Join(dir, "tags", "logix.yaml")
+	tf, _ := os.ReadFile(tags)
+	if err := os.WriteFile(tags, []byte(strings.Replace(string(tf), `"Local:2:O.Data.0"`, `"Local:5:O.Data.0"`, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout := captureStdout(t, func() int {
+		_, code = captureStderr(t, func() int { return runLogixWrite([]string{"-o", out, prog}) })
+		return code
+	})
+	if code != 1 || !strings.Contains(stdout, "RunCmd is an alias of Local:5:O.Data.0, and hardware.L5X has no module in slot 5 of the controller's chassis (Local)") || !strings.Contains(stdout, "[logix/io-module]") {
+		t.Errorf("exit %d\n%s", code, stdout)
+	}
+
+	// A hardware file that is not one.
+	if err := os.WriteFile(filepath.Join(dir, "hardware.L5X"), []byte("<RSLogix5000Content><Controller Name=\"X\"/></RSLogix5000Content>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg, code = captureStderr(t, func() int { return runLogixWrite([]string{"-o", out, prog}) })
+	if code != 2 || !strings.Contains(msg, "target.logix.hardware: hardware.L5X: no <Modules> section") {
+		t.Errorf("exit %d\n%s", code, msg)
 	}
 }

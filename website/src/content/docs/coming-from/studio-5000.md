@@ -10,9 +10,7 @@ nautilus ladder is the IEC 61131-3 grammar written as text, so most Logix
 habits carry over one for one and a few have a different shape. This page is
 the map. Read the [ladder page](/languages/ladder/) for the full grammar.
 
-Rows marked **(in review)** are in [pull request
-#225](https://github.com/joyautomation/nautilus/pull/225) and become
-available when it merges. Rows marked **declined** are not coming; the
+Rows marked **declined** are not coming; the
 section after the tables says why and what to do instead, and the same list
 is on [Not supported, by design](/languages/not-supported/).
 
@@ -55,7 +53,7 @@ millisecond `DINT`.
 | `t.PRE` | `PT` | bound at the call, or any `TIME` expression |
 | `TOF t` | `t:TOF(PT := T#5S)` | `Q` stays TRUE for `PT` after `IN` drops |
 | `RTO t` | no retentive timer block | see below |
-| `RES t` (timer) | `t:TONR(PT := T#5S, Reset := Clear)` **(in review)** | needs `dialect: logix` in `nautilus.yaml`; clears `ET` and `Q` while `Reset` is TRUE |
+| `RES t` (timer) | `t:TONR(PT := T#5S, Reset := Clear)` | needs `dialect: logix` in `nautilus.yaml`; clears `ET` and `Q` while `Reset` is TRUE |
 | `CTU c PRE 10` | `c:CTU(PV := 10, R := ResetC)` | rung power is `CU`; counts rising edges |
 | `c.DN` | `c.Q` | |
 | `c.ACC` | `c.CV` | |
@@ -69,7 +67,7 @@ Two semantic differences are worth knowing before you port logic:
   the preset the other way round, so re-derive the done condition rather
   than translating the bit.
 - There is no `RTO` block. A retentive timer is an accumulator you write
-  yourself: in a rung with an assignment **(in review)**,
+  yourself: in a rung with an assignment,
   `Run { Hours := Hours + ScanDt }`, or in an ST block, and cleared by a
   reset rung.
 
@@ -80,19 +78,19 @@ Two semantic differences are worth knowing before you port logic:
 | `EQU A B` | `EQ(A, B)` | a function contact; `/EQ(A, B)` negates |
 | `NEQ`, `GRT`, `GEQ`, `LES`, `LEQ` | `NE`, `GT`, `GE`, `LT`, `LE` | the diagram captions follow the IEC names |
 | `LIM Low Test High` | `GE(Test, Low) LE(Test, High)` | two contacts in series. The IEC `LIMIT(MN, IN, MX)` clamps a value, it does not test one, so it is the wrong spelling for this |
-| `MOV Src Dest` | `{ Dest := Src }` **(in review)** | made while the rung has power; power passes through |
-| `CPT Dest Expr` | `{ Dest := Expr }` **(in review)** | any IEC expression, evaluated every scan |
-| `ADD`, `SUB`, `MUL`, `DIV`, `MOD`, `NEG`, `ABS` | `{ Sum := A + B }` and the matching operators **(in review)** | until then, an ST program or block does the arithmetic |
-| bit of a `DINT` (`Status.3`) | `Status.3` **(in review)** | a BOOL, readable and assignable; bit 0 is least significant |
+| `MOV Src Dest` | `{ Dest := Src }` | made while the rung has power; power passes through |
+| `CPT Dest Expr` | `{ Dest := Expr }` | any IEC expression, evaluated every scan |
+| `ADD`, `SUB`, `MUL`, `DIV`, `MOD`, `NEG`, `ABS` | `{ Sum := A + B }` and the matching operators | inside an assignment, or as a function in a comparison |
+| bit of a `DINT` (`Status.3`) | `Status.3` | a BOOL, readable and assignable; bit 0 is least significant |
 
 Ladder power is boolean, so a numeric function is not a contact on its own.
 `ADD(A, B)` goes inside a comparison, `GE(ADD(Base, Bias), Limit)`, or into
-an assignment once #225 lands.
+an assignment.
 
 The assignment is one element in the rung's text, `{ Dest := Expr }`, with
-power passing straight through. Until #225 merges, put the math in an ST
-program that shares the tag store with the ladder one; that is the pattern
-the demo project uses.
+power passing straight through. Longer math can live in an ST program that
+shares the tag store with the ladder one; that is the pattern the demo
+project uses.
 
 ## Subroutines and Add-On Instructions
 
@@ -118,7 +116,7 @@ and tasks](/guides/blocks-and-tasks/).
 | controller-scope tag | an entry in `nautilus.yaml` or `tags/*.yaml`, in scope in every program as it is |
 | a tag's Data Type | the tag's `type:` — `BOOL`, `DINT`, `REAL`, `TIME`, a UDT, an `ARRAY` |
 | program-scope tag | `VAR` in the program |
-| alias tag, rack point | the tag's `alias:` field, `dialect: logix` **(in review)** |
+| alias tag, rack point | the tag's `alias:` field, `dialect: logix` |
 | task, program | `tasks:` in `nautilus.yaml`, one program file per task |
 | UDT | `TYPE … STRUCT … END_STRUCT` |
 | tag description | the tag's `desc:` (the diagram does not show it on the element yet, [#216](https://github.com/joyautomation/nautilus/issues/216)) |

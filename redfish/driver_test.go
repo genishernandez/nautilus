@@ -539,6 +539,18 @@ func TestPollFetchesOnceDecodesAllAndRates(t *testing.T) {
 	if _, ok := updates(res)["S.PowerW"]; ok {
 		t.Fatal("a rate across an outage")
 	}
+	// Back from a park: no poll failed, but the source loop's OnReconnect
+	// still drops the history.
+	res, _ = d.poll(ctx, "S", hw.DefaultClass)
+	if _, ok := updates(res)["S.PowerW"]; !ok {
+		t.Fatal("no rate on the second poll after the outage")
+	}
+	d.onReconnect("S")
+	f.bodies["/redfish/v1/Chassis/1/Sensors/Energy"] = `{"Reading": 1500}`
+	res, _ = d.poll(ctx, "S", hw.DefaultClass)
+	if _, ok := updates(res)["S.PowerW"]; ok {
+		t.Fatal("a rate across a park")
+	}
 
 	// A value the binding's map does not know: logged, member left alone.
 	f.bodies["/redfish/v1/Chassis/1/Thermal"] = `{"Temperatures": [], "Fans": [{"MemberId": "0", "Reading": 2000, "Status": {"State": "Quiesced"}}]}`

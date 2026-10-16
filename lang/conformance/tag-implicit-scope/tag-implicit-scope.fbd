@@ -1,0 +1,8 @@
+PROGRAM ScopeFbd
+(* No VAR_EXTERNAL: the network wires manifest tags directly. *)
+FBD
+  fbd_On  := Run
+  fbd_Out := MUL(Gain, 2.0)
+  fbd_N   := ADD(Cnt, 1)
+END_FBD
+END_PROGRAM

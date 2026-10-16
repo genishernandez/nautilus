@@ -99,10 +99,16 @@ Series elements AND together and branch legs OR, so
 `Run := AND(OR(Start, Run), NOT Stop)`. That is the seal-in: Start energizes
 Run, Run's own contact holds it in, Stop drops it out.
 
-Coils sit at the right end of a rung. A rung needs at least one coil or a
-function block as its last element: `A B t1:TON(PT := T#5S)` is a complete
-rung whose only output is `t1.Q`, read elsewhere. Several coils share one
-condition, evaluated once and fanned out. A rung with only a coil is driven
+Coils sit at the right end of a rung. A rung needs at least one coil,
+function block or assignment. A block can sit anywhere in the rung: power
+continues from its output pin, so `A t1:TON(PT := T#5S) B ( Lamp )` sets
+`Lamp` to `t1.Q AND B`. Without a coil the rung ends at its last block, so
+`A B t1:TON(PT := T#5S)` is a complete rung whose only output is `t1.Q`, read
+elsewhere; anything after that block would drive nothing and is an error.
+Several coils share one
+condition, evaluated once and fanned out. (When a coil writes a tag the
+condition reads, as in `/Lamp ( Lamp ) ( Horn )`, the condition is held in a
+generated BOOL, `<rung>__power`, which shows among the program's locals.) A rung with only a coil is driven
 by the rail, so `( AlwaysOn )` assigns TRUE. Rungs evaluate
 top to bottom within a scan, so a coil written on one rung reads back as a
 contact on the next rung in the same scan.
@@ -220,6 +226,10 @@ resolve through the Go compiler into minimal text edits:
   next name (`m1` → `m2`) and its block instances renamed the same way.
 
   <Clip id="ld_add_branch" />
+- A multi-leg OR in one step: Ctrl- or Shift-click several elements of one
+  series and press `O` (or the toolbar's **OR**). They become one branch
+  with a leg each, `a b c` → `[ a | b | c ]`. A branch selects as a whole
+  when you click its rails; `O` then adds a leg, and `Del` deletes it.
 - Drag an element to reorder it or move it to another rung. A contact
   dropped in the coil zone is refused, and so is a coil dropped mid-series.
 

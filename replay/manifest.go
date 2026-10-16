@@ -9,7 +9,9 @@
 // The recording is read when the driver starts, not when it is built, so
 // `naut check` and `naut build` pass where the recording is absent (CI, a
 // public checkout of an example whose data is private): until it loads,
-// the driver reports the error and its tags read NotConnected.
+// the driver reports the error and its tags read NotConnected, and it
+// looks again every few seconds — a recording that appears, or is fixed
+// in place, is picked up without a restart.
 package replay
 
 import (
@@ -30,7 +32,7 @@ import (
 const (
 	TagSpeed = "Replay_Speed" // REAL: recorded seconds per wall second (1 = real time)
 	TagPause = "Replay_Pause" // BOOL: hold the clock
-	TagSeek  = "Replay_SeekS" // DINT: unix seconds; a change jumps the clock there
+	TagSeek  = "Replay_SeekS" // DINT: unix seconds; a change jumps the clock there, 0 re-arms (a pulse)
 	TagAt    = "Replay_At"    // DINT: unix seconds, the recorded moment being delivered
 	TagFrom  = "Replay_From"  // DINT: unix seconds, where the loop starts
 	TagTo    = "Replay_To"    // DINT: unix seconds, where it wraps

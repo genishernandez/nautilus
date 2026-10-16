@@ -1,5 +1,23 @@
 # Changelog — @joyautomation/nautilus-hmi
 
+## 0.7.1 — 2026-10-14 (patch)
+
+### Fixed
+
+- **Anchored pipe ends land where the mimic editor draws them.** `<Mimic>`
+  measures each equipment's box to place its ports, and a bare inline
+  `<svg>` leaves a few pixels of descender space under it, so the measured
+  box was taller than the drawing and every anchored end sat a little low:
+  a jog into a pump's inlet, a tilt out of a valve, where the editor drew a
+  straight run. Equipment SVGs now render `display: block` inside `<Mimic>`,
+  the rule the editor already had.
+
+### Changed
+
+- **Doc comments use generic example names.** The examples in `tags.ts`,
+  `confirm.ts` and the other modules' comments now use synthetic tag names
+  (`ZONE15_FIT_001`) and a generic operator (`operator1`). No code change.
+
 ## 0.7.0 — 2026-10-04 (minor: additive, no breaking changes)
 
 ### Added

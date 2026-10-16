@@ -226,8 +226,9 @@ func registerConversions() {
 }
 
 // sourceConvType is the conversion-table type a value of t converts from:
-// its declared elementary type; an expression's undeclared-width integer
-// (a + b) as LINT, which keeps every bit; an enumeration as its integer.
+// its declared elementary type; an expression's integer (a + b, typed to
+// its operands' common width but never wrapped to it) as LINT, which keeps
+// every bit; an enumeration as its integer.
 func sourceConvType(t *Type) (convType, bool) {
 	if t == nil {
 		return convType{}, false
@@ -236,7 +237,7 @@ func sourceConvType(t *Type) (convType, bool) {
 	case TypeBool:
 		return convTypeNamed("BOOL")
 	case TypeInt:
-		if t.Enum != nil || t.Name == "" {
+		if t.Enum != nil || t.Name == "" || t.Computed {
 			return convTypeNamed("LINT")
 		}
 		return convTypeNamed(t.Name)

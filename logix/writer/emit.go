@@ -23,22 +23,51 @@ func emit(lw *lowered, o Options) []byte {
 	w(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
 	w(`<RSLogix5000Content SchemaRevision="1.0" SoftwareRevision="%s" TargetName="%s" TargetType="Controller" ContainsContext="false" Owner="nautilus" ExportDate="%s" ExportOptions="References NoRawData L5KData DecoratedData Context Dependencies ForceProtectedEncoding AllProjDocTrans">`,
 		attr(o.SoftwareRevision), attr(o.Controller), attr(o.ExportDate))
-	w(`<Controller Use="Target" Name="%s" ProcessorType="%s" MajorRev="%s" MinorRev="%s" ProjectCreationDate="(pinned)" LastModifiedDate="(pinned)" SFCExecutionControl="CurrentActive" SFCRestartPosition="MostRecent" SFCLastScan="DontScan" ProjectSN="16#0000_0000" MatchProjectToController="false" CanUseRPIFromProducer="false" InhibitAutomaticFirmwareUpdate="0" PassThroughConfiguration="EnabledWithAppend" DownloadProjectDocumentationAndExtendedProperties="true" DownloadProjectCustomProperties="true" ReportMinorOverflow="false" AutoDiagsEnabled="true" WebServerEnabled="false">`,
-		attr(o.Controller), attr(o.ProcessorType), attr(o.MajorRev), attr(o.MinorRev))
-	w(`<RedundancyInfo Enabled="false" KeepTestEditsOnSwitchOver="false"/>`)
+	// The processor's own Local module and family where Logix Designer's
+	// export showed them, else the 1756-L85E's (LocalModuleWarning, #373).
+	lm, _ := localModuleFor(o.ProcessorType)
+	fam := lm.Family
+	// The family's <Controller> attributes, in the export's order.
+	timeSlice, tail, redundancy := "", ` AutoDiagsEnabled="true" WebServerEnabled="false"`, ""
+	if fam.TimeSlice {
+		timeSlice, tail = ` TimeSlice="20" ShareUnusedTimeSlice="1"`, ""
+		redundancy = ` IOMemoryPadPercentage="90" DataTablePadPercentage="50"`
+	}
+	if fam.EtherNetIPMode != "" {
+		tail = fmt.Sprintf(` EtherNetIPMode="%s"`, attr(fam.EtherNetIPMode)) + tail
+	}
+	w(`<Controller Use="Target" Name="%s" ProcessorType="%s" MajorRev="%s" MinorRev="%s"%s ProjectCreationDate="(pinned)" LastModifiedDate="(pinned)" SFCExecutionControl="CurrentActive" SFCRestartPosition="MostRecent" SFCLastScan="DontScan" ProjectSN="16#0000_0000" MatchProjectToController="false" CanUseRPIFromProducer="false" InhibitAutomaticFirmwareUpdate="0" PassThroughConfiguration="EnabledWithAppend" DownloadProjectDocumentationAndExtendedProperties="true" DownloadProjectCustomProperties="true" ReportMinorOverflow="false"%s>`,
+		attr(o.Controller), attr(o.ProcessorType), attr(o.MajorRev), attr(o.MinorRev), timeSlice, tail)
+	w(`<RedundancyInfo Enabled="false" KeepTestEditsOnSwitchOver="false"%s/>`, redundancy)
 	w(`<Security Code="0" ChangesToDetect="16#ffff_ffff_ffff_ffff"/>`)
 	w(`<SafetyInfo/>`)
 	if types := lw.usedTypesInOrder(); len(types) > 0 {
 		w(`<DataTypes>`)
 		for _, u := range types {
 			w(`<DataType Name="%s" Family="NoFamily" Class="User">`, attr(u.Name))
+			if u.Desc != "" {
+				w(`<Description>`)
+				w(`%s`, cdata(u.Desc))
+				w(`</Description>`)
+			}
 			w(`<Members>`)
 			for _, m := range u.Members {
-				switch {
-				case m.Struct != nil:
-					w(`<Member Name="%s" DataType="%s" Dimension="%d" Radix="NullType" Hidden="false" ExternalAccess="Read/Write"/>`, attr(m.Name), m.DataType, m.Dim)
-				default:
-					w(`<Member Name="%s" DataType="%s" Dimension="%d" Radix="%s" Hidden="false" ExternalAccess="Read/Write"/>`, attr(m.Name), m.DataType, m.Dim, radixOf(m.DataType))
+				radix := radixOf(m.DataType)
+				if m.Struct != nil {
+					radix = "NullType"
+				}
+				// A member with a description is the element form Logix
+				// exports: the <Description> inside, then </Member>.
+				end := "/>"
+				if m.Desc != "" {
+					end = ">"
+				}
+				w(`<Member Name="%s" DataType="%s" Dimension="%d" Radix="%s" Hidden="false" ExternalAccess="Read/Write"%s`, attr(m.Name), m.DataType, m.Dim, radix, end)
+				if m.Desc != "" {
+					w(`<Description>`)
+					w(`%s`, cdata(m.Desc))
+					w(`</Description>`)
+					w(`</Member>`)
 				}
 			}
 			w(`</Members>`)
@@ -48,20 +77,27 @@ func emit(lw *lowered, o Options) []byte {
 	} else {
 		w(`<DataTypes/>`)
 	}
-	w(`<Modules>`)
-	w(`<Module Name="Local" CatalogNumber="%s" Vendor="1" ProductType="14" ProductCode="168" Major="%s" Minor="%s" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
-		attr(o.ProcessorType), attr(o.MajorRev), attr(o.MinorRev))
-	w(`<EKey State="Disabled"/>`)
-	w(`<Ports>`)
-	w(`<Port Id="1" Address="0" Type="ICP" Upstream="false">`)
-	w(`<Bus Size="17"/>`)
-	w(`</Port>`)
-	w(`<Port Id="2" Type="Ethernet" Upstream="false">`)
-	w(`<Bus/>`)
-	w(`</Port>`)
-	w(`</Ports>`)
-	w(`</Module>`)
-	w(`</Modules>`)
+	if h := o.Hardware; h != nil {
+		// The project's own I/O configuration, as its L5X has it.
+		w(`%s`, h.modulesXML())
+	} else {
+		w(`<Modules>`)
+		w(`<Module Name="Local" CatalogNumber="%s" Vendor="1" ProductType="%s" ProductCode="%s" Major="%s" Minor="%s" ParentModule="Local" ParentModPortId="1" Inhibited="false" MajorFault="true">`,
+			attr(o.ProcessorType), lm.ProductType, lm.ProductCode, attr(o.MajorRev), attr(o.MinorRev))
+		w(`<EKey State="Disabled"/>`)
+		w(`<Ports>`)
+		w(`<Port Id="1" Address="0" Type="%s" Upstream="false">`, fam.Backplane)
+		w(`<Bus Size="%d"/>`, lm.BusSize)
+		w(`</Port>`)
+		for _, id := range fam.EthernetPortIDs {
+			w(`<Port Id="%d" Type="Ethernet" Upstream="false">`, id)
+			w(`<Bus/>`)
+			w(`</Port>`)
+		}
+		w(`</Ports>`)
+		w(`</Module>`)
+		w(`</Modules>`)
+	}
 	emitAOIs(&b, lw, o)
 	emitTags(&b, lw.ctrlTags)
 	w(`<Programs>`)
@@ -144,7 +180,9 @@ func emit(lw *lowered, o Options) []byte {
 	w(`<Trends/>`)
 	w(`<TimeSynchronize Priority1="128" Priority2="128" PTPEnable="false"/>`)
 	w(`<EthernetPorts>`)
-	w(`<EthernetPort Port="1" Label="1" PortEnabled="true"/>`)
+	for i, label := range fam.EthernetLabels {
+		w(`<EthernetPort Port="%d" Label="%s" PortEnabled="true"/>`, i+1, label)
+	}
 	w(`</EthernetPorts>`)
 	w(`</Controller>`)
 	w(`</RSLogix5000Content>`)

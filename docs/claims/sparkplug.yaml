@@ -1,0 +1,268 @@
+page: website/src/content/docs/guides/sparkplug.md
+title: Publishing to MQTT (Sparkplug B)
+prefix: SPB
+claims:
+  - id: SPB-001
+    claim: >-
+      The node's birth certificate (NBIRTH) lists the whole tag store with
+      names, types and current values, and each tag's `unit:` and `desc:`
+      arrive as the `engUnit` and `documentation` metric properties,
+      including on template members.
+    source: "#"
+    tests:
+      - go ./sparkplug TestBirthStatesUnitAndDescAsProperties
+      - go ./sparkplug TestBirthListsTheWholeTagStoreWithTypesAndValues
+      - go ./sparkplug TestPropertiesRoundTrip
+      - go ./sparkplug TestTCKConformance
+  - id: SPB-002
+    claim: >-
+      Types map faithfully: BOOL to Boolean, integers to Int64, REAL to
+      Double, UDT to Template.
+    source: "#"
+    tests:
+      - go ./sparkplug TestFaithfulTypingFromIR
+      - go ./sparkplug TestStructToTemplate
+  - id: SPB-003
+    claim: >-
+      A host can write the tags `writable:` names back via NCMD: a scalar
+      command overwrites the tag in the store for the program to act on.
+    source: "#"
+    tests:
+      - go ./sparkplug TestWriteGateOpensMatchingTagsOnly
+      - go ./sparkplug TestCommandScalarStillReplaces
+  - id: SPB-005
+    claim: >-
+      `Node Control/Rebirth` is honored: the node answers the command with
+      a fresh NBIRTH.
+    source: "#"
+    tests:
+      - go ./sparkplug TestTCKConformance
+      - go ./sparkplug TestRebirthCommandStopsDataUntilTheNBIRTH
+  - id: SPB-006
+    claim: >-
+      Only `broker` and `group-id` are required.
+    source: "#"
+    tests:
+      - go ./internal/project TestSparkplugConfig
+      - go ./internal/project TestSparkplugOnlyBrokerAndGroupIDAreRequired
+  - id: SPB-007
+    claim: >-
+      The password is never read from the manifest: it comes from
+      `NAUTILUS_MQTT_PASSWORD`.
+    source: "#"
+    tests:
+      - go ./internal/project TestSparkplugPasswordComesFromTheEnvironment
+  - id: SPB-008
+    claim: >-
+      `ssl://host:8883` brokers connect over TLS.
+    source: "#"
+    tests:
+      - go ./sparkplug TestEdgeNodeConnectsOverTLS
+  - id: SPB-009
+    claim: >-
+      `edge-node` defaults to the project name.
+    source: "#"
+    tests:
+      - go ./internal/project TestSparkplugEdgeNodeDefaultsToTheProjectName
+  - id: SPB-010
+    claim: >-
+      `deadband` publishes a numeric only when it moved more than that in
+      absolute units; zero publishes on any change.
+    source: "#publish-classes"
+    tests:
+      - go ./sparkplug TestRBEDeadbandAndHeartbeat
+      - go ./sparkplug TestRBEZeroDeadbandPublishesAnyChange
+      - go ./sparkplug TestRBEDeadbandOnStructMembers
+      - go ./sparkplug TestRBEDeadbandOnNestedStruct
+      - go ./internal/project TestSparkplugManifestClassesReachTheNode
+  - id: SPB-011
+    claim: >-
+      `min-interval` means never publishing more often than that, even on
+      change.
+    source: "#publish-classes"
+    tests:
+      - go ./sparkplug TestRBEDeadbandAndHeartbeat
+      - go ./sparkplug TestRBEMinIntervalStillAppliesToStructs
+      - go ./internal/project TestSparkplugManifestClassesReachTheNode
+  - id: SPB-012
+    claim: >-
+      `max-interval` publishes at least that often even when the value is
+      unchanged (heartbeat).
+    source: "#publish-classes"
+    tests:
+      - go ./sparkplug TestRBEDeadbandAndHeartbeat
+      - go ./sparkplug TestShouldPublishSampleGeneration
+      - go ./internal/project TestSparkplugManifestClassesReachTheNode
+  - id: SPB-013
+    claim: >-
+      `every-change: true` publishes every transition unconditionally,
+      ignoring deadband and rate limits, while an unchanged sample stays
+      quiet.
+    source: "#publish-classes"
+    tests:
+      - go ./sparkplug TestRBEDisableAndBoolChange
+      - go ./internal/project TestSparkplugManifestClassesReachTheNode
+    note: >-
+      TestRBEDisableAndBoolChange: a transition inside min-interval publishes
+      and an unchanged sample stays quiet.
+      TestSparkplugManifestClassesReachTheNode: a 0.001 move under a 100
+      deadband, inside a 1 h min-interval, publishes.
+  - id: SPB-014
+    claim: >-
+      `metric-classes` assigns tags to a named class by glob, and every tag
+      unassigned uses `default-class`.
+    source: "#publish-classes"
+    tests:
+      - go ./sparkplug TestClassResolution
+  - id: SPB-015
+    claim: >-
+      Every field connection publishes as its own Sparkplug device under
+      the edge node, carrying the input tags it delivers (its `__Online`
+      companion included); computed tags, program state, outputs and every
+      tag of the `memory` loopback publish at node level.
+    source: "#devices-and-connection-health"
+    tests:
+      - go ./sparkplug TestMetricsSplitBetweenDevicesAndTheNode
+      - go ./internal/project TestSparkplugDevicePerConnection
+      - go ./internal/project TestSparkplugMemoryMakesNoDevice
+    partial: true
+    note: >-
+      One device per connection carrying its inputs and `__Online`, the
+      memory loopback making none, and tags outside a device's list riding
+      the NBIRTH are asserted. That outputs publish at node level is not, and
+      the code disagrees for modbus: a writable binding that is also polled
+      (not `writeonly`) is listed in its source's Connections() inputs, so
+      that output rides the device. TestMetricsSplitBetweenDevicesAndTheNode
+      only shows the node honouring the device lists it is handed.
+  - id: SPB-016
+    claim: >-
+      A device's DBIRTH/DDEATH follow its connection's health: when one
+      link drops the host sees that device die rather than stale values,
+      while every other device stays born.
+    source: "#devices-and-connection-health"
+    tests:
+      - go ./sparkplug TestOneDeviceDyingLeavesTheOthersBorn
+      - go ./sparkplug TestDeviceBirthWaitsForFirstRead
+  - id: SPB-017
+    claim: >-
+      With `primary-host` set, the node defers its birth until the host's
+      STATE is ONLINE, and both the 2.x (plain ONLINE/OFFLINE) and 3.0 (JSON)
+      STATE encodings are accepted. By default (`primary-host-offline:
+      buffer`), when the host goes offline the node stays connected and born
+      (no NDEATH) and stops publishing data, which is buffered and replayed
+      as historical with store-forward and not sent without it.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestParseState
+      - go ./sparkplug TestPrimaryHostDefersTheBirthUntilOnline
+      - go ./sparkplug TestNoPrimaryHostBirthsOnConnect
+      - go ./sparkplug TestStoreForwardBuffersWhileThePrimaryHostIsOffline
+      - go ./sparkplug TestPrimaryHostOfflineWithoutStoreForwardSendsNothing
+      - go ./sparkplug TestPrimaryHostOfflineDefaultKeepsTheSession
+  - id: SPB-026
+    claim: >-
+      With `primary-host-offline: disconnect`, when the host goes offline the
+      node publishes NDEATH (the ending session's bdSeq) before a clean
+      disconnect, connects again with the next bdSeq, and births only once
+      the host is ONLINE again; with store-forward it buffers meanwhile and
+      replays as historical after the new birth. An offline STATE older than
+      the last online one is ignored. The key needs `primary-host`.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestPrimaryHostOfflineDisconnectEndsTheSession
+      - go ./sparkplug TestHostOfflineDisconnectDoesNotBirthWhileTheHostIsOffline
+      - go ./internal/project TestSparkplugPrimaryHostOffline
+  - id: SPB-018
+    claim: >-
+      With `store-forward: N`, data messages are buffered while the broker
+      is unreachable (or the primary host is offline) and replayed, marked
+      historical, once delivery resumes.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestStoreForwardBuffersAcrossABrokerOutage
+      - go ./sparkplug TestBrokerDropStartsANewSessionWithTheNextBdSeq
+      - go ./sparkplug TestStoreForwardBuffersWhileThePrimaryHostIsOffline
+      - go ./sparkplug TestNoPublishWhileTheConnectionIsNotOpen
+      - go ./sparkplug TestTimedOutTickIsBufferedWhenStoreForwardIsOn
+  - id: SPB-019
+    claim: >-
+      The store-and-forward buffer is a bounded ring that drops the oldest
+      record when full, and the drain is rate-limited.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestStoreForwardRingAndDrain
+      - go ./sparkplug TestStoreForwardRingDropsOldestAndDrainsInBatches
+  - id: SPB-028
+    claim: >-
+      With `store-forward-file`, the store-and-forward buffer is journaled
+      to that file as it fills, so a process exit during an outage does not
+      lose it: the next start loads it and replays it, marked historical and
+      with its original timestamps, after the first birth (whether the
+      outage was the broker or the primary host, in either
+      `primary-host-offline` mode), then clears the file. The file is
+      bounded like the ring; a torn last record is skipped with a log line
+      and an unreadable file is set aside. Without the key nothing is
+      written to disk.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestStoreForwardFileSurvivesARestartDuringABrokerOutage
+      - go ./sparkplug TestStoreForwardFileSurvivesARestartDuringAHostOutage
+      - go ./sparkplug TestStoreForwardFileRoundTrip
+      - go ./sparkplug TestStoreForwardFileIsBoundedLikeTheRing
+      - go ./sparkplug TestStoreForwardFileSkipsATornLastRecord
+      - go ./sparkplug TestStoreForwardFileSetsAnUnreadableFileAside
+      - go ./sparkplug TestStoreForwardFileMisconfiguration
+      - go ./sparkplug TestStoreForwardWithoutAFileTouchesNoDisk
+      - go ./internal/project TestSparkplugStoreForwardFile
+  - id: SPB-022
+    claim: >-
+      `bdseq-file` persists the birth-death sequence number across
+      restarts; without it bdSeq restarts at 0 each run.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestBdSeqFilePersistsAcrossRestarts
+  - id: SPB-027
+    claim: >-
+      A dropped broker connection is a new session: the broker's will
+      carries the old bdSeq, and the node reconnects with the next bdSeq,
+      persisted to `bdseq-file`, in both its new will and its new NBIRTH, so
+      a host applies the next death and ignores a late will from the old
+      connection. Commands, the primary host's STATE and store-and-forward
+      carry on across the reconnect.
+    source: "#primary-host-and-store-and-forward"
+    tests:
+      - go ./sparkplug TestBrokerDropStartsANewSessionWithTheNextBdSeq
+      - go ./sparkplug TestBrokerDropResubscribesToThePrimaryHost
+      - go ./sparkplug TestBrokerDropThenHostOfflineDisconnect
+      - go ./sparkplug/host TestEdgeBrokerDropIsANewSessionToTheHost
+  - id: SPB-023
+    claim: >-
+      The node passes the Sparkplug TCK edge-node profile, run against a
+      live node on every push.
+    source: "#conformance"
+    tests:
+      - go ./sparkplug TestTCKConformance
+    note: >-
+      Runs only with NAUTILUS_TCK=1 in the sparkplug-tck CI job (strong
+      evidence there; skipped locally).
+  - id: SPB-024
+    claim: >-
+      MQTT and protobuf live only in the sparkplug package; the runtime
+      core's one dependency outside the Go standard library is
+      gopkg.in/yaml.v3.
+    source: "#conformance"
+    tests:
+      - go ./sparkplug TestMQTTAndProtobufLiveOnlyInTheSparkplugPackage
+      - go ./sparkplug TestRuntimeCoreDoesNotDependOnMQTTOrProtobuf
+      - go ./sparkplug TestRuntimeCoreDependsOnlyOnStdlibAndYAML
+  - id: SPB-025
+    claim: >-
+      `driver: {type: sparkplug-host}` presents an edge-node group as input
+      tags in a central project, with writes going back as NCMD/DCMD.
+    source: "#the-other-side-of-the-wire"
+    tests:
+      - go ./internal/project TestLoadSparkplugHostDriver
+      - go ./sparkplug/host TestTCKHostConformance
+    partial: true
+    note: >-
+      Covered in depth by the sparkplug-host claims file.

@@ -555,8 +555,8 @@ func TestUserDefinedTypeRejections(t *testing.T) {
 }
 
 // The §7a yardstick: batch-skid's line/Line.L5X, written as nautilus,
-// comes out as the export's own rung text — with its LES caption spelled
-// the way Logix actually spells it.
+// comes out as the export's own rung text, byte for byte (#372 corrected
+// the example's rung 0 from the editor caption LES to the neutral LT).
 func TestYardstickMatchesLineL5X(t *testing.T) {
 	dir := filepath.Join("testdata", "conformance", "yardstick")
 	src, err := os.ReadFile(filepath.Join(dir, "Receive.ld"))
@@ -575,9 +575,8 @@ func TestYardstickMatchesLineL5X(t *testing.T) {
 		t.Fatalf("%d rungs, want %d", len(got), len(ref))
 	}
 	for i := range ref {
-		w := strings.Replace(ref[i].Text, "LES(", "LT(", 1)
-		if got[i].Text != w {
-			t.Errorf("rung %d\n got %s\nwant %s", i, got[i].Text, w)
+		if got[i].Text != ref[i].Text {
+			t.Errorf("rung %d\n got %s\nwant %s", i, got[i].Text, ref[i].Text)
 		}
 	}
 	if len(f.Controller.DataTypes) != 1 || f.Controller.DataTypes[0].Name != "LineStatus" {
@@ -1012,7 +1011,7 @@ LD
   RUNG math
     a { n := n + 1; m := n - m; r := r * 2.0; q := r / q; r := ABS(q) }
   RUNG cpt
-    a { n := (n + 3) * m - 7; r := SQRT(q) + ABS(r) ** 2.0; n := -m; n := n MOD 4; r := TRUNC(q) }
+    a { n := (n + 3) * m - 7; r := SQRT(q) + ABS(r) ** 2.0; n := -m; n := n MOD 4; r := TRUNC(q); r := EXPT(q, 2.0) }
   RUNG cmp
     GT(n + 1, m) /LE(r * 2.0, q) EQ(n MOD 2, 0) ( b )
   RUNG time
@@ -1028,7 +1027,7 @@ END_PROGRAM
 	want := []string{
 		"XIC(a)MOVE(m,n)MOVE(1.5,r)MOVE(16#FF,n);",
 		"XIC(a)ADD(n,1,n)SUB(n,m,m)MUL(r,2.0,r)DIV(r,q,q)ABS(q,r);",
-		"XIC(a)CPT(n,((n + 3) * m) - 7)CPT(r,SQR(q) + (ABS(r) ** 2.0))CPT(n,-m)CPT(n,n MOD 4)CPT(r,TRN(q));",
+		"XIC(a)CPT(n,((n + 3) * m) - 7)CPT(r,SQR(q) + (ABS(r) ** 2.0))CPT(n,-m)CPT(n,n MOD 4)CPT(r,TRN(q))CPT(r,q ** 2.0);",
 		"CMP(n + 1 > m)CMP(r * 2.0 > q)CMP(n MOD 2 = 0)OTE(b);",
 		"XIC(a)MOVE(1500,n);",
 	}
@@ -1112,8 +1111,9 @@ END_PROGRAM
 		got = append(got, rg.Text)
 	}
 	// Timers is indexed by a variable somewhere, so every call on it
-	// presets through a MOVE (see lowered.computedIdx); Counts is not, so
-	// its element's preset lives in the tag's data.
+	// presets through a MOVE (see lowered.computedIdx); its literal-index
+	// elements carry their presets in the tag's data too. Counts is not, so
+	// its element's preset lives in the tag's data alone.
 	want := []string{
 		"MOVE(2000,Timers[0].PRE);",
 		"XIC(a)TON(Timers[0],?,?)XIC(Timers[0].DN)OTE(b);",
@@ -1149,8 +1149,10 @@ END_PROGRAM
 		}
 		return nil
 	}
-	if pre(0) != int64(0) || pre(1) != int64(0) || pre(2) != int64(0) {
-		t.Errorf("presets = %v %v %v (a variable-indexed array presets by MOVE, not data)", pre(0), pre(1), pre(2))
+	// Timers[1] is only read and Timers[i] is no element in particular:
+	// neither puts a preset in the data.
+	if pre(0) != int64(2000) || pre(1) != int64(0) || pre(2) != int64(500) {
+		t.Errorf("presets = %v %v %v, want 2000 0 500 (literal-index elements keep their presets in the data)", pre(0), pre(1), pre(2))
 	}
 	if counts == nil || counts.DataType != "COUNTER" || counts.Dimensions != "2" {
 		t.Fatalf("Counts tag = %+v", counts)
@@ -1177,7 +1179,7 @@ LD
 END_LD
 END_PROGRAM
 `
-	doc, diags, err := Write(src, Options{Aliases: map[string]string{"StartPB": "Local:1:I.Data.3", "Level": "Local:2:I.Ch0Data"}, Descs: map[string]string{"StartPB": "start pushbutton"}})
+	doc, diags, err := Write(src, Options{Aliases: map[string]string{"StartPB": "Local:1:I.Data.3", "Level": "Local:2:I.Ch0Data"}, Descs: map[string]string{"StartPB": "start pushbutton"}, Hardware: iolineHardware(t)})
 	if err != nil || len(diags) > 0 {
 		t.Fatalf("%v %v", err, diags)
 	}
@@ -1263,5 +1265,231 @@ END_PROGRAM
 	}
 	if !strings.Contains(string(doc), "t.Reset := NOT (Go) OR (t.DN);") || !strings.Contains(string(doc), "TONR(t);") {
 		t.Errorf("st:\n%s", doc)
+	}
+}
+
+// FIRST_SCAN() is the status flag S:FS: a contact in ladder (negated, the
+// XIO), the bit itself in ST.
+func TestFirstScan(t *testing.T) {
+	src := `PROGRAM P
+VAR_EXTERNAL
+    Seeded : DINT; Later : BOOL; Go : BOOL;
+END_VAR
+LD
+  RUNG seed
+    FIRST_SCAN() { Seeded := 5 }
+  RUNG later
+    Go /FIRST_SCAN() ( Later )
+END_LD
+END_PROGRAM
+`
+	f := mustWrite(t, src, Options{})
+	var got []string
+	for _, rg := range f.Controller.Programs[0].Routines[0].Rungs {
+		got = append(got, rg.Text)
+	}
+	want := []string{
+		"XIC(S:FS)MOVE(5,Seeded);",
+		"XIC(Go)XIO(S:FS)OTE(Later);",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("rungs\n got %s\nwant %s", strings.Join(got, "\n     "), strings.Join(want, "\n     "))
+	}
+	if _, problems, err := RoundTrip(src, Options{}); err != nil || len(problems) > 0 {
+		t.Errorf("round trip: %v %v", err, problems)
+	}
+	stSrc := `PROGRAM P
+VAR_EXTERNAL
+    Seeded : DINT;
+END_VAR
+IF FIRST_SCAN() THEN
+    Seeded := 5;
+END_IF;
+END_PROGRAM
+`
+	doc, diags, err := WriteST(stSrc, Options{})
+	if err != nil || len(diags) > 0 {
+		t.Fatalf("st: %v %v", err, diags)
+	}
+	if !strings.Contains(string(doc), "IF S:FS THEN") {
+		t.Errorf("st:\n%s", doc)
+	}
+}
+
+// LOCAL_TIME is GSV(WallClockTime,,LocalDateTime,…): the instance a
+// DINT[7] whose members are its elements, and the import's copy into an
+// array folds into one GSV into that array, with no instance tag left.
+func TestLocalTime(t *testing.T) {
+	src := `PROGRAM P
+VAR_EXTERNAL
+    Sec : DINT; Late : BOOL;
+END_VAR
+VAR
+    clk : LOCAL_TIME;
+    imp : LOCAL_TIME;
+    gettime : ARRAY[0..6] OF DINT;
+END_VAR
+LD
+  RUNG clock
+    clk:LOCAL_TIME() { Sec := clk.SECOND }
+  RUNG late
+    GE(clk.HOUR, 17) ( Late )
+  RUNG imported
+    imp:LOCAL_TIME() { gettime[0] := imp.YEAR; gettime[1] := imp.MONTH; gettime[2] := imp.DAY; gettime[3] := imp.HOUR; gettime[4] := imp.MINUTE; gettime[5] := imp.SECOND; gettime[6] := imp.MILLISECOND * 1000 }
+END_LD
+END_PROGRAM
+`
+	f := mustWrite(t, src, Options{})
+	prog := f.Controller.Programs[0]
+	var got []string
+	for _, rg := range prog.Routines[0].Rungs {
+		got = append(got, rg.Text)
+	}
+	want := []string{
+		"GSV(WallClockTime,,LocalDateTime,clk[0])MOVE(clk[5],Sec);",
+		"GE(clk[3],17)OTE(Late);",
+		"GSV(WallClockTime,,LocalDateTime,gettime[0]);",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("rungs\n got %s\nwant %s", strings.Join(got, "\n     "), strings.Join(want, "\n     "))
+	}
+	tags := map[string]string{}
+	for _, tg := range prog.Tags {
+		tags[tg.Name] = tg.DataType + "[" + tg.Dimensions + "]"
+	}
+	if tags["clk"] != "DINT[7]" {
+		t.Errorf("clk tag = %q, want DINT[7]", tags["clk"])
+	}
+	if _, ok := tags["imp"]; ok {
+		t.Errorf("imp folded into gettime; its tag should be gone: %v", tags)
+	}
+	if _, problems, err := RoundTrip(src, Options{}); err != nil || len(problems) > 0 {
+		t.Errorf("round trip: %v %v", err, problems)
+	}
+	// Read anywhere else, the instance keeps its tag and the call fills it:
+	// a fold into gettime would leave imp's elements unwritten.
+	shared := strings.Replace(src, "GE(clk.HOUR, 17)", "GE(imp.HOUR, 17)", 1)
+	f = mustWrite(t, shared, Options{})
+	var texts []string
+	for _, rg := range f.Controller.Programs[0].Routines[0].Rungs {
+		texts = append(texts, rg.Text)
+	}
+	if !strings.HasPrefix(texts[2], "GSV(WallClockTime,,LocalDateTime,imp[0])MOVE(imp[0],gettime[0])") {
+		t.Errorf("shared clock: %v", texts)
+	}
+	// Ladder cannot read MILLISECOND (the element is microseconds); ST can.
+	bad := strings.Replace(src, "clk.SECOND", "clk.MILLISECOND", 1)
+	if _, diags, _ := Write(bad, Options{}); len(diags) == 0 || diags[0].Rule != ruleMember {
+		t.Errorf("MILLISECOND in ladder: %v", diags)
+	}
+	stSrc := `PROGRAM P
+VAR_EXTERNAL
+    Sec : DINT; Ms : DINT;
+END_VAR
+VAR
+    clk : LOCAL_TIME;
+END_VAR
+clk();
+Sec := clk.SECOND;
+Ms := clk.MILLISECOND;
+END_PROGRAM
+`
+	doc, diags, err := WriteST(stSrc, Options{})
+	if err != nil || len(diags) > 0 {
+		t.Fatalf("st: %v %v", err, diags)
+	}
+	for _, w := range []string{"GSV(WallClockTime,,LocalDateTime,clk[0]);", "Sec := clk[5];", "Ms := (clk[6] / 1000);"} {
+		if !strings.Contains(string(doc), w) {
+			t.Errorf("st: missing %q in\n%s", w, doc)
+		}
+	}
+}
+
+// LGA-017: a refusal names the construct and what to write instead. Each
+// case pins the alternative, not only the construct.
+func TestRefusalsNameTheAlternative(t *testing.T) {
+	wrap := func(vars, rungs string) string {
+		return "PROGRAM P\nVAR\n" + vars + "\nEND_VAR\nLD\n" + rungs + "\nEND_LD\nEND_PROGRAM\n"
+	}
+	seq := "FUNCTION_BLOCK Seq\nVAR_INPUT A : BOOL; END_VAR\nVAR_OUTPUT Q : BOOL; END_VAR\nLD\n RUNG r A ( Q )\nEND_LD\nEND_FUNCTION_BLOCK\n"
+	ladder := []struct{ name, src, rule, want string }{
+		{"name underscores", wrap("Bad__Name_ : BOOL; Y : BOOL;", "RUNG r Bad__Name_ ( Y )"), ruleName, "rename it, e.g. Bad_Name"},
+		{"name length", wrap("A_very_long_tag_name_that_logix_will_not_take_at_all : BOOL; Y : BOOL;", "RUNG r A_very_long_tag_name_that_logix_will_not_take_at_all ( Y )"), ruleName, "rename it shorter"},
+		{"block parameter", seq + wrap("X : BOOL; s : Seq;", "RUNG r X s:Seq(B := X)"), ruleFBPin, "(parameters: A, Q)"},
+		{"block input captured", seq + wrap("X : BOOL; Y : BOOL; s : Seq;", "RUNG r X s:Seq(A => Y)"), ruleFBPin, "capture one of Q with =>"},
+		{"operand Logix cannot spell", wrap("Y : BOOL; N : INT;", "RUNG r GT(MIN(N, 1), 5) ( Y )"), ruleOperand, "compute it into a tag first"},
+		{"time as operand", wrap("T : TIME; t1 : TON; Y : BOOL;", "RUNG r GT(T, 5) t1:TON(PT := T) ( Y )"), ruleTime, "DINT of milliseconds"},
+		{"member of timer", wrap("t : TON; Y : BOOL;", "RUNG r t.TT ( Y )"), ruleMember, "the readable members are Q (DN)"},
+		{"bool array x32", wrap("A : ARRAY [0..7] OF BOOL; X : BOOL; Y : BOOL;", "RUNG r X ( Y )"), ruleArrayShape, "ARRAY [0..31] OF BOOL"},
+	}
+	for _, c := range ladder {
+		t.Run(c.name, func(t *testing.T) {
+			diags, err := Check(c.src)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if !hasDiag(diags, c.rule, c.want) {
+				t.Errorf("want %s with %q, got:\n%s", c.rule, c.want, joinDiags(diags))
+			}
+		})
+	}
+	stWrap := func(body string) string {
+		return "PROGRAM P\nVAR\n  X : REAL; B : BOOL; t : TON; m : Motor;\nEND_VAR\n" + body + "\nEND_PROGRAM\n"
+	}
+	lib := "FUNCTION_BLOCK Motor\nVAR_INPUT Run : BOOL; END_VAR\nVAR_OUTPUT Running : BOOL; END_VAR\nEND_FUNCTION_BLOCK\n"
+	st := []struct{ name, src, rule, want string }{
+		{"timer member", stWrap("B := t.TT;"), ruleMember, "the readable members are Q (DN), ET (ACC)"},
+		{"timer output", stWrap("t(IN := B, PT := T#1S, TT => X);"), ruleFBPin, "the outputs are Q and ET"},
+		{"block input", stWrap("m(Go := B);"), ruleFBPin, "(inputs: Run)"},
+		{"block output", stWrap("m(Run := B, Done => B);"), ruleFBPin, "(outputs: Running)"},
+	}
+	for _, c := range st {
+		t.Run(c.name, func(t *testing.T) {
+			diags, err := CheckST(c.src, lib)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if !hasDiag(diags, c.rule, c.want) {
+				t.Errorf("want %s with %q, got:\n%s", c.rule, c.want, joinDiags(diags))
+			}
+		})
+	}
+}
+
+func hasDiag(diags []Diag, rule, want string) bool {
+	for _, d := range diags {
+		if d.Rule == rule && strings.Contains(d.Message, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// An ST TOF is TOFR on an FBD_TIMER, with no Reset: TOFR restarts from
+// the input's rising edge by itself. A counter's CV reads as ACC.
+func TestSTTOFAndCounterValue(t *testing.T) {
+	src := "PROGRAM P\nVAR\n  Run : BOOL; Fan : BOOL; t : TOF; c : CTU; N : DINT;\nEND_VAR\n" +
+		"t(IN := Run, PT := T#5S, Q => Fan);\nc(CU := Run, PV := 3);\nN := c.CV;\nEND_PROGRAM\n"
+	doc, diags, err := WriteST(src, Options{Controller: "C"})
+	if err != nil || len(diags) > 0 {
+		t.Fatalf("%v %v", err, joinDiags(diags))
+	}
+	f, err := l5x.Parse(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := f.Controller.Programs[0].Routines[0].Text
+	for _, want := range []string{"t.PRE := 5000;", "t.TimerEnable := Run;", "TOFR(t);", "Fan := t.DN;", "N := c.ACC;"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "t.Reset") {
+		t.Errorf("a TOF drives no Reset:\n%s", text)
+	}
+	for _, tg := range append(f.Controller.Tags, f.Controller.Programs[0].Tags...) {
+		if tg.Name == "t" && tg.DataType != "FBD_TIMER" {
+			t.Errorf("t is %s, want FBD_TIMER", tg.DataType)
+		}
 	}
 }

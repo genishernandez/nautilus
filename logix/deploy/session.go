@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,12 +42,19 @@ type Session struct {
 	// aoiRoutines are the controller\'s Add-On Instruction routines, which
 	// an online routine edit cannot change.
 	aoiRoutines map[string]*l5x.RoutineLogic
-	rungs       []l5x.Rung // what the routine runs now (ladder)
-	lines       []string   // what the routine runs now (ST), one per line
-	prog        string
-	rout        string
-	routType    string
-	opened      time.Time
+	// routines is what the controller's programs run, by "Program/Routine"
+	// (and the AOIs by "AOI:…"): from the upload at open, then each
+	// verified edit. An edit picks its routine from here by the program it
+	// writes, so a second program with a routine of the same name — the
+	// writer's side program "Nautilus" has a MainRoutine too — is never
+	// mistaken for it.
+	routines map[string]*l5x.RoutineLogic
+	rungs    []l5x.Rung // what the routine runs now (ladder)
+	lines    []string   // what the routine runs now (ST), one per line
+	prog     string
+	rout     string
+	routType string
+	opened   time.Time
 }
 
 // Connect uploads the running project, opens it and goes online. It
@@ -105,24 +113,47 @@ func (s *Session) open(ctx context.Context) error {
 	}
 	s.s, s.tags, s.opened = sess, logic.Tags, time.Now()
 	s.aoiRoutines = aoiRoutinesOf(logic)
+	s.routines = logic.Routines
 	s.prog, s.rout = "", ""
 	s.rungs = nil
-	// The routine the target names, if the controller has it.
-	prog := s.t.Program
+	// The routine the target names, if the controller has it — for the
+	// log line; each edit picks again by the program it writes.
 	rout := s.t.Routine
 	if rout == "" {
 		rout = "MainRoutine"
 	}
-	for k, r := range logic.Routines {
-		p, name, _ := strings.Cut(k, "/")
-		if (prog == "" || strings.EqualFold(p, prog)) && strings.EqualFold(name, rout) {
-			s.prog, s.rout, s.rungs = p, name, r.Rungs
-			s.lines = strings.Split(strings.TrimRight(r.Text, "\n"), "\n")
-			s.routType = r.Type
+	if prog := s.t.Program; prog != "" {
+		s.pick(prog, rout)
+	} else {
+		keys := make([]string, 0, len(logic.Routines))
+		for k := range logic.Routines {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			p, name, _ := strings.Cut(k, "/")
+			if !strings.EqualFold(p, writer.SideProgram) && strings.EqualFold(name, rout) && s.pick(p, name) {
+				break
+			}
 		}
 	}
 	s.log("session open and online to %s in %s (%d rungs in %s/%s)", s.t.CommPath, time.Since(t0).Round(time.Millisecond), len(s.rungs), s.prog, s.rout)
 	return nil
+}
+
+// pick makes prog/rout the routine an edit compares with and replaces.
+// False when the controller runs no such routine.
+func (s *Session) pick(prog, rout string) bool {
+	for k, r := range s.routines {
+		p, name, _ := strings.Cut(k, "/")
+		if strings.EqualFold(p, prog) && strings.EqualFold(name, rout) {
+			s.prog, s.rout, s.rungs = p, name, r.Rungs
+			s.lines = strings.Split(strings.TrimRight(r.Text, "\n"), "\n")
+			s.routType = r.Type
+			return true
+		}
+	}
+	return false
 }
 
 // Close goes offline and releases the project.
@@ -155,6 +186,7 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 		Controller: s.t.Controller, Program: s.t.Program, Routine: s.t.Routine, Task: s.t.Task,
 		PeriodMs: s.t.PeriodMs, ProcessorType: s.t.Processor, MajorRev: major, MinorRev: minor, Libs: s.t.Libs,
 		Inits: s.t.Inits, Descs: s.t.Descs, Aliases: s.t.Aliases, Tags: s.t.Tags, Side: s.t.Side,
+		AllTags: s.t.AllTags, ControllerScoped: s.t.ControllerScoped, Hardware: s.t.Hardware,
 	}
 	full, diags, err := s.t.write(src, wopts)
 	if err != nil {
@@ -182,11 +214,12 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 	rep.Rungs = len(want.Routines[rep.Program+"/"+rep.Routine].Rungs)
 
 	if s.s == nil {
+		s.log("the online session was closed; reopening it (upload, open, go online: about a minute)")
 		if err := s.open(ctx); err != nil {
 			return done(err)
 		}
 	}
-	if s.prog == "" || !strings.EqualFold(s.prog, rep.Program) || !strings.EqualFold(s.rout, rep.Routine) {
+	if !s.pick(rep.Program, rep.Routine) {
 		rep.RoutineMissing = true
 		return done(&NeedsDownloadError{RoutineMissing: true})
 	}
@@ -203,7 +236,10 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 		text = strings.Join(s.lines, "\n") + "\n"
 	}
 	have := &l5x.Logic{Tags: s.tags, Routines: map[string]*l5x.RoutineLogic{rep.Program + "/" + rep.Routine: {Type: s.routType, Rungs: s.rungs, Text: text}}}
-	rep.Diffs = l5x.LogicDiff(have, want)
+	// Only the routine this edit replaces: the side program's routine (and
+	// any other) is not sent, so it is not compared either.
+	key := rep.Program + "/" + rep.Routine
+	rep.Diffs = l5x.LogicDiff(have, &l5x.Logic{Tags: want.Tags, Routines: map[string]*l5x.RoutineLogic{key: want.Routines[key]}})
 	if len(rep.Diffs) == 0 {
 		rep.Same = true
 		s.log("the controller already runs this logic")
@@ -212,6 +248,7 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 
 	run := "edit-" + time.Now().UTC().Format("20060102-150405.000")
 	xpath := logixd.RoutinePath(s.prog, s.rout)
+	s.log("%d difference(s) from the controller; replacing %s/%s online (FinalizeEdits)", len(rep.Diffs), s.prog, s.rout)
 	mode, _ := s.s.Mode(ctx)
 	rep.ModeBefore = string(mode)
 	var replaced uint32
@@ -252,6 +289,7 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 	rep.Applied, rep.Replaced, rep.ModeAfter = Online, replaced, string(after)
 
 	// Verify from the controller: export the routine and compare rungs.
+	s.log("edit finalized, controller %s; verifying from the controller", after)
 	out := path.Join(run, "routine.L5X")
 	if _, err := s.s.PartialExport(ctx, xpath, out); err != nil {
 		return done(fmt.Errorf("verify export: %w", err))
@@ -282,6 +320,7 @@ func (s *Session) Edit(ctx context.Context, src string) (*Report, error) {
 	); len(d) > 0 {
 		return done(&VerifyError{Diffs: d})
 	}
+	s.routines[s.prog+"/"+s.rout] = &nowCmp
 	s.rungs = nowCmp.Rungs
 	s.lines = strings.Split(strings.TrimRight(nowCmp.Text, "\n"), "\n")
 	s.routType = nowCmp.Type

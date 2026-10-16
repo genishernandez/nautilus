@@ -46,10 +46,13 @@ controller onto both the text and the diagram.
   rename, insert blocks from the *+ add* palette — *function block* places
   any standard block (PID included) or project block with every input an
   open pin — box-select, arrow keys to move. Double-click an FB's header to
-  rename the instance.
+  rename the instance. An insert lands beside the selected element, or
+  where you double-click empty canvas; a network you arranged by hand
+  keeps its layout.
 - **Ladder**: drag instructions from the palette onto a rung, drag elements
   between spots and rungs, ⊕ to insert, `N` for NO/NC, `M` for coil mode,
-  `B` to branch around the selection, click a rung's name to select or
+  `B` to branch around the selection, Ctrl-click several elements and `O`
+  to OR them into one branch (a leg each), click a rung's name to select or
   delete the rung. *FB…* places any function block — standard or one of
   the project's library blocks — under a name you choose; double-click a
   block's header to rename the instance. With a controller running, power
@@ -215,6 +218,7 @@ server.
 | `nautilus.liveValues.enabled` | `true` | Show live values inline and on diagrams when a controller is reachable. |
 | `nautilus.token` | `""` | Bearer token for writes to a controller started with `NAUTILUS_TOKEN`. Set it in workspace settings. |
 | `nautilus.confirmControllerWrites` | `true` | Confirm before Download or Rollback changes what a controller runs. Leave it on for anything that might be live. |
+| `nautilus.logix.resetValuesOnDownload` | `false` | Download Project to Logix Controller keeps the controller's tag values where the tag is unchanged; turn this on to start every tag at the project's value (`naut logix deploy --download --reset-values`). |
 | `nautilus.mimic.snapToGrid` | `true` | Snap dragged equipment, labels and pipe points to the grid in the mimic editor. |
 
 ## Commands

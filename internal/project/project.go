@@ -134,10 +134,44 @@ type LogixTarget struct {
 	Program string `yaml:"program"`
 	Routine string `yaml:"routine"`
 	Task    string `yaml:"task"`
+	// Continuous schedules the program in a CONTINUOUS Logix task, as
+	// the controller it was imported from did; the task's scan: is then
+	// only nautilus's own rate. Default false: a PERIODIC task at scan:.
+	Continuous bool `yaml:"continuous"`
+	// AllTags writes every manifest tag as a controller tag, whether or
+	// not a program names it, as `naut logix import` sets for a project
+	// whose tag file is the controller's tag set: a tag only an external
+	// client reads or writes is still the controller's. Default false: a
+	// tag no program names is not written. A tag with neither type: nor
+	// init: has no type to write either way, and an unnamed one whose type
+	// the Logix subset lacks (a STRING) is left out.
+	AllTags bool `yaml:"all-tags"`
+	// ControllerScoped lists program variables written as controller
+	// tags rather than program tags, each with the Logix tag's
+	// description: a timer or counter the export had at controller scope
+	// is a block instance in nautilus, so program-scoped, and the import
+	// records it here so the write-back keeps its tag path
+	// (AcceptTmr.ACC, not Program:MainProgram.AcceptTmr.ACC).
+	ControllerScoped []LogixScoped `yaml:"controller-scoped"`
+	// Hardware is an L5X, relative to the project, whose <Modules> section
+	// is the controller's I/O configuration: the chassis, its modules, and
+	// the adapters and modules beyond it that alias: tags name. The writer
+	// carries it into the project verbatim. `naut logix import --project`
+	// writes one (hardware.L5X) from an export with I/O modules; a Logix
+	// Designer export of the whole project works as it is. Default: none,
+	// and the project has the controller's own Local module only.
+	Hardware string `yaml:"hardware"`
 	// Side is the side code nautilus adds beside the program, in a Logix
 	// program of its own: testing, verification and metrics logic that
 	// never touches the user's routine.
 	Side *LogixSide `yaml:"side"`
+}
+
+// LogixScoped is one target.logix.controller-scoped entry: a program
+// variable and the description its controller tag carries.
+type LogixScoped struct {
+	Name string `yaml:"name"`
+	Desc string `yaml:"desc"`
 }
 
 // LogixSide selects the side code.
@@ -179,14 +213,34 @@ type SparkplugConfig struct {
 	PrimaryHost     string   `yaml:"primary-host"` // gate births on a SCADA host's STATE
 	PublishInterval Duration `yaml:"publish-interval"`
 	BdSeqFile       string   `yaml:"bdseq-file"` // persists bdSeq across restarts
-	// Device publishes the field driver's input tags as a Sparkplug DEVICE
-	// with this id (DBIRTH/DDEATH follow the driver's connection health).
-	// Empty = everything publishes at node level.
+	// PrimaryHostOffline is what the node does when the primary host's
+	// STATE goes offline: "buffer" (the default) keeps the session and
+	// stops data, which store-forward buffers; "disconnect" ends the
+	// session as Sparkplug 3.0 has it (NDEATH, disconnect, reconnect, and
+	// birth once the host is back). Needs primary-host.
+	PrimaryHostOffline string `yaml:"primary-host-offline"`
+	// Device was the one Sparkplug device every driver's tags rode on. It
+	// is gone: each field connection is now its own device (see
+	// sparkplugDevices). Kept so Load can say so instead of "unknown field".
 	Device string `yaml:"device"`
+	// Writable opens NCMD/DCMD writes for the tags (or UDT members) these
+	// globs match. Empty, the default, refuses every write: the node is
+	// read-only and only Node Control/Rebirth is honoured.
+	Writable []string `yaml:"writable"`
 	// StoreForward buffers up to this many data messages while the broker
 	// (or the primary host) is unreachable and replays them, marked
 	// historical, on reconnect. Zero disables (the default).
 	StoreForward int `yaml:"store-forward"`
+	// StoreForwardFile journals that buffer to a file, so a process exit
+	// during an outage does not lose it: the next start loads it and
+	// replays it, as historical, after its first birth. Relative to the
+	// working directory, like bdseq-file. Empty (the default): memory only.
+	// Needs store-forward.
+	StoreForwardFile string `yaml:"store-forward-file"`
+	// FlattenUDTs publishes each UDT member as a plain metric
+	// ("P101/Running") instead of the tag as one Sparkplug Template, for
+	// hosts that do not read Templates. Default false: Templates.
+	FlattenUDTs bool `yaml:"flatten-udts"`
 	// RBE tuning: a default class, named classes, and glob assignments.
 	DefaultClass  *RBEConfig           `yaml:"default-class"`
 	Classes       map[string]RBEConfig `yaml:"classes"`
@@ -365,7 +419,7 @@ type Project struct {
 	Runtime   runtime.Options
 	Server    server.Options
 	sparkplug *SparkplugConfig
-	inputTags []string // role-input tag names, for the Sparkplug device
+	drivers   []nio.NamedDriver // the configured drivers, named; nil for the implicit memory loopback
 
 	// HMIDir is server.hmi's path, cleaned and relative to the project
 	// (e.g. "hmi/build") — "" when unset. `naut build` uses it to warn
@@ -387,15 +441,13 @@ type Project struct {
 	Retain     *RetainConfig
 	Redundancy *RedundancyConfig
 
+	OPCUA *OPCUAConfig
 	// Alarms is the composed `alarms:` section (alarm-files folded in),
 	// or nil when the manifest declares none. Load composes and validates
 	// it; building the engine over a compiled runtime is a separate call
 	// (see alarms.go) for the same reason Sparkplug is: Load must stay
 	// side-effect-free so check, build and the LSP can use it.
 	Alarms *AlarmsConfig
-
-	//OPCUA
-	OPCUA *OPCUAConfig
 }
 
 // RetainNames resolves the retain section's defaults against the project
@@ -444,6 +496,9 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 		PublishInterval: time.Duration(c.PublishInterval),
 		BdSeqFile:       c.BdSeqFile,
 	}
+	if c.PrimaryHostOffline == "disconnect" { // Load refused anything but buffer/disconnect
+		cfg.PrimaryHostOffline = sparkplug.HostOfflineDisconnect
+	}
 	rbe := func(r RBEConfig) sparkplug.RBE {
 		return sparkplug.RBE{
 			Deadband:    r.Deadband,
@@ -455,6 +510,12 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 	var opts []sparkplug.Option
 	if c.StoreForward > 0 {
 		opts = append(opts, sparkplug.WithStoreForward(c.StoreForward))
+		if c.StoreForwardFile != "" { // Load refused it without store-forward
+			opts = append(opts, sparkplug.WithStoreForwardFile(c.StoreForwardFile))
+		}
+	}
+	if c.FlattenUDTs {
+		opts = append(opts, sparkplug.WithFlattenUDTs())
 	}
 	if c.DefaultClass != nil {
 		opts = append(opts, sparkplug.WithDefaultRBE(rbe(*c.DefaultClass)))
@@ -465,20 +526,62 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 	for class, patterns := range c.MetricClasses {
 		opts = append(opts, sparkplug.WithMetricClass(class, patterns...))
 	}
-	if c.Device != "" {
-		// The field driver's tags as a Sparkplug DEVICE: its DBIRTH/DDEATH
-		// track the driver's own connection health when it reports one.
-		tags := p.inputTags
-		if n, ok := p.Runtime.Driver.(interface{ InputNames() []string }); ok {
-			tags = n.InputNames()
-		}
-		opts = append(opts, sparkplug.WithDevice(sparkplug.Device{
-			ID:     c.Device,
-			Tags:   tags,
-			Health: driverHealth(p.Runtime.Driver),
-		}))
+	devices, err := sparkplugDevices(p.drivers)
+	if err != nil {
+		return nil, err
 	}
+	for _, d := range devices {
+		opts = append(opts, sparkplug.WithDevice(d))
+	}
+	opts = append(opts, sparkplug.WithWritable(c.Writable...))
 	return sparkplug.New(rt, cfg, opts...)
+}
+
+// sparkplugDevices makes each field connection a Sparkplug device
+// (edge-collector.md §3): one per source of a driver that holds several
+// (modbus, snmp, redfish, prometheus), named by the source id, and one per
+// driver that is a single connection (eip, sparkplug-host, replay), named
+// by the driver. Each births and dies with its own connection, so one dead
+// meter never takes another device's DBIRTH with it. The memory loopback
+// is no connection and makes no device; its tags, like every tag no
+// connection delivers (program state, outputs), publish at node level.
+func sparkplugDevices(drivers []nio.NamedDriver) ([]sparkplug.Device, error) {
+	var out []sparkplug.Device
+	from := map[string]string{} // device id → where it came from, for a collision
+	add := func(d sparkplug.Device, origin string) error {
+		if prev, dup := from[d.ID]; dup {
+			return fmt.Errorf("sparkplug: device %q is both %s and %s — each connection is its own Sparkplug device, so rename one", d.ID, prev, origin)
+		}
+		from[d.ID] = origin
+		out = append(out, d)
+		return nil
+	}
+	for _, nd := range drivers {
+		switch drv := nd.Driver.(type) {
+		case nio.ConnectionReporter:
+			for _, c := range drv.Connections() {
+				id := c.ID
+				err := add(sparkplug.Device{
+					ID:     id,
+					Tags:   c.Inputs,
+					Health: func() bool { return drv.ConnectionUp(id) },
+				}, fmt.Sprintf("source %q of driver %q", id, nd.Name))
+				if err != nil {
+					return nil, err
+				}
+			}
+		case interface{ InputNames() []string }:
+			err := add(sparkplug.Device{
+				ID:     nd.Name,
+				Tags:   drv.InputNames(),
+				Health: driverHealth(nd.Driver),
+			}, fmt.Sprintf("driver %q", nd.Name))
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
 }
 
 // hasProgramDecl reports whether src contains a PROGRAM declaration,
@@ -692,8 +795,26 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 	}
 	opts.Tags = append(opts.Tags, gvlTags(libs, opts.Tags)...)
 	opts.Meta = applyTagMeta(opts.Tags, m.TagMeta)
-	if opts.Driver, err = buildDrivers(fsys, m); err != nil {
+	var drivers []nio.NamedDriver
+	if opts.Driver, drivers, err = buildDrivers(fsys, m); err != nil {
 		return nil, err
+	}
+	if m.Sparkplug != nil {
+		switch m.Sparkplug.PrimaryHostOffline {
+		case "", "buffer":
+		case "disconnect":
+			if m.Sparkplug.PrimaryHost == "" {
+				return nil, fmt.Errorf("sparkplug.primary-host-offline: disconnect needs primary-host: the node ends its session when that host goes offline")
+			}
+		default:
+			return nil, fmt.Errorf("sparkplug.primary-host-offline: %q is not buffer or disconnect", m.Sparkplug.PrimaryHostOffline)
+		}
+		if m.Sparkplug.StoreForwardFile != "" && m.Sparkplug.StoreForward <= 0 {
+			return nil, fmt.Errorf("sparkplug.store-forward-file needs store-forward: the file journals that buffer")
+		}
+	}
+	if m.Sparkplug != nil && m.Sparkplug.Device != "" {
+		return nil, fmt.Errorf("sparkplug.device: removed — each field connection is now its own Sparkplug device, named after its driver (eip, sparkplug-host) or its source id (modbus, snmp, redfish, prometheus); delete device: %s, and give a driver a name: to choose its device id", m.Sparkplug.Device)
 	}
 
 	addr := m.Server.Addr
@@ -703,12 +824,6 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 	projName := m.Name
 	if projName == "" {
 		projName = "nautilus"
-	}
-	var inputs []string
-	for _, t := range m.Tags {
-		if strings.EqualFold(t.Role, "input") {
-			inputs = append(inputs, t.Name)
-		}
 	}
 	var hmiFS fs.FS
 	var hmiDir string
@@ -752,9 +867,9 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 			HistorianURL: m.Server.Historian,
 			HMI:          hmiFS,
 		},
-		sparkplug:  m.Sparkplug,
 		OPCUA:      m.OPCUA,
-		inputTags:  inputs,
+		sparkplug:  m.Sparkplug,
+		drivers:    drivers,
 		Retain:     m.Retain,
 		Redundancy: m.Redundancy,
 		Alarms:     m.Alarms,
@@ -815,7 +930,7 @@ func gvlTags(libs []string, declared []runtime.TagDef) []runtime.TagDef {
 				continue
 			}
 			have[ir.NameKey(g.Name)] = true
-			out = append(out, runtime.TagDef{Name: g.Name, Role: runtime.RoleState})
+			out = append(out, runtime.TagDef{Name: g.Name, Role: runtime.RoleState, GVL: true})
 		}
 	}
 	return out
@@ -877,6 +992,62 @@ func TagDefsFor(file string) []runtime.TagDef {
 		dir = parent
 	}
 	return nil
+}
+
+// PeersFor is the programs of the project governing file — every task's
+// program, by its task name (the first task is main) — for the compile
+// options' Peers: the language server and `naut check` compile one file
+// at a time, and with these a reference to another task's instance
+// (`t1.Q`) is told that tasks share only tags (#327), as runtime.New
+// tells it. override holds unsaved editor buffers by absolute path; libs
+// are the project's library sources (a ladder rung needs a user block's
+// pins). nil when the file is in no project.
+func PeersFor(file string, override map[string]string, libs []string) []st.PeerProgram {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Dir(abs)
+	for range 32 {
+		if fi, err := os.Stat(filepath.Join(dir, ManifestName)); err == nil && !fi.IsDir() {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
+	}
+	m, err := ReadManifest(os.DirFS(dir), "")
+	if err != nil || len(m.Tasks) < 2 {
+		return nil
+	}
+	var peers []st.PeerProgram
+	for i, t := range m.Tasks {
+		if t.Program == "" {
+			continue
+		}
+		p := filepath.Join(dir, filepath.FromSlash(path.Clean(t.Program)))
+		src, ok := override[p]
+		if !ok {
+			raw, err := os.ReadFile(p)
+			if err != nil {
+				continue
+			}
+			src = string(raw)
+		}
+		name := t.Name
+		switch {
+		case i == 0:
+			name = runtime.MainTaskName
+		case name == "":
+			name = strings.TrimSuffix(path.Base(t.Program), path.Ext(t.Program))
+		}
+		if peer, ok := runtime.PeerOf(src, name, libs...); ok {
+			peers = append(peers, peer)
+		}
+	}
+	return peers
 }
 
 func tagDefs(tags []TagConfig) ([]runtime.TagDef, error) {
@@ -983,37 +1154,21 @@ func normalize(v any) any {
 	return v
 }
 
-// driverHealth adapts a field driver's connection state onto the bool the
-// Sparkplug device: wiring gates DBIRTH/DDEATH with. nil means the driver
-// has no notion of a connection (memory) and the device is always healthy —
-// the behaviour that existed before health reporting did. A multi-driver
-// set is healthy only when EVERY child that has an opinion is: an operator
-// reading the device online should be able to trust all of its tags, not
-// the lucky subset whose bus is up.
+// driverHealth adapts a field driver's connection state onto the bool a
+// Sparkplug device gates DBIRTH/DDEATH with, for a driver that is one
+// connection as a whole. nil means the driver has no notion of a
+// connection (replay) and its device is always healthy.
+//
+// eip is healthy once connected AND primed: its snapshot fills tag by tag
+// during a poll, and on a controller where the first poll is slow (struct
+// roots refused, read member by member) a DBIRTH sent as soon as the link
+// came up carried only the tags read so far, and the rest rebirthed the node.
 func driverHealth(d nio.Driver) func() bool {
 	switch drv := d.(type) {
 	case *eip.Driver:
-		return func() bool { return drv.Health().Connected }
+		return func() bool { h := drv.Health(); return h.Connected && h.Primed }
 	case *sphost.Driver:
 		return func() bool { return drv.Status().Connected }
-	case *nio.Multi:
-		var checks []func() bool
-		for _, c := range drv.Children() {
-			if h := driverHealth(c.Driver); h != nil {
-				checks = append(checks, h)
-			}
-		}
-		if len(checks) == 0 {
-			return nil
-		}
-		return func() bool {
-			for _, h := range checks {
-				if !h() {
-					return false
-				}
-			}
-			return true
-		}
 	}
 	return nil
 }
@@ -1023,51 +1178,61 @@ func driverHealth(d nio.Driver) func() bool {
 // construction path serves both; two or more wrap in nio.Multi, which is
 // where duplicate tag ownership across drivers is refused (a load-time
 // error naming both drivers — the same no-last-wins rule tag files keep).
-func buildDrivers(fsys fs.FS, m Manifest) (nio.Driver, error) {
+// It also returns every configured driver with its name — a lone one
+// included, since a Sparkplug device is named after its driver — and
+// none for the implicit memory loopback.
+func buildDrivers(fsys fs.FS, m Manifest) (nio.Driver, []nio.NamedDriver, error) {
 	configs := m.Drivers
 	if !reflect.DeepEqual(m.Driver, DriverConfig{}) {
 		if len(configs) > 0 {
-			return nil, fmt.Errorf("%s: driver: and drivers: are both set — drivers: is the plural of the same section, so move the single driver into the list", ManifestName)
+			return nil, nil, fmt.Errorf("%s: driver: and drivers: are both set — drivers: is the plural of the same section, so move the single driver into the list", ManifestName)
 		}
 		configs = []DriverConfig{m.Driver}
-	}
-	switch len(configs) {
-	case 0:
-		// No driver section at all: the memory loopback, as ever.
-		return buildDriver(fsys, DriverConfig{})
-	case 1:
-		return buildDriver(fsys, configs[0])
 	}
 	// Names default to the type, deduped "eip-2" — stable, predictable, and
 	// only needed once two drivers share a manifest. An explicit name that
 	// collides is caught by NewMulti, which checks the final set.
 	counts := map[string]int{}
+	nameOf := func(c DriverConfig) string {
+		if c.Name != "" {
+			return c.Name
+		}
+		base := strings.ToLower(c.Type)
+		if base == "" {
+			base = "memory"
+		}
+		counts[base]++
+		if n := counts[base]; n > 1 {
+			return fmt.Sprintf("%s-%d", base, n)
+		}
+		return base
+	}
+	switch len(configs) {
+	case 0:
+		// No driver section at all: the memory loopback, as ever.
+		d, err := buildDriver(fsys, DriverConfig{})
+		return d, nil, err
+	case 1:
+		d, err := buildDriver(fsys, configs[0])
+		if err != nil {
+			return nil, nil, err
+		}
+		return d, []nio.NamedDriver{{Name: nameOf(configs[0]), Driver: d}}, nil
+	}
 	named := make([]nio.NamedDriver, 0, len(configs))
 	for i, c := range configs {
-		name := c.Name
-		if name == "" {
-			base := strings.ToLower(c.Type)
-			if base == "" {
-				base = "memory"
-			}
-			counts[base]++
-			if n := counts[base]; n > 1 {
-				name = fmt.Sprintf("%s-%d", base, n)
-			} else {
-				name = base
-			}
-		}
+		name := nameOf(c)
 		d, err := buildDriver(fsys, c)
 		if err != nil {
-			return nil, fmt.Errorf("drivers[%d] (%s): %w", i, name, err)
+			return nil, nil, fmt.Errorf("drivers[%d] (%s): %w", i, name, err)
 		}
 		named = append(named, nio.NamedDriver{Name: name, Driver: d})
 	}
 	multi, err := nio.NewMulti(named...)
 	if err != nil {
-		return nil, fmt.Errorf("drivers: %w", err)
+		return nil, nil, fmt.Errorf("drivers: %w", err)
 	}
-	return multi, nil
+	return multi, named, nil
 }
 
 func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {

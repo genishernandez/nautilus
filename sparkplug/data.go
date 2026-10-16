@@ -3,8 +3,8 @@ package sparkplug
 import (
 	"time"
 
-	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/runtime"
+	"github.com/joyautomation/nautilus/sparkplug/spb"
 )
 
 // scanAndPublish samples the tag store once, applies each metric's RBE rule,
@@ -230,6 +230,9 @@ func (n *Node) drainStoreForward() bool {
 	sent, ok := n.publishRecords(recs)
 	if !ok {
 		n.sf.requeue(recs[sent:])
+	}
+	n.sf.delivered(recs[:sent]) // the file's bookkeeping; no-op without one
+	if !ok {
 		return false
 	}
 	if left := n.sf.len(); left > 0 {
@@ -279,7 +282,7 @@ func (n *Node) refreshShapeLocked(tags *runtime.Tags) {
 func (n *Node) collectChanged(snap map[string]runtime.Sample, now time.Time, owner string) []Metric {
 	var out []Metric
 	for _, name := range n.ownerName[owner] {
-		if !n.known[name] {
+		if !n.known[name] || n.unpublishable[name] {
 			continue
 		}
 		s, ok := snap[name]
@@ -295,18 +298,26 @@ func (n *Node) collectChanged(snap map[string]runtime.Sample, now time.Time, own
 			continue
 		}
 		v := s.Value
-		tmplRef := ""
-		if v.Kind == ir.TypeStruct && v.Struct != nil {
-			tmplRef = v.Struct.Name
-		}
-		m, err := MetricFromValue(name, v, tmplRef)
+		m, err := n.metricFor(name, v)
 		if err != nil {
 			continue
 		}
 		// Data messages carry the full metric name (aliases are unusable
 		// under the TCK — see birth.go).
 		m.Timestamp = nowMs()
-		out = append(out, m)
+		if n.flatten && m.Datatype == spb.DataType_Template {
+			// Only the members that moved since the last publish; st.last
+			// is still that publish's value here (record comes after).
+			var prev []Metric
+			if st.primed {
+				if pm, err := n.metricFor(name, st.last); err == nil {
+					prev = flattenMetric(pm)
+				}
+			}
+			out = append(out, changedLeaves(flattenMetric(m), prev)...)
+		} else {
+			out = append(out, m)
+		}
 		st.record(v, s.Gen, now)
 	}
 	return out
@@ -314,11 +325,12 @@ func (n *Node) collectChanged(snap map[string]runtime.Sample, now time.Time, own
 
 // deviceHealthLocked detects device health transitions and returns closures
 // that publish the corresponding DBIRTH/DDEATH after the lock is released.
+// "Healthy" is deviceReady: connected, and its first read delivered.
 // Caller holds n.mu.
 func (n *Node) deviceHealthLocked(snap map[string]runtime.Sample) []func(*Node) {
 	var events []func(*Node)
 	for _, d := range n.devices {
-		healthy := d.Health == nil || d.Health()
+		healthy := n.deviceReadyLocked(d, func(name string) bool { _, ok := snap[name]; return ok }, time.Now())
 		was := n.devHealth[d.ID]
 		if healthy == was {
 			continue
@@ -351,11 +363,9 @@ func (n *Node) publishDeviceBirth(d Device) {
 		if !ok {
 			continue
 		}
-		m, err := n.birthMetric(name, v, ts)
-		if err != nil {
-			continue
+		if m, ok := n.birthMetric(name, v, ts); ok {
+			ms = append(ms, n.expand(m)...)
 		}
-		ms = append(ms, m)
 	}
 	p, err := Payload{Timestamp: ts, Seq: n.nextSeq(), Metrics: ms}.Encode()
 	n.mu.Unlock()

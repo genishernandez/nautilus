@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/joyautomation/nautilus/lang/ld"
-	"github.com/joyautomation/nautilus/lang/st"
 )
 
 // Rung lowering: the ladder graph's elements to Logix neutral text.
@@ -55,12 +54,21 @@ func (lw *lowered) rung(r ld.Rung, notes string) {
 // split the rung) and false inside a branch leg.
 func (c *rungCtx) series(elems []ld.Element, top bool) string {
 	var parts []string
+	skip := 0
 	for i, e := range elems {
+		if skip > 0 {
+			skip--
+			continue
+		}
 		last := i == len(elems)-1
 		switch e.Kind {
 		case "contact":
 			parts = append(parts, c.contact(e.Ref, e.Neg))
 		case "fn":
+			if isFirstScan(e.Fn, e.Args) {
+				parts = append(parts, c.contact(firstScanFlag, e.Neg))
+				continue
+			}
 			if t, ok := c.compare(e); ok {
 				parts = append(parts, t)
 			}
@@ -78,6 +86,27 @@ func (c *rungCtx) series(elems []ld.Element, top bool) string {
 			c.legHead = inherited
 			parts = append(parts, "["+strings.Join(legs, " ,")+" ]")
 		case "fb":
+			if isLocalTime(e.Type) {
+				// The import's copy right after the call folds into the GSV;
+				// when the instance is read elsewhere too, the call fills
+				// it and the copy is element for element.
+				if i+1 < len(elems) && elems[i+1].Kind == "assign" {
+					if dest, ok := localTimeCopy(e.Inst, elems[i+1].Text); ok {
+						skip = 1
+						if c.lw.clockFold[strings.ToLower(e.Inst)] {
+							parts = append(parts, gsvLocalTime(dest))
+							continue
+						}
+						c.lw.clockUsed[strings.ToLower(e.Inst)] = true
+						parts = append(parts, gsvLocalTime(e.Inst+"[0]"))
+						parts = append(parts, localTimeMoves(e.Inst, dest)...)
+						continue
+					}
+				}
+				c.lw.clockUsed[strings.ToLower(e.Inst)] = true
+				parts = append(parts, gsvLocalTime(e.Inst+"[0]"))
+				continue
+			}
 			if c.lw.blockType(e.Type) == "" && c.lw.blockSourceExists(e.Type) {
 				// A user block: an Add-On Instruction at the head of its
 				// rung, the condition so far on a helper rung (aoi.go).
@@ -214,8 +243,11 @@ func (c *rungCtx) ref(ref string) (string, bool) {
 	}
 	typ := strings.ToUpper(strings.TrimSpace(v.Type))
 	if strings.EqualFold(typ, "TIME") {
-		c.lw.diag(ruleTime, c.r.Line, c.r.Name, "%s: a TIME variable can only feed a timer preset in the Logix target", ref)
+		c.lw.diag(ruleTime, c.r.Line, c.r.Name, "%s: a TIME variable can only feed a timer preset in the Logix target; compare or compute with a DINT of milliseconds", ref)
 		return "", false
+	}
+	if isLocalTime(typ) && strings.HasPrefix(rest, ".") {
+		return c.lw.localTimeMember(base, rest[1:], c.r.Line, c.r.Name)
 	}
 	if rest == "" || strings.HasPrefix(rest, "[") && !strings.Contains(rest, ".") {
 		return ref, true
@@ -284,7 +316,7 @@ func (c *rungCtx) ref(ref string) (string, bool) {
 			if p := a.param(member); p != nil && !strings.Contains(member, ".") && !strings.Contains(member, "[") {
 				return base + "." + p.Name, true
 			}
-			c.lw.diag(ruleMember, c.r.Line, c.r.Name, "%s: %s has no parameter %s", ref, v.Type, member)
+			c.lw.diag(ruleMember, c.r.Line, c.r.Name, "%s: %s has no parameter %s (parameters: %s)", ref, v.Type, member, a.paramNames(""))
 			return "", false
 		}
 		return "", false
@@ -552,7 +584,7 @@ func (c *rungCtx) block(e ld.Element, top, isLast bool) (text, cont string, ok b
 			// moves into a DINT.
 			member, ok := memberRewrite[st][up]
 			if !ok {
-				c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: output %s has no Logix member", e.Inst, e.Type, pin)
+				c.lw.diag(ruleFBPin, c.r.Line, c.r.Name, "%s:%s: output %s has no Logix member; the readable members are %s", e.Inst, e.Type, pin, membersOf(st))
 				return "", "", false
 			}
 			target, ok := c.ref(val)
@@ -674,6 +706,10 @@ func (c *rungCtx) preset(e ld.Element, st, val string) bool {
 	}
 	// An element of an array of blocks: a literal index gets its preset
 	// in the tag's data; a computed index takes a MOVE ahead of the rung.
+	// When some call indexes the array with a variable, that MOVE can land
+	// on any element and is sticky on the controller, so a literal-index
+	// call re-asserts its own preset with a MOVE as well — while keeping it
+	// in the tag's data, which is the element's preset until then.
 	idx, literalIdx := -1, false
 	if instIdx != "" {
 		inner := strings.TrimSuffix(strings.TrimPrefix(instIdx, "["), "]")
@@ -691,11 +727,14 @@ func (c *rungCtx) preset(e ld.Element, st, val string) bool {
 		switch {
 		case instIdx == "":
 			tag.Preset = lit
-		case literalIdx && !c.lw.computedIdx[strings.ToLower(instBase)]:
+		case literalIdx:
 			if tag.Presets == nil {
 				tag.Presets = map[int]int64{}
 			}
 			tag.Presets[idx] = lit
+			if c.lw.computedIdx[strings.ToLower(instBase)] {
+				c.pre = append(c.pre, rungOut{Text: "MOVE(" + strconv.FormatInt(lit, 10) + "," + e.Inst + ".PRE)", Source: c.r.Name, Line: c.r.Line})
+			}
 		default:
 			c.pre = append(c.pre, rungOut{Text: "MOVE(" + strconv.FormatInt(lit, 10) + "," + e.Inst + ".PRE)", Source: c.r.Name, Line: c.r.Line})
 		}
@@ -771,30 +810,12 @@ func (lw *lowered) userBlock(typ string) bool {
 			return true
 		}
 	}
-	for _, lib := range lw.opts.Libs {
-		if prog, err := st.Parse(lib); err == nil {
-			for _, fb := range prog.FBDecls {
-				if strings.EqualFold(fb.Name, typ) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return lw.libs().fbs[strings.ToLower(typ)]
 }
 
 // userFunction reports whether a name is a user FUNCTION a library declares.
 func (lw *lowered) userFunction(name string) bool {
-	for _, lib := range lw.opts.Libs {
-		if prog, err := st.Parse(lib); err == nil {
-			for _, fn := range prog.FuncDecls {
-				if strings.EqualFold(fn.Name, name) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return lw.libs().fns[strings.ToLower(name)]
 }
 
 // splitBinding reads `PIN := value` or `PIN => target`.

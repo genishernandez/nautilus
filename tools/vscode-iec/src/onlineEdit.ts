@@ -59,6 +59,9 @@ export type ProgramInfo = {
   canRollback: boolean;
   programs?: ProgramSummary[];
   error?: string;
+  /** "logix" when the runtime URL is `naut logix serve --project`: the
+   * Download there is an online edit to a Logix controller (logixDeploy.ts). */
+  target?: string;
 };
 
 /** All four IEC languages participate in online edits: a project's program
@@ -286,14 +289,33 @@ export class OnlineEdit implements vscode.Disposable {
     const c = res.ok;
     const dir = vscode.Uri.file(c.root);
     const at = (rel: string) => vscode.Uri.joinPath(dir, ...rel.split("/"));
+    const activeFile = activeUri && under(activeUri.path, dir.path) ? activeUri.path.slice(dir.path.length + 1) : "";
+    if (c.programs.some((p) => p.file === activeFile)) this.lastProgramFile = activeFile;
     return {
       dir,
       prelude: c.prelude,
       // Project-relative, like the program files: a lib/ file never names one.
-      activeFile: activeUri && under(activeUri.path, dir.path) ? activeUri.path.slice(dir.path.length + 1) : "",
+      activeFile,
       programs: c.programs.map((p) => ({ file: p.file, uri: at(p.file), body: p.program, pou: p.pou })),
       libraries: c.libraries.map((file) => ({ file, uri: at(file) })),
     };
+  }
+
+  /** The last program file that was the active editor — what Rollback and
+   * Download fall back to when the active tab names no program (a diff view). */
+  private lastProgramFile = "";
+
+  private async pickProgram<P extends { file: string; pou: string }>(
+    programs: P[],
+    action: string
+  ): Promise<P | undefined> {
+    const last = programs.find((p) => p.file === this.lastProgramFile);
+    if (last) return last;
+    const pick = await vscode.window.showQuickPick(
+      programs.map((p) => ({ label: p.file, description: p.pou, program: p })),
+      { title: `nautilus: choose the program to ${action}` }
+    );
+    return pick?.program;
   }
 
   /**
@@ -304,7 +326,15 @@ export class OnlineEdit implements vscode.Disposable {
    * composeAll and handle multi-program projects themselves.
    */
   private async compose(quiet = false, action = "download"): Promise<
-    | { source: string; prelude: string; programFile: string; programUri: vscode.Uri; programBody: string; pou: string }
+    | {
+        source: string;
+        prelude: string;
+        programFile: string;
+        programUri: vscode.Uri;
+        programBody: string;
+        pou: string;
+        dir: vscode.Uri;
+      }
     | undefined
   > {
     const ws = await this.composeAll(quiet);
@@ -340,13 +370,18 @@ export class OnlineEdit implements vscode.Disposable {
           if (!pick) return undefined;
           program = pick.program;
         } else {
-          if (!quiet)
-            void notifyError(
-              library
-                ? `nautilus: no program in this workspace instantiates a block from ${ws.activeFile} — open the one to ${action}`
-                : `nautilus: multiple program files (${ws.programs.map((p) => p.file).join(", ")}) — open the one to ${action}`
-            );
-          return undefined;
+          if (library) {
+            if (!quiet)
+              void notifyError(
+                `nautilus: no program in this workspace instantiates a block from ${ws.activeFile} — open the one to ${action}`
+              );
+            return undefined;
+          }
+          // Neither a program nor a library (a diff tab, a settings file):
+          // the last program that was active is the likeliest target, else ask.
+          const picked = quiet ? undefined : await this.pickProgram(ws.programs, action);
+          if (!picked) return undefined;
+          program = picked;
         }
       }
     }
@@ -357,7 +392,18 @@ export class OnlineEdit implements vscode.Disposable {
       programUri: program.uri,
       programBody: program.body,
       pou: program.pou,
+      dir: ws.dir,
     };
+  }
+
+  /** The program a Logix deploy sends (logixDeploy.ts): the program file's
+   * text as written — unsaved edits included — and the project directory.
+   * The Logix writer takes the project's libraries itself, so no prelude. */
+  async programForLogix(
+    action: string
+  ): Promise<{ programFile: string; programBody: string; dir: vscode.Uri } | undefined> {
+    const c = await this.compose(false, action);
+    return c && { programFile: c.programFile, programBody: c.programBody, dir: c.dir };
   }
 
   /** Push the composed workspace program to the controller (warm swap). */
@@ -370,6 +416,12 @@ export class OnlineEdit implements vscode.Disposable {
     const info = await this.fetchInfo(composed.pou);
     if (!info) {
       void notifyError(`nautilus: no controller at ${this.runtimeUrl()}`);
+      return;
+    }
+    if (info.target === "logix") {
+      // `naut logix serve --project`: Download here is an online edit to a
+      // Logix controller, with its own confirmation and progress.
+      await vscode.commands.executeCommand("nautilus.logix.onlineEdit");
       return;
     }
     if (!info.editable) {
@@ -643,15 +695,13 @@ export class OnlineEdit implements vscode.Disposable {
     // Without the composition the target program is unknown, and falling
     // through to main could undo the wrong task.
     if (!ws && this.composeError) return;
-    const program =
+    let program =
       ws && (ws.programs.length === 1 ? ws.programs[0] : ws.programs.find((p) => p.file === ws.activeFile));
     if (ws && ws.programs.length > 1 && !program) {
       // Rolling back is per-task — falling through to main would undo the
-      // wrong program.
-      void notifyError(
-        `nautilus: multiple program files (${ws.programs.map((p) => p.file).join(", ")}) — open the one to roll back`
-      );
-      return;
+      // wrong program, so resolve one (last active program, else ask).
+      program = await this.pickProgram(ws.programs, "roll back");
+      if (!program) return;
     }
     if (this.confirmWritesEnabled()) {
       const pick = await notifyWarning(

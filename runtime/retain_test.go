@@ -83,16 +83,36 @@ func TestRetainedValueLoadsBeforeFirstScan(t *testing.T) {
 }
 
 // The store is not a back door: a tag outside the retained set is ignored
-// even if a state file (or a tampered ConfigMap) names it.
+// even if a state file (or a tampered ConfigMap) names it. The program
+// here never writes Count, so a value the load let through would still be
+// there after the scan (counterProgram rewrites Count every scan and would
+// hide it).
 func TestLoadIgnoresTagsOutsideTheRetainedSet(t *testing.T) {
 	store := &fakeStore{state: retain.State{Tags: map[string]any{
 		"SP":    72.5,
-		"Count": int64(999), // RoleState — not retained by default
+		"Count": 999.0, // RoleState — not retained by default
 	}}}
-	rt := newRetained(t, store, nil)
-	rt.Scan()
-	if got := rt.Tags().vals["Count"].v.I; got == 999 {
-		t.Fatal("a non-retained tag was written from the store")
+	rt, err := New(Options{
+		Program: `PROGRAM Idle VAR_EXTERNAL Count : INT; SP : REAL; END_VAR END_PROGRAM`,
+		Tags: []TagDef{
+			Setpoint("SP", 65.0),
+			State("Count", int64(7)),
+		},
+		Retain: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Scan() // the first scan's takeover is what loads the store
+	if got := rt.Tags().Real("SP"); got != 72.5 {
+		t.Fatalf("SP = %v; the load did not run (want the retained 72.5)", got)
+	}
+	v, err := rt.Tags().ReadGlobal("Count")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.I != 7 || v.F != 0 {
+		t.Fatalf("Count = %+v; want its seed 7: a non-retained tag was written from the store", v)
 	}
 }
 
@@ -249,7 +269,10 @@ func TestTakeoverReloadsAndResetsFrames(t *testing.T) {
 // keeps running the edit, not the binary's baked-in source.
 func TestRetainedProgramApplies(t *testing.T) {
 	edited := strings.Replace(counterProgram, "n := n + 1;", "n := n + 10;", 1)
-	store := &fakeStore{state: retain.State{Programs: map[string]string{MainTaskName: edited}}}
+	store := &fakeStore{state: retain.State{
+		Programs:     map[string]string{MainTaskName: edited},
+		ProgramBases: map[string]string{MainTaskName: sourceHash(counterProgram)},
+	}}
 	rt := newRetained(t, store, nil)
 	rt.Scan()
 	if got := rt.Tags().vals["Count"].v.I; got != 10 {
@@ -260,10 +283,267 @@ func TestRetainedProgramApplies(t *testing.T) {
 	}
 }
 
+// OE-005: an online edit survives a restart when a retain store is
+// configured. The edit is saved by the leader's saver tick and reloaded by
+// the next runtime on the same store before its first scan. A newer binary
+// (a different built-in program) is a deploy, and the deploy wins (#359).
+func TestOnlineEditSurvivesARestartThroughTheStore(t *testing.T) {
+	store := &fakeStore{}
+	rt := newRetained(t, store, nil)
+	rt.Scan()
+	if err := rt.Program().Swap(strings.Replace(counterProgram, "n := n + 1;", "n := n + 10;", 1)); err != nil {
+		t.Fatal(err)
+	}
+	rt.saveRetained(nil)
+	if _, ok := store.state.Programs[MainTaskName]; !ok {
+		t.Fatal("the saver did not persist the online edit")
+	}
+
+	// Restart: a fresh runtime from the same built-in program and store.
+	rt2 := newRetained(t, store, nil)
+	rt2.Scan()
+	if got := rt2.Tags().vals["Count"].v.I; got != 10 {
+		t.Fatalf("Count = %d after a restart, want 10 from the online edit", got)
+	}
+
+	// A newer binary (a different built-in program) runs its own program:
+	// a deploy replaces the edit.
+	rt3, err := New(Options{
+		Program: strings.Replace(counterProgram, "n := n + 1;", "n := n + 5;", 1),
+		Tags:    []TagDef{Setpoint("SP", 65.0), State("Count", int64(0))},
+		Retain:  store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt3.Scan()
+	if got := rt3.Tags().vals["Count"].v.I; got != 5 {
+		t.Fatalf("Count = %d on a newer binary, want 5: a deploy replaces the retained edit", got)
+	}
+
+	// A build whose program is the edit (pulled and committed) runs clean,
+	// and its next save drops the retained source.
+	rt4, err := New(Options{
+		Program: strings.Replace(counterProgram, "n := n + 1;", "n := n + 10;", 1),
+		Tags:    []TagDef{Setpoint("SP", 65.0), State("Count", int64(0))},
+		Retain:  store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt4.Program().Dirty() {
+		t.Fatal("a build matching the retained edit still reads as edited")
+	}
+	if st := rt4.retainState(); len(st.Programs) != 0 {
+		t.Fatalf("a build matching the edit still persists it: %v", st.Programs)
+	}
+}
+
+// ── online edits across a restart vs. a deploy (#359) ────────────────────
+
+// newBuild is a runtime on the given store whose binary embeds program — a
+// restart when program is counterProgram, a deploy of a different build
+// otherwise.
+func newBuild(t *testing.T, store retain.Store, program string) *Runtime {
+	t.Helper()
+	rt, err := New(Options{
+		Program: program,
+		Tags:    []TagDef{Setpoint("SP", 65.0), State("Count", int64(0))},
+		Retain:  store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt
+}
+
+// editAndSave makes an online edit (n := n + 10) on a fresh runtime of the
+// counterProgram build and lets the saver persist it, as a running
+// controller does every saveInterval.
+func editAndSave(t *testing.T, store *fakeStore) string {
+	t.Helper()
+	edited := strings.Replace(counterProgram, "n := n + 1;", "n := n + 10;", 1)
+	rt := newRetained(t, store, nil)
+	rt.Scan()
+	if _, err := rt.Program().SwapWarm(edited); err != nil {
+		t.Fatal(err)
+	}
+	rt.saveRetained(nil)
+	if store.state.Programs[MainTaskName] != edited {
+		t.Fatal("the saver did not persist the online edit")
+	}
+	if got, want := store.state.ProgramBases[MainTaskName], sourceHash(counterProgram); got != want {
+		t.Fatalf("saved edit base = %q, want the build's program hash %q", got, want)
+	}
+	return edited
+}
+
+// A restart of the SAME build keeps running the online edit: the store
+// reloads it before the first scan, as a PLC keeps its edits through a
+// power cycle.
+func TestOnlineEditSurvivesARestartOfTheSameBuild(t *testing.T) {
+	store := &fakeStore{}
+	editAndSave(t, store)
+
+	rt := newBuild(t, store, counterProgram)
+	rt.Scan()
+	if got := rt.Tags().vals["Count"].v.I; got != 10 {
+		t.Fatalf("Count = %d after a restart of the same build, want 10 from the online edit", got)
+	}
+	if !rt.Program().Dirty() {
+		t.Fatal("the reloaded edit must read as modified, so `naut pull` still sees it")
+	}
+	if d := rt.Stats().RetainDiscardedEdits; len(d) != 0 {
+		t.Fatalf("a restart of the same build reported discarded edits: %v", d)
+	}
+	if st := rt.retainState(); st.Programs[MainTaskName] == "" {
+		t.Fatal("the reloaded edit is no longer persisted")
+	}
+}
+
+// A deploy wins: a build whose program for the task differs from the one
+// the edit was made against runs its own program, the edit is discarded
+// (named in diagnostics), and the next save drops it from the store.
+func TestNewDeployReplacesARetainedOnlineEdit(t *testing.T) {
+	store := &fakeStore{}
+	edited := editAndSave(t, store)
+
+	deployed := strings.Replace(counterProgram, "n := n + 1;", "n := n + 5;", 1)
+	rt := newBuild(t, store, deployed)
+	rt.Scan()
+	if got := rt.Tags().vals["Count"].v.I; got != 5 {
+		t.Fatalf("Count = %d on a new build, want 5 from the deployed program, not the old edit", got)
+	}
+	if rt.Program().Dirty() {
+		t.Fatal("the new build reads as online-edited after its deploy discarded the edit")
+	}
+	s := rt.Stats()
+	if len(s.RetainDiscardedEdits) != 1 || s.RetainDiscardedEdits[0] != MainTaskName {
+		t.Fatalf("RetainDiscardedEdits = %v, want [%s]", s.RetainDiscardedEdits, MainTaskName)
+	}
+	if s.RetainErrors != 0 {
+		t.Fatalf("a discarded edit counted as a retain error: %+v", s.LastRetainError)
+	}
+	rt.saveRetained(nil)
+	if len(store.state.Programs) != 0 || len(store.state.ProgramBases) != 0 {
+		t.Fatalf("the discarded edit is still applied from the store: %v %v", store.state.Programs, store.state.ProgramBases)
+	}
+	// The safety net: the edit's source is kept, never applied, so an edit
+	// nobody pulled into git before the deploy can still be recovered.
+	if got := store.state.DiscardedPrograms[MainTaskName]; got != edited {
+		t.Fatalf("discardedPrograms[%s] = %q, want the discarded edit's source", MainTaskName, got)
+	}
+
+	// A restart of the new build stays on the deployed program, and the
+	// discarded source survives its load and save.
+	rt2 := newBuild(t, store, deployed)
+	rt2.Scan()
+	if got := rt2.Tags().vals["Count"].v.I; got != 5 {
+		t.Fatalf("Count = %d after restarting the new build, want 5", got)
+	}
+	rt2.saveRetained(nil)
+	if got := store.state.DiscardedPrograms[MainTaskName]; got != edited {
+		t.Fatal("a later save lost the discarded edit's source")
+	}
+
+	// A newer discard for the same task overwrites the older one.
+	second := strings.Replace(deployed, "n := n + 5;", "n := n + 7;", 1)
+	if _, err := rt2.Program().SwapWarm(second); err != nil {
+		t.Fatal(err)
+	}
+	rt2.saveRetained(nil)
+	rt3 := newBuild(t, store, counterProgram)
+	rt3.Scan()
+	rt3.saveRetained(nil)
+	if got := store.state.DiscardedPrograms[MainTaskName]; got != second {
+		t.Fatalf("discardedPrograms[%s] = %q, want the newest discarded edit", MainTaskName, got)
+	}
+}
+
+// A build that contains the edit (pulled into git and shipped) has nothing
+// to swap: it runs clean, nothing is reported discarded, and the next save
+// clears the entry.
+func TestBuildContainingTheEditClearsTheRetainedEntry(t *testing.T) {
+	store := &fakeStore{}
+	edited := editAndSave(t, store)
+
+	rt := newBuild(t, store, edited)
+	rt.Scan()
+	if got := rt.Tags().vals["Count"].v.I; got != 10 {
+		t.Fatalf("Count = %d, want 10 from the build that contains the edit", got)
+	}
+	if rt.Program().Dirty() {
+		t.Fatal("a build matching the retained edit reads as edited")
+	}
+	if d := rt.Stats().RetainDiscardedEdits; len(d) != 0 {
+		t.Fatalf("a build containing the edit reported it discarded: %v", d)
+	}
+	rt.saveRetained(nil)
+	if len(store.state.Programs) != 0 {
+		t.Fatalf("a build matching the edit still persists it: %v", store.state.Programs)
+	}
+}
+
+// A store written before edit bases were recorded has an edit with no base.
+// Nothing proves it was made against this build — a deploy may have
+// happened since — so it is treated as replaced by a deploy: dropped,
+// named in diagnostics, and the binary's program runs.
+func TestRetainedEditWithoutABaseIsDiscarded(t *testing.T) {
+	edited := strings.Replace(counterProgram, "n := n + 1;", "n := n + 10;", 1)
+	store := &fakeStore{state: retain.State{Programs: map[string]string{MainTaskName: edited}}}
+	rt := newRetained(t, store, nil)
+	rt.Scan()
+	if got := rt.Tags().vals["Count"].v.I; got != 1 {
+		t.Fatalf("Count = %d, want 1 from the binary's program: a base-less edit must not run", got)
+	}
+	if d := rt.Stats().RetainDiscardedEdits; len(d) != 1 || d[0] != MainTaskName {
+		t.Fatalf("RetainDiscardedEdits = %v, want [%s]", d, MainTaskName)
+	}
+
+	// Unless the binary already IS the edit: then it is simply cleared.
+	store = &fakeStore{state: retain.State{Programs: map[string]string{MainTaskName: edited}}}
+	rt = newBuild(t, store, edited)
+	rt.Scan()
+	if d := rt.Stats().RetainDiscardedEdits; len(d) != 0 {
+		t.Fatalf("a base-less edit the build contains was reported discarded: %v", d)
+	}
+}
+
+// A takeover re-reads the store. A standby of the same build picks up the
+// old leader's edit; a standby of a different build (a rolling deploy)
+// does not, and keeps its own program.
+func TestTakeoverAppliesOnlyASameBuildEdit(t *testing.T) {
+	store := &fakeStore{}
+	editAndSave(t, store)
+
+	same := newRetained(t, store, &flag{lead: true})
+	same.Scan()
+	if got := same.Tags().vals["Count"].v.I; got != 10 {
+		t.Fatalf("same-build takeover: Count = %d, want 10 from the old leader's edit", got)
+	}
+
+	other, err := New(Options{
+		Program:     strings.Replace(counterProgram, "n := n + 1;", "n := n + 5;", 1),
+		Tags:        []TagDef{Setpoint("SP", 65.0), State("Count", int64(0))},
+		Retain:      store,
+		Coordinator: &flag{lead: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Scan()
+	if got := other.Tags().vals["Count"].v.I; got != 5 {
+		t.Fatalf("new-build takeover: Count = %d, want 5 from its own program", got)
+	}
+}
+
 // A retained program that no longer compiles must not take down the
 // controller: the error surfaces in stats, the built-in program runs.
 func TestBrokenRetainedProgramIsReportedNotFatal(t *testing.T) {
-	store := &fakeStore{state: retain.State{Programs: map[string]string{MainTaskName: "PROGRAM Broken syntax error"}}}
+	store := &fakeStore{state: retain.State{
+		Programs:     map[string]string{MainTaskName: "PROGRAM Broken syntax error"},
+		ProgramBases: map[string]string{MainTaskName: sourceHash(counterProgram)},
+	}}
 	rt := newRetained(t, store, nil)
 	rt.Scan()
 	if got := rt.Tags().vals["Count"].v.I; got != 1 {
@@ -374,12 +654,12 @@ func (f *fakeAlarms) RestoreAlarms(m map[string]retain.AlarmRetain) {
 func TestAlarmStateRoundTripsThroughRetain(t *testing.T) {
 	store := &fakeStore{state: retain.State{
 		Alarms: map[string]retain.AlarmRetain{
-			"HiTemp": {Acked: true, AckBy: "rchon", AckMs: 1700000000000},
+			"HiTemp": {Acked: true, AckBy: "operator1", AckMs: 1700000000000},
 		},
 	}}
 	rt := newRetained(t, store, nil)
 	eng := &fakeAlarms{held: map[string]retain.AlarmRetain{
-		"LoFlow": {ShelfUntilMs: 1700000600000, ShelfBy: "rchon"},
+		"LoFlow": {ShelfUntilMs: 1700000600000, ShelfBy: "operator1"},
 	}}
 	rt.SetAlarms(eng)
 
@@ -388,11 +668,11 @@ func TestAlarmStateRoundTripsThroughRetain(t *testing.T) {
 	if len(eng.restored) != 1 {
 		t.Fatalf("RestoreAlarms called %d times, want once on takeover", len(eng.restored))
 	}
-	if got := eng.restored[0]["HiTemp"]; !got.Acked || got.AckBy != "rchon" {
+	if got := eng.restored[0]["HiTemp"]; !got.Acked || got.AckBy != "operator1" {
 		t.Errorf("restored %+v, want the stored acknowledgement", got)
 	}
 
-	if got := rt.retainState().Alarms; len(got) != 1 || got["LoFlow"].ShelfBy != "rchon" {
+	if got := rt.retainState().Alarms; len(got) != 1 || got["LoFlow"].ShelfBy != "operator1" {
 		t.Errorf("saved alarms = %+v, want the engine's shelf", got)
 	}
 }
@@ -403,7 +683,7 @@ func TestAlarmStateRoundTripsThroughRetain(t *testing.T) {
 func TestTakeoverRestoresAlarmsOnTheLeadershipEdge(t *testing.T) {
 	f := &flag{lead: true}
 	store := &fakeStore{state: retain.State{
-		Alarms: map[string]retain.AlarmRetain{"HiTemp": {Acked: true, AckBy: "rchon"}},
+		Alarms: map[string]retain.AlarmRetain{"HiTemp": {Acked: true, AckBy: "operator1"}},
 	}}
 	rt := newRetained(t, store, f)
 	eng := &fakeAlarms{}

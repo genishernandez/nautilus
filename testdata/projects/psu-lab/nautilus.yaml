@@ -1,0 +1,15 @@
+# psu-lab: a synthetic test fixture for the N-supply load sharing in
+# examples/it-cluster/lib/server.st (linked as lib/server.st). LAB1 has one supply, LAB4 four.
+# Not a demo; the it-cluster example does not include it.
+#   naut check .   naut test .
+name: psu-lab
+
+server:
+  addr: "localhost:8088"
+
+tasks:
+  - program: psu_lab.st
+    scan: 1s
+
+tag-files:
+  - tags/psu_lab.yaml

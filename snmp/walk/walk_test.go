@@ -128,6 +128,52 @@ Copyright (c) \"FS\" 2009-2024"
 	}
 }
 
+// A Linux net-snmp agent's UCD-SNMP-MIB load averages are Opaque floats; a
+// full walk of one must import, and write back as the same values.
+func TestParseOpaqueFloats(t *testing.T) {
+	in := `.1.3.6.1.4.1.2021.10.1.6.1 = Opaque: Float: 0.150000
+.1.3.6.1.4.1.2021.10.1.6.2 = Opaque: Double: 2.500000
+.1.3.6.1.4.1.2021.10.1.6.3 = Opaque: Hex-STRING: 01 02
+`
+	w, err := Parse(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		oid    string
+		want   float64
+		double bool
+	}{
+		{"1.3.6.1.4.1.2021.10.1.6.1", float64(float32(0.15)), false},
+		{"1.3.6.1.4.1.2021.10.1.6.2", 2.5, true},
+	} {
+		v, _ := w.Get(tc.oid)
+		f, double, ok := OpaqueFloat(v.Bytes)
+		if v.Type != Opaque || !ok || f != tc.want || double != tc.double {
+			t.Errorf("%s: %+v → %v double=%v ok=%v", tc.oid, v, f, double, ok)
+		}
+	}
+	if v, _ := w.Get("1.3.6.1.4.1.2021.10.1.6.3"); v.Type != Opaque || len(v.Bytes) != 2 {
+		t.Errorf("hex opaque = %+v", v)
+	}
+	if v, _ := w.Get("1.3.6.1.4.1.2021.10.1.6.1"); v.ValueString() != "0.15" {
+		t.Errorf("ValueString = %q", v.ValueString())
+	}
+	// Written back and re-read, the bytes are identical.
+	again, err := ParseBytes(w.Bytes())
+	if err != nil {
+		t.Fatalf("%v\n%s", err, w.Bytes())
+	}
+	for i := range w {
+		if string(w[i].Bytes) != string(again[i].Bytes) {
+			t.Errorf("%s round trip: % X → % X (%s)", w[i].OID, w[i].Bytes, again[i].Bytes, w[i].Line())
+		}
+	}
+	if _, err := Parse(strings.NewReader(".1.3.6.1.4.1.2021.10.1.6.1 = Opaque: Float: lots\n")); err == nil {
+		t.Error("a non-numeric Opaque Float must be an error")
+	}
+}
+
 func TestParseErrorsNameTheLine(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{".1.3.6.1.2.1.1.5.0 = STRING: \"x\"\n.1.3.6.1.2.1.1.5.0 = STRING: \"y\"\n", "appears twice"},

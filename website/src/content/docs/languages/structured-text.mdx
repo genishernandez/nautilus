@@ -72,8 +72,11 @@ is what the next line reads in the same scan.
 
 The `VAR_EXTERNAL` block here is the explicit form: in a manifest project every
 tag in `nautilus.yaml` is in scope in every program without it, typed by its
-`type:` (or its `init:`), and a `VAR_EXTERNAL` that names one must agree with
-that type. (This Go-tier example's tags are declared in Go with no type, so
+`type:` (or its `init:`). A `VAR_EXTERNAL` that names a tag with a `type:` must
+agree with it. A tag typed only by its `init:` takes the declared type instead
+(`VAR_EXTERNAL Count : DINT` with `init: 0` is a DINT), and the `init:` must be
+a value of that type: `init: TRUE` against `VAR_EXTERNAL Speed : REAL` is an
+error. (This Go-tier example's tags are declared in Go with no type, so
 the program states them.) Either way, naming a tag binds it in the tag store
 rather than creating it, and reading a tag nothing has ever written faults the
 scan with `undefined tag`. A `FUNCTION_BLOCK` sees no tag it does not declare
@@ -128,9 +131,15 @@ END_VAR
 
 Elementary types are `BOOL`; the integer kinds `SINT`, `USINT`, `INT`, `UINT`,
 `DINT`, `UDINT`, `LINT`, `ULINT`, `BYTE`, `WORD`, `DWORD`, `LWORD`; `REAL` and
-`LREAL`; `TIME` and `LTIME`; `STRING`, `WSTRING`, `CHAR`, and `WCHAR`. Integer
+`LREAL`; `TIME` and `LTIME`; `STRING`, `WSTRING`, `CHAR`, and `WCHAR`. `WSTRING`, `CHAR` and `WCHAR`
+are accepted as declarations but are held as `STRING`. Integer
 kinds share one 64-bit representation, so a declared width documents intent
-without narrowing. `TIME` counts milliseconds.
+without narrowing: arithmetic does not wrap (an `INT` at 32767 plus 1 is
+32768), by design, so a counter or totaliser never turns silently wrong. A
+conversion such as `TO_INT` wraps to its target when you want the PLC
+behaviour. Mixing signed and unsigned widens to a signed type that holds both
+(`INT + UINT` is a `DINT`) rather than being refused. `TIME` counts
+milliseconds.
 
 `ARRAY[lo..hi] OF T` takes several comma-separated dimensions and any element
 type, including a UDT or a function block. Bounds are integer constants: a
@@ -187,8 +196,9 @@ then `AND`; then `XOR`; then `OR`. An `INT` widens to `REAL` where one is
 expected; the other direction is a compile error, so narrowing goes through
 a conversion: `REAL_TO_DINT` (or `TO_DINT`) rounds to nearest with ties to even
 (`2.5` becomes `2`, `3.5` becomes `4`, as on Codesys, Logix and TIA), and
-`TRUNC_DINT` truncates toward zero. Every IEC `<A>_TO_<B>` between the
-elementary types exists; integer narrowing wraps to the target width
+`TRUNC_DINT` truncates toward zero. Every IEC `<A>_TO_<B>` between `BOOL`, the
+integer kinds, `REAL`, `LREAL`, `TIME`, `LTIME` and `STRING` exists (there are
+no `WSTRING_TO_…`, `CHAR_TO_…` or `WCHAR_TO_…` functions); integer narrowing wraps to the target width
 (`DINT_TO_INT(70000)` is `4464`, as on Codesys), and a REAL or a STRING with
 no value in the target faults the scan. The full matrix and its rules are in
 the [language reference](/reference/functions/#type-conversions).

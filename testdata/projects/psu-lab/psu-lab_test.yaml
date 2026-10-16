@@ -1,0 +1,44 @@
+# The supply blocks of lib/server.st (linked from the it-cluster example) on a
+# synthetic fixture: PsuUnit sharing the draw equally across N supplies.
+#   naut test .
+tolerance: 0.01
+
+tests:
+  - name: four supplies share the draw equally while all are up
+    steps:
+      - advance: 2s
+        expect: { LAB4_PSU1.OutputW: 50.0, LAB4_PSU2.OutputW: 50.0, LAB4_PSU3.OutputW: 50.0, LAB4_PSU4.OutputW: 50.0, LAB4_PSU1.Fault: false, LAB4.PowerOn: true, LAB4.PowerW: 200.0 }
+
+  - name: a lost supply carries nothing and the others share its load in the same scan
+    steps:
+      - given: { Sim_LAB4_PSU2.InputLost: true }
+        advance: 1s
+        expect: { LAB4_PSU2.OutputW: 0.0, LAB4_PSU2.InputOk: false, LAB4_PSU2.InputV: 0.0, LAB4_PSU2.Fault: true,
+                  LAB4_PSU1.OutputW: { near: 66.67 }, LAB4_PSU3.OutputW: { near: 66.67 }, LAB4_PSU4.OutputW: { near: 66.67 }, LAB4.PowerOn: true, LAB4.PowerW: 200.0 }
+      - given: { Sim_LAB4_PSU4.Fail: true }
+        advance: 1s
+        expect: { LAB4_PSU2.OutputW: 0.0, LAB4_PSU4.OutputW: 0.0, LAB4_PSU4.Fault: true, LAB4_PSU4.InputOk: true, LAB4_PSU1.OutputW: 100.0, LAB4_PSU3.OutputW: 100.0 }
+      - given: { Sim_LAB4_PSU3.InputLost: true }
+        advance: 1s
+        expect: { LAB4_PSU1.OutputW: 200.0, LAB4_PSU3.OutputW: 0.0, LAB4.PowerOn: true }
+      - given: { Sim_LAB4_PSU2.InputLost: false, Sim_LAB4_PSU3.InputLost: false, Sim_LAB4_PSU4.Fail: false }
+        advance: 1s
+        expect: { LAB4_PSU1.OutputW: 50.0, LAB4_PSU2.OutputW: 50.0, LAB4_PSU3.OutputW: 50.0, LAB4_PSU4.OutputW: 50.0, LAB4_PSU2.Fault: false }
+
+  - name: every one of four supplies down is no power at all
+    steps:
+      - given: { Sim_LAB4_PSU1.Fail: true, Sim_LAB4_PSU2.InputLost: true, Sim_LAB4_PSU3.Fail: true, Sim_LAB4_PSU4.InputLost: true }
+        advance: 1s
+        expect: { LAB4_PSU1.OutputW: 0.0, LAB4_PSU2.OutputW: 0.0, LAB4_PSU3.OutputW: 0.0, LAB4_PSU4.OutputW: 0.0,
+                  LAB4.PowerOn: false, LAB4.PowerW: 0.0, LAB4.Online: false }
+      - given: { Sim_LAB4_PSU3.Fail: false }
+        advance: 1s
+        expect: { LAB4_PSU3.OutputW: 200.0, LAB4_PSU1.OutputW: 0.0, LAB4.PowerOn: true, LAB4.Online: true }
+
+  - name: a single supply carries the whole draw, and its loss is no power (unchanged)
+    steps:
+      - advance: 1s
+        expect: { LAB1_PSU1.OutputW: 200.0, LAB1.PowerOn: true }
+      - given: { Sim_LAB1_PSU1.InputLost: true }
+        advance: 1s
+        expect: { LAB1_PSU1.OutputW: 0.0, LAB1_PSU1.Fault: true, LAB1.PowerOn: false, LAB1.PowerW: 0.0 }

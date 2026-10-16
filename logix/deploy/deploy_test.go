@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/joyautomation/nautilus/lang/l5x"
 	"github.com/joyautomation/nautilus/logix/logixd"
 	"github.com/joyautomation/nautilus/logix/writer"
 )
@@ -28,6 +30,11 @@ type fakeAgent struct {
 	// routineImports records whole-routine online imports (ST).
 	routineImports []map[string]any
 	mode           string
+	// startState makes a download refuse unless it switches to Program
+	// mode, as the SDK does with a controller in Run.
+	startState bool
+	// modeFails makes the mode read answer an error.
+	modeFails bool
 }
 
 func newFakeAgent(t *testing.T, running []byte) (*fakeAgent, *logixd.Client) {
@@ -96,6 +103,9 @@ func (f *fakeAgent) serve(w http.ResponseWriter, r *http.Request) {
 		ok(map[string]any{})
 	case strings.HasSuffix(r.URL.Path, "/comm-path"), strings.HasSuffix(r.URL.Path, "/online"), strings.HasSuffix(r.URL.Path, "/offline"):
 		ok(map[string]any{"connected": "Online", "commPath": "x"})
+	case strings.HasSuffix(r.URL.Path, "/mode") && f.modeFails:
+		w.WriteHeader(500)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]any{"kind": "operation_failed", "message": "mode unavailable", "fatal": false}})
 	case strings.HasSuffix(r.URL.Path, "/mode"):
 		ok(map[string]any{"mode": f.mode})
 	case strings.HasSuffix(r.URL.Path, "/partial-import-with-target"):
@@ -136,6 +146,18 @@ func (f *fakeAgent) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		ok(map[string]any{"insertPosition": body["insertPosition"], "replaceCount": body["replaceCount"], "onlineOption": body["onlineOption"], "elapsedMs": 3})
 	case strings.HasSuffix(r.URL.Path, "/download"):
+		if f.startState && (f.mode == "Run" || body["ensureProgramMode"] == true) {
+			// The SDK's answer, its status lines with it (on Echo, ~20).
+			w.WriteHeader(500)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false,
+				"error": map[string]any{"kind": "operation_failed", "type": "OperationFailedException",
+					"message": "RxE_INVALID_START_STATE - Invalid start state.  Internal error. (C:\\work\\DemoLine.ACD)", "fatal": false},
+				"events": []any{
+					map[string]any{"kind": "status", "source": "Download", "message": "Preparing the download"},
+					map[string]any{"kind": "error", "source": "Download", "message": "Failed to download to the controller"},
+				}})
+			return
+		}
 		f.running = f.generated()
 		f.mode = "Program"
 		ok(map[string]any{})
@@ -307,6 +329,41 @@ func TestEmptyControllerNeedsADownload(t *testing.T) {
 	}
 }
 
+// A plain download to a controller in Run is refused by the SDK with
+// RxE_INVALID_START_STATE; the error says what to do instead and keeps
+// the SDK's own text underneath (#379). Asked for Program mode and still
+// refused (a keyswitch in RUN), the hint would be wrong: the SDK's answer
+// goes as it is.
+func TestDownloadInRunSaysToSwitchToProgramMode(t *testing.T) {
+	src := demoSource(t)
+	f, c := newFakeAgent(t, nil)
+	f.startState = true
+	_, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download})
+	var se *StartStateError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v (%T)", err, err)
+	}
+	if se.Mode != "Run" || !strings.Contains(err.Error(), "the controller is in Run mode") ||
+		!strings.Contains(err.Error(), `"Switch to Program Mode and Download"`) || !strings.Contains(err.Error(), "--program-mode") {
+		t.Errorf("message = %q", err)
+	}
+	if strings.Contains(err.Error(), "RxE_") {
+		t.Errorf("the message carries the SDK's code: %q", err)
+	}
+	if raw := se.Raw.Error(); !strings.Contains(raw, "RxE_INVALID_START_STATE") || !strings.Contains(raw, "Failed to download to the controller") {
+		t.Errorf("raw = %q", raw)
+	}
+	if (&StartStateError{}).Error() == "" || !strings.Contains((&StartStateError{}).Error(), "is not in Program mode") {
+		t.Errorf("no mode: %q", (&StartStateError{}).Error())
+	}
+
+	// Program mode asked for, and refused all the same.
+	_, err = Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download, ProgramMode: true})
+	if errors.As(err, &se) || err == nil || !strings.Contains(err.Error(), "RxE_INVALID_START_STATE") {
+		t.Errorf("program mode, refused: %v (%T)", err, err)
+	}
+}
+
 // The warm path: one session, several edits, one upload.
 func TestSessionEditsWithoutReopening(t *testing.T) {
 	src := demoSource(t)
@@ -442,5 +499,195 @@ func TestDeployBuildsAnAOIProjectInTwoSteps(t *testing.T) {
 				t.Error("the skeleton should carry a NOP routine and no call")
 			}
 		}
+	}
+}
+
+// A project with side code has two programs with a MainRoutine: the
+// program's and the side program "Nautilus". The session must edit the
+// program's, whatever order the controller's routines come back in — a
+// map — so this connects several times; before the fix about half the
+// sessions picked Nautilus/MainRoutine and refused the edit as "does not
+// run this program's routine yet" (found on Echo, #375).
+func TestSessionEditsTheProgramNotTheSideProgram(t *testing.T) {
+	src := demoSource(t)
+	tgt := target()
+	tgt.Side = writer.Side{Heartbeat: "Nautilus_Scan"}
+	same, _, err := writer.Write(src, writer.Options{Controller: "DemoLine", Side: tgt.Side})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(same), `<Program Name="`+writer.SideProgram+`"`) {
+		t.Fatal("fixture has no side program")
+	}
+	edited := strings.Replace(src, "/StopPB ( RunCmd )", "/StopPB /HiLevelAlm ( RunCmd )", 1)
+	for i := 0; i < 12; i++ {
+		_, c := newFakeAgent(t, same)
+		s, err := Connect(context.Background(), Options{Client: c, Target: tgt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rep, err := s.Edit(context.Background(), edited)
+		if err != nil || rep.Applied != Online || !rep.Verified || rep.Program != "MainProgram" {
+			t.Fatalf("connect %d: err=%v report=%+v", i, err, rep)
+		}
+		// And the next edit compares with what the first left.
+		rep, err = s.Edit(context.Background(), edited)
+		if err != nil || !rep.Same {
+			t.Fatalf("connect %d, again: err=%v report=%+v", i, err, rep)
+		}
+		_ = s.Close(context.Background())
+	}
+}
+
+func keepTarget(t *testing.T) Target {
+	o := keepOptions(t)
+	tgt := target()
+	tgt.PeriodMs, tgt.Libs, tgt.Inits, tgt.Tags, tgt.Descs, tgt.Side = o.PeriodMs, o.Libs, o.Inits, o.Tags, o.Descs, o.Side
+	return tgt
+}
+
+// A download keeps the controller's values (#273): the upload comes before
+// the import, and what is downloaded carries the controller's data.
+func TestDownloadKeepsTheControllersValues(t *testing.T) {
+	f, c := newFakeAgent(t, running(t))
+	// A new rung, so there is something to download.
+	src := strings.Replace(keepSource(t), "END_LD", "  RUNG extra\n    StopPB ( HiLevelAlm )\nEND_LD", 1)
+	var lines []string
+	rep, err := Run(context.Background(), src, Options{Client: c, Target: keepTarget(t), Mode: Download, ProgramMode: true,
+		Log: func(format string, a ...any) { lines = append(lines, fmt.Sprintf(format, a...)) }})
+	if err != nil || !rep.Verified {
+		t.Fatalf("err = %v, report = %+v", err, rep)
+	}
+	if rep.Values == nil || len(rep.Values.Kept) != 12 {
+		t.Fatalf("values = %+v", rep.Values)
+	}
+	upload, convert := -1, -1
+	for i, call := range f.calls {
+		if upload < 0 && strings.HasSuffix(call, "/upload-to-new") {
+			upload = i
+		}
+		if convert < 0 && strings.HasSuffix(call, "/convert") {
+			convert = i
+		}
+	}
+	if upload < 0 || upload > convert {
+		t.Errorf("the upload must come before the project's import: %v", f.calls)
+	}
+	uploads := 0
+	for _, call := range f.calls {
+		if strings.HasSuffix(call, "/upload-to-new") {
+			uploads++
+		}
+	}
+	if uploads != 2 {
+		t.Errorf("%d uploads, want 2 (before, which also decides the values, and after)", uploads)
+	}
+	dl, _ := l5x.Parse(f.running)
+	if v := tagIn(t, dl, "", "HiLevelSP").Value; v != 72.5 {
+		t.Errorf("downloaded HiLevelSP = %v, want the controller's 72.5", v)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "tag values: 12 kept from the controller") {
+		t.Errorf("log = %v", lines)
+	}
+
+	// --reset-values: the project's values, and no upload before the build.
+	f, c = newFakeAgent(t, running(t))
+	rep, err = Run(context.Background(), src, Options{Client: c, Target: keepTarget(t), Mode: Download, ResetValues: true, ProgramMode: true})
+	if err != nil || rep.Values != nil {
+		t.Fatalf("err = %v, values = %+v", err, rep.Values)
+	}
+	dl, _ = l5x.Parse(f.running)
+	if v := tagIn(t, dl, "", "HiLevelSP").Value; v != 85.0 {
+		t.Errorf("reset: HiLevelSP = %v, want the project's 85", v)
+	}
+}
+
+// A build reports what a download would do with the values; an online
+// edit does not look at them.
+func TestBuildReportsTheValuePlan(t *testing.T) {
+	_, c := newFakeAgent(t, running(t))
+	o := keepTarget(t)
+	o.Tags["SpareSP"], o.Inits["SpareSP"] = "REAL", 5.0
+	src := strings.Replace(keepSource(t), "SpareSP    : DINT;", "SpareSP    : REAL;", 1)
+	src = strings.Replace(src, "GE(SpareSP, 0)", "GE(SpareSP, 0.0)", 1)
+	rep, err := Run(context.Background(), src, Options{Client: c, Target: o, Mode: BuildOnly})
+	if err != nil || rep.Values == nil || len(rep.Values.Reset) != 1 || rep.Values.Reset[0] != "SpareSP: DINT → REAL" {
+		t.Fatalf("err = %v, values = %+v", err, rep.Values)
+	}
+}
+
+// A plain download to a controller in Run is refused as soon as the mode
+// is read, before the import and build; the same answer as the SDK's
+// late refusal (#391).
+func TestDownloadInRunRefusedBeforeBuild(t *testing.T) {
+	src := demoSource(t)
+	for _, mode := range []string{"Run", "Remote Run"} {
+		f, c := newFakeAgent(t, running(t))
+		f.mode = mode
+		f.startState = true
+		rep, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download})
+		var se *StartStateError
+		if !errors.As(err, &se) || se.Mode != mode {
+			t.Fatalf("%s: err = %v (%T)", mode, err, err)
+		}
+		if rep == nil || rep.ModeBefore != mode {
+			t.Errorf("%s: report = %+v", mode, rep)
+		}
+		for _, call := range f.calls {
+			if strings.HasSuffix(call, "/build") || strings.HasSuffix(call, "/download") || strings.HasSuffix(call, "/save") {
+				t.Errorf("%s: %s ran after the refusal; calls = %v", mode, call, f.calls)
+			}
+		}
+		// Reset-values downloads are refused early too.
+		if _, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download, ResetValues: true}); !errors.As(err, &se) {
+			t.Errorf("%s reset: err = %v", mode, err)
+		}
+	}
+}
+
+// Program mode asked for: no check, the download goes ahead. A mode that
+// is not Run goes ahead too.
+func TestDownloadProgramModeSkipsTheModeCheck(t *testing.T) {
+	src := demoSource(t)
+	f, c := newFakeAgent(t, running(t))
+	f.startState = false
+	rep, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download, ProgramMode: true, ResetValues: true})
+	if err != nil || rep.Applied != Download {
+		t.Fatalf("err = %v, report = %+v", err, rep)
+	}
+	for _, call := range f.calls {
+		if strings.HasSuffix(call, "/mode") && !strings.Contains(strings.Join(f.calls, " "), "/download") {
+			t.Errorf("mode read before the download: %v", f.calls)
+		}
+	}
+	// Program mode on the controller: a plain download proceeds.
+	f2, c2 := newFakeAgent(t, running(t))
+	f2.mode = "Program"
+	if rep, err := Run(context.Background(), src, Options{Client: c2, Target: target(), Mode: Download}); err != nil || rep.Applied != Download {
+		t.Fatalf("program mode: err = %v", err)
+	}
+}
+
+// A mode read that fails falls through to today's behaviour: the download
+// is tried, and the SDK's own late refusal still gets the same answer.
+func TestDownloadModeReadFailureFallsThrough(t *testing.T) {
+	src := demoSource(t)
+	f, c := newFakeAgent(t, running(t))
+	f.modeFails, f.startState = true, true
+	_, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download})
+	var se *StartStateError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v (%T)", err, err)
+	}
+	built := false
+	for _, call := range f.calls {
+		built = built || strings.HasSuffix(call, "/build")
+	}
+	if !built {
+		t.Errorf("the download did not get as far as the build: %v", f.calls)
+	}
+	f.startState = false
+	if rep, err := Run(context.Background(), src, Options{Client: c, Target: target(), Mode: Download}); err != nil || rep.Applied != Download {
+		t.Fatalf("download with a failing mode read: err = %v", err)
 	}
 }

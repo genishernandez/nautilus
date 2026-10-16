@@ -1,0 +1,16 @@
+PROGRAM OrderFbd
+(* The same four assignments as FBD statements, in source order. *)
+VAR_EXTERNAL
+    A     : BOOL;
+    fbd_X : BOOL;
+    fbd_Y : BOOL;
+    fbd_V : BOOL;
+    fbd_W : BOOL;
+END_VAR
+FBD
+  fbd_X := A
+  fbd_Y := fbd_X
+  fbd_V := fbd_W
+  fbd_W := A
+END_FBD
+END_PROGRAM

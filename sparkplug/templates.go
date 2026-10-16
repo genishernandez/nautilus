@@ -25,8 +25,8 @@ func (n *Node) templateDefs(snap map[string]ir.Value, ts uint64) []Metric {
 		}
 		seen[sd.Name] = true
 		for _, f := range sd.Fields {
-			if s := structOf(f.Type); s != nil {
-				walk(s) // define nested types first
+			if f.Type != nil && f.Type.Kind == ir.TypeStruct {
+				walk(f.Type.Struct) // define nested types first
 			}
 		}
 		order = append(order, sd)
@@ -61,12 +61,21 @@ func (n *Node) templateDefs(snap map[string]ir.Value, ts uint64) []Metric {
 // nested types before their users). This is the convention Ignition/Tahu use
 // for a UDT member that is itself a UDT: the member is a reference, not an
 // inline copy of the nested definition.
+//
+// An array member's datatype is the array datatype itself (Int64Array, …) —
+// Sparkplug 3.0 §6.4.14 "Template" lets a template's metrics be any datatype — with no
+// value, like any other definition member: its length is in the instances.
+// A member Sparkplug cannot carry (publishable: an array of structs, a
+// multi-dimensional array) is left out here and in every instance.
 func definitionTemplate(sd *ir.StructDef) *Template {
 	t := &Template{IsDefinition: true}
 	for _, f := range sd.Fields {
+		if !publishable(f.Type) {
+			continue
+		}
 		m := Metric{Name: f.Name, Datatype: definitionDatatype(f.Type)}
-		if s := structOf(f.Type); s != nil {
-			m.Value = &Template{TemplateRef: s.Name}
+		if f.Type != nil && f.Type.Kind == ir.TypeStruct && f.Type.Struct != nil {
+			m.Value = &Template{TemplateRef: f.Type.Struct.Name}
 		} else {
 			m.IsNull = true // definition members have no value
 		}
@@ -76,8 +85,9 @@ func definitionTemplate(sd *ir.StructDef) *Template {
 }
 
 // definitionDatatype maps a field's ir.Type to its Sparkplug datatype for a
-// definition member. Arrays use their element datatype (v1 approximation);
-// nested structs are Template.
+// definition member — the datatype MetricFromValue gives an instance's member
+// of that type. Nested structs are Template; an array of scalars is the
+// matching array datatype.
 func definitionDatatype(t *ir.Type) spb.DataType {
 	if t == nil {
 		return spb.DataType_String
@@ -94,22 +104,11 @@ func definitionDatatype(t *ir.Type) spb.DataType {
 	case ir.TypeStruct:
 		return spb.DataType_Template
 	case ir.TypeArray:
-		return definitionDatatype(t.Elem)
+		if t.Elem != nil {
+			if dt, ok := arrayDatatype(t.Elem.Kind); ok {
+				return dt
+			}
+		}
 	}
 	return spb.DataType_String
-}
-
-// structOf returns the StructDef a type resolves to (through an array element),
-// or nil if it isn't a struct.
-func structOf(t *ir.Type) *ir.StructDef {
-	if t == nil {
-		return nil
-	}
-	switch t.Kind {
-	case ir.TypeStruct:
-		return t.Struct
-	case ir.TypeArray:
-		return structOf(t.Elem)
-	}
-	return nil
 }

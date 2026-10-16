@@ -252,6 +252,7 @@ VAR_EXTERNAL
 END_VAR
 VAR
   Live : BOOL;
+  Clearing : BOOL; (* ClearFaults this scan: it is reset before the plants run *)
   Cable_SW1_Port25 : BOOL;
   Cable_SW1_Port26 : BOOL;
   Cable_SW1_Port24 : BOOL;
@@ -273,6 +274,18 @@ VAR
   NODE1_M : ServerPlant;
   NODE2_M : ServerPlant;
   NODE3_M : ServerPlant;
+  Cable_SW1_Port25_Mbps : REAL;
+  Cable_SW1_Port26_Mbps : REAL;
+  Cable_SW1_Port24_Mbps : REAL;
+  Cable_SW2_Port25_Mbps : REAL;
+  Cable_SW2_Port26_Mbps : REAL;
+  Cable_SW2_Port24_Mbps : REAL;
+  Cable_SW3_Port25_Mbps : REAL;
+  Cable_SW3_Port26_Mbps : REAL;
+  Cable_SW3_Port24_Mbps : REAL;
+  Cable_SW1_Port27_Mbps : REAL;
+  Cable_SW2_Port27_Mbps : REAL;
+  Cable_SW3_Port27_Mbps : REAL;
   SW1_Port01_M : PortPlant;
   SW1_Port02_M : PortPlant;
   SW1_Port03_M : PortPlant;
@@ -455,6 +468,7 @@ VAR
   NODE3_Nic_BMC_M : NicPlant;
 END_VAR
   Live := Replay_At > 0;
+  Clearing := ClearFaults;
   IF ClearFaults THEN
     Sim_Room.InletDeltaC := 0.0;
     Sim_Net.BroadcastPps := 0.0;
@@ -1167,28 +1181,41 @@ END_VAR
     ClearFaults := FALSE;
   END_IF;
   (* the chassis first: dark, off, rebooting, the thermal model *)
-  SW1_M(Dt := PlantDtS, F := Sim_SW1, P := SW1);
-  SW2_M(Dt := PlantDtS, F := Sim_SW2, P := SW2);
-  SW3_M(Dt := PlantDtS, F := Sim_SW3, P := SW3);
-  NODE1_M(Rec := Rec_NODE1, F := Sim_NODE1, Room := Sim_Room, FansFailed := BOOL_TO_INT(Sim_NODE1_Fan1.Fail) + BOOL_TO_INT(Sim_NODE1_Fan2.Fail) + BOOL_TO_INT(Sim_NODE1_Fan3.Fail) + BOOL_TO_INT(Sim_NODE1_Fan4.Fail) + BOOL_TO_INT(Sim_NODE1_Fan5.Fail) + BOOL_TO_INT(Sim_NODE1_Fan6.Fail), CpuRiseNow := NODE1_Temp_CPU_M.Rise, CpuOverInlet := NODE1_Temp_CPU_M.Base - NODE1_Temp_Inlet_M.Base, Live := Live, P := NODE1);
-  NODE2_M(Rec := Rec_NODE2, F := Sim_NODE2, Room := Sim_Room, FansFailed := BOOL_TO_INT(Sim_NODE2_Fan1.Fail) + BOOL_TO_INT(Sim_NODE2_Fan2.Fail) + BOOL_TO_INT(Sim_NODE2_Fan3.Fail) + BOOL_TO_INT(Sim_NODE2_Fan4.Fail) + BOOL_TO_INT(Sim_NODE2_Fan5.Fail) + BOOL_TO_INT(Sim_NODE2_Fan6.Fail), CpuRiseNow := NODE2_Temp_CPU_M.Rise, CpuOverInlet := NODE2_Temp_CPU_M.Base - NODE2_Temp_Inlet_M.Base, Live := Live, P := NODE2);
-  NODE3_M(Rec := Rec_NODE3, F := Sim_NODE3, Room := Sim_Room, FansFailed := BOOL_TO_INT(Sim_NODE3_Fan1.Fail) + BOOL_TO_INT(Sim_NODE3_Fan2.Fail) + BOOL_TO_INT(Sim_NODE3_Fan3.Fail) + BOOL_TO_INT(Sim_NODE3_Fan4.Fail) + BOOL_TO_INT(Sim_NODE3_Fan5.Fail) + BOOL_TO_INT(Sim_NODE3_Fan6.Fail), CpuRiseNow := NODE3_Temp_CPU_M.Rise, CpuOverInlet := NODE3_Temp_CPU_M.Base - NODE3_Temp_Inlet_M.Base, Live := Live, P := NODE3);
-  (* every cable, from both ends' faults: down at one end is down at both *)
+  SW1_M(Dt := PlantDtS, Clear := Clearing, F := Sim_SW1, P := SW1);
+  SW2_M(Dt := PlantDtS, Clear := Clearing, F := Sim_SW2, P := SW2);
+  SW3_M(Dt := PlantDtS, Clear := Clearing, F := Sim_SW3, P := SW3);
+  NODE1_M(Rec := Rec_NODE1, F := Sim_NODE1, Room := Sim_Room, FansFailed := BOOL_TO_INT(Sim_NODE1_Fan1.Fail) + BOOL_TO_INT(Sim_NODE1_Fan2.Fail) + BOOL_TO_INT(Sim_NODE1_Fan3.Fail) + BOOL_TO_INT(Sim_NODE1_Fan4.Fail) + BOOL_TO_INT(Sim_NODE1_Fan5.Fail) + BOOL_TO_INT(Sim_NODE1_Fan6.Fail), CpuRiseNow := NODE1_Temp_CPU_M.Rise, CpuOverInlet := NODE1_Temp_CPU_M.Base - NODE1_Temp_Inlet_M.Base, Live := Live, Unpowered := (Sim_NODE1_PSU1.InputLost OR Sim_NODE1_PSU1.Fail) AND (Sim_NODE1_PSU2.InputLost OR Sim_NODE1_PSU2.Fail), P := NODE1);
+  NODE2_M(Rec := Rec_NODE2, F := Sim_NODE2, Room := Sim_Room, FansFailed := BOOL_TO_INT(Sim_NODE2_Fan1.Fail) + BOOL_TO_INT(Sim_NODE2_Fan2.Fail) + BOOL_TO_INT(Sim_NODE2_Fan3.Fail) + BOOL_TO_INT(Sim_NODE2_Fan4.Fail) + BOOL_TO_INT(Sim_NODE2_Fan5.Fail) + BOOL_TO_INT(Sim_NODE2_Fan6.Fail), CpuRiseNow := NODE2_Temp_CPU_M.Rise, CpuOverInlet := NODE2_Temp_CPU_M.Base - NODE2_Temp_Inlet_M.Base, Live := Live, Unpowered := (Sim_NODE2_PSU1.InputLost OR Sim_NODE2_PSU1.Fail) AND (Sim_NODE2_PSU2.InputLost OR Sim_NODE2_PSU2.Fail), P := NODE2);
+  NODE3_M(Rec := Rec_NODE3, F := Sim_NODE3, Room := Sim_Room, FansFailed := BOOL_TO_INT(Sim_NODE3_Fan1.Fail) + BOOL_TO_INT(Sim_NODE3_Fan2.Fail) + BOOL_TO_INT(Sim_NODE3_Fan3.Fail) + BOOL_TO_INT(Sim_NODE3_Fan4.Fail) + BOOL_TO_INT(Sim_NODE3_Fan5.Fail) + BOOL_TO_INT(Sim_NODE3_Fan6.Fail), CpuRiseNow := NODE3_Temp_CPU_M.Rise, CpuOverInlet := NODE3_Temp_CPU_M.Base - NODE3_Temp_Inlet_M.Base, Live := Live, Unpowered := (Sim_NODE3_PSU1.InputLost OR Sim_NODE3_PSU1.Fail) AND (Sim_NODE3_PSU2.InputLost OR Sim_NODE3_PSU2.Fail), P := NODE3);
+  (* every cable, from both ends' faults: down at one end is down at both,
+     and a speed override at one end is the link's *)
   Cable_SW1_Port25 := NOT (Sim_Cable_SW1_Port25.Pulled OR Sim_SW1_Port25.Down OR Sim_SW1_Port25.AdminDown OR SW1_M.Down OR Sim_NODE1_Nic_Slot2_P2.Down OR NODE1_M.Off);
+  Cable_SW1_Port25_Mbps := Sim_SW1_Port25.SpeedMbps;
   Cable_SW1_Port26 := NOT (Sim_Cable_SW1_Port26.Pulled OR Sim_SW1_Port26.Down OR Sim_SW1_Port26.AdminDown OR SW1_M.Down OR Sim_NODE3_Nic_Slot2_P2.Down OR NODE3_M.Off);
-  Cable_SW1_Port24 := NOT (Sim_Cable_SW1_Port24.Pulled OR Sim_SW1_Port24.Down OR Sim_SW1_Port24.AdminDown OR SW1_M.Down OR Sim_NODE1_Nic_BMC.Down OR NODE1_M.Off);
+  Cable_SW1_Port26_Mbps := Sim_SW1_Port26.SpeedMbps;
+  Cable_SW1_Port24 := NOT (Sim_Cable_SW1_Port24.Pulled OR Sim_SW1_Port24.Down OR Sim_SW1_Port24.AdminDown OR SW1_M.Down OR Sim_NODE1_Nic_BMC.Down OR NODE1_M.Dead);
+  Cable_SW1_Port24_Mbps := Sim_SW1_Port24.SpeedMbps;
   Cable_SW2_Port25 := NOT (Sim_Cable_SW2_Port25.Pulled OR Sim_SW2_Port25.Down OR Sim_SW2_Port25.AdminDown OR SW2_M.Down OR Sim_NODE2_Nic_Slot2_P2.Down OR NODE2_M.Off);
+  Cable_SW2_Port25_Mbps := Sim_SW2_Port25.SpeedMbps;
   Cable_SW2_Port26 := NOT (Sim_Cable_SW2_Port26.Pulled OR Sim_SW2_Port26.Down OR Sim_SW2_Port26.AdminDown OR SW2_M.Down OR Sim_NODE1_Nic_Slot3_P2.Down OR NODE1_M.Off);
-  Cable_SW2_Port24 := NOT (Sim_Cable_SW2_Port24.Pulled OR Sim_SW2_Port24.Down OR Sim_SW2_Port24.AdminDown OR SW2_M.Down OR Sim_NODE2_Nic_BMC.Down OR NODE2_M.Off);
+  Cable_SW2_Port26_Mbps := Sim_SW2_Port26.SpeedMbps;
+  Cable_SW2_Port24 := NOT (Sim_Cable_SW2_Port24.Pulled OR Sim_SW2_Port24.Down OR Sim_SW2_Port24.AdminDown OR SW2_M.Down OR Sim_NODE2_Nic_BMC.Down OR NODE2_M.Dead);
+  Cable_SW2_Port24_Mbps := Sim_SW2_Port24.SpeedMbps;
   Cable_SW3_Port25 := NOT (Sim_Cable_SW3_Port25.Pulled OR Sim_SW3_Port25.Down OR Sim_SW3_Port25.AdminDown OR SW3_M.Down OR Sim_NODE3_Nic_Slot3_P2.Down OR NODE3_M.Off);
+  Cable_SW3_Port25_Mbps := Sim_SW3_Port25.SpeedMbps;
   Cable_SW3_Port26 := NOT (Sim_Cable_SW3_Port26.Pulled OR Sim_SW3_Port26.Down OR Sim_SW3_Port26.AdminDown OR SW3_M.Down OR Sim_NODE2_Nic_Slot3_P2.Down OR NODE2_M.Off);
-  Cable_SW3_Port24 := NOT (Sim_Cable_SW3_Port24.Pulled OR Sim_SW3_Port24.Down OR Sim_SW3_Port24.AdminDown OR SW3_M.Down OR Sim_NODE3_Nic_BMC.Down OR NODE3_M.Off);
+  Cable_SW3_Port26_Mbps := Sim_SW3_Port26.SpeedMbps;
+  Cable_SW3_Port24 := NOT (Sim_Cable_SW3_Port24.Pulled OR Sim_SW3_Port24.Down OR Sim_SW3_Port24.AdminDown OR SW3_M.Down OR Sim_NODE3_Nic_BMC.Down OR NODE3_M.Dead);
+  Cable_SW3_Port24_Mbps := Sim_SW3_Port24.SpeedMbps;
   Cable_NODE1_Nic_Slot2_P1 := NOT (Sim_Cable_NODE1_Nic_Slot2_P1.Pulled OR Sim_NODE1_Nic_Slot2_P1.Down OR NODE1_M.Off OR Sim_NODE2_Nic_Slot3_P1.Down OR NODE2_M.Off);
   Cable_NODE2_Nic_Slot2_P1 := NOT (Sim_Cable_NODE2_Nic_Slot2_P1.Pulled OR Sim_NODE2_Nic_Slot2_P1.Down OR NODE2_M.Off OR Sim_NODE3_Nic_Slot3_P1.Down OR NODE3_M.Off);
   Cable_NODE1_Nic_Slot3_P1 := NOT (Sim_Cable_NODE1_Nic_Slot3_P1.Pulled OR Sim_NODE1_Nic_Slot3_P1.Down OR NODE1_M.Off OR Sim_NODE3_Nic_Slot2_P1.Down OR NODE3_M.Off);
   Cable_SW1_Port27 := NOT (Sim_Cable_SW1_Port27.Pulled OR Sim_SW1_Port27.Down OR Sim_SW1_Port27.AdminDown OR SW1_M.Down OR Sim_SW2_Port28.Down OR Sim_SW2_Port28.AdminDown OR SW2_M.Down);
+  Cable_SW1_Port27_Mbps := SlowerMbps(A := Sim_SW1_Port27.SpeedMbps, B := Sim_SW2_Port28.SpeedMbps);
   Cable_SW2_Port27 := NOT (Sim_Cable_SW2_Port27.Pulled OR Sim_SW2_Port27.Down OR Sim_SW2_Port27.AdminDown OR SW2_M.Down OR Sim_SW3_Port28.Down OR Sim_SW3_Port28.AdminDown OR SW3_M.Down);
+  Cable_SW2_Port27_Mbps := SlowerMbps(A := Sim_SW2_Port27.SpeedMbps, B := Sim_SW3_Port28.SpeedMbps);
   Cable_SW3_Port27 := NOT (Sim_Cable_SW3_Port27.Pulled OR Sim_SW3_Port27.Down OR Sim_SW3_Port27.AdminDown OR SW3_M.Down OR Sim_SW1_Port28.Down OR Sim_SW1_Port28.AdminDown OR SW1_M.Down);
+  Cable_SW3_Port27_Mbps := SlowerMbps(A := Sim_SW3_Port27.SpeedMbps, B := Sim_SW1_Port28.SpeedMbps);
   (* the switches: the recording bent by the faults, lib/switch.st *)
   SW1.PortsUp := 0;
   SW1_Port01_M(Rec := Rec_SW1_Port01, F := Sim_SW1_Port01, Dark := SW1_M.Down, Live := Live, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port01);
@@ -1237,15 +1264,15 @@ END_VAR
   IF SW1_Port22.OperUp THEN SW1.PortsUp := SW1.PortsUp + 1; END_IF;
   SW1_Port23_M(Rec := Rec_SW1_Port23, F := Sim_SW1_Port23, Dark := SW1_M.Down, Live := Live, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port23);
   IF SW1_Port23.OperUp THEN SW1.PortsUp := SW1.PortsUp + 1; END_IF;
-  SW1_Port24_M(Rec := Rec_SW1_Port24, F := Sim_SW1_Port24, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW1_Port24, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port24);
+  SW1_Port24_M(Rec := Rec_SW1_Port24, F := Sim_SW1_Port24, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW1_Port24, LinkMbps := Cable_SW1_Port24_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port24);
   IF SW1_Port24.OperUp THEN SW1.PortsUp := SW1.PortsUp + 1; END_IF;
-  SW1_Port25_M(Rec := Rec_SW1_Port25, F := Sim_SW1_Port25, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW1_Port25, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port25);
+  SW1_Port25_M(Rec := Rec_SW1_Port25, F := Sim_SW1_Port25, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW1_Port25, LinkMbps := Cable_SW1_Port25_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port25);
   IF SW1_Port25.OperUp THEN SW1.PortsUp := SW1.PortsUp + 1; END_IF;
-  SW1_Port26_M(Rec := Rec_SW1_Port26, F := Sim_SW1_Port26, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW1_Port26, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port26);
+  SW1_Port26_M(Rec := Rec_SW1_Port26, F := Sim_SW1_Port26, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW1_Port26, LinkMbps := Cable_SW1_Port26_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port26);
   IF SW1_Port26.OperUp THEN SW1.PortsUp := SW1.PortsUp + 1; END_IF;
-  SW1_Port27_M(Rec := Rec_SW1_Port27, F := Sim_SW1_Port27, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW1_Port27, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port27);
+  SW1_Port27_M(Rec := Rec_SW1_Port27, F := Sim_SW1_Port27, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW1_Port27, LinkMbps := Cable_SW1_Port27_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port27);
   IF SW1_Port27.OperUp THEN SW1.PortsUp := SW1.PortsUp + 1; END_IF;
-  SW1_Port28_M(Rec := Rec_SW1_Port28, F := Sim_SW1_Port28, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW3_Port27, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port28);
+  SW1_Port28_M(Rec := Rec_SW1_Port28, F := Sim_SW1_Port28, Dark := SW1_M.Down, Live := Live, LinkOk := Cable_SW3_Port27, LinkMbps := Cable_SW3_Port27_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW1_Port28);
   IF SW1_Port28.OperUp THEN SW1.PortsUp := SW1.PortsUp + 1; END_IF;
   SW2.PortsUp := 0;
   SW2_Port01_M(Rec := Rec_SW2_Port01, F := Sim_SW2_Port01, Dark := SW2_M.Down, Live := Live, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port01);
@@ -1294,15 +1321,15 @@ END_VAR
   IF SW2_Port22.OperUp THEN SW2.PortsUp := SW2.PortsUp + 1; END_IF;
   SW2_Port23_M(Rec := Rec_SW2_Port23, F := Sim_SW2_Port23, Dark := SW2_M.Down, Live := Live, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port23);
   IF SW2_Port23.OperUp THEN SW2.PortsUp := SW2.PortsUp + 1; END_IF;
-  SW2_Port24_M(Rec := Rec_SW2_Port24, F := Sim_SW2_Port24, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW2_Port24, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port24);
+  SW2_Port24_M(Rec := Rec_SW2_Port24, F := Sim_SW2_Port24, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW2_Port24, LinkMbps := Cable_SW2_Port24_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port24);
   IF SW2_Port24.OperUp THEN SW2.PortsUp := SW2.PortsUp + 1; END_IF;
-  SW2_Port25_M(Rec := Rec_SW2_Port25, F := Sim_SW2_Port25, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW2_Port25, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port25);
+  SW2_Port25_M(Rec := Rec_SW2_Port25, F := Sim_SW2_Port25, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW2_Port25, LinkMbps := Cable_SW2_Port25_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port25);
   IF SW2_Port25.OperUp THEN SW2.PortsUp := SW2.PortsUp + 1; END_IF;
-  SW2_Port26_M(Rec := Rec_SW2_Port26, F := Sim_SW2_Port26, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW2_Port26, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port26);
+  SW2_Port26_M(Rec := Rec_SW2_Port26, F := Sim_SW2_Port26, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW2_Port26, LinkMbps := Cable_SW2_Port26_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port26);
   IF SW2_Port26.OperUp THEN SW2.PortsUp := SW2.PortsUp + 1; END_IF;
-  SW2_Port27_M(Rec := Rec_SW2_Port27, F := Sim_SW2_Port27, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW2_Port27, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port27);
+  SW2_Port27_M(Rec := Rec_SW2_Port27, F := Sim_SW2_Port27, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW2_Port27, LinkMbps := Cable_SW2_Port27_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port27);
   IF SW2_Port27.OperUp THEN SW2.PortsUp := SW2.PortsUp + 1; END_IF;
-  SW2_Port28_M(Rec := Rec_SW2_Port28, F := Sim_SW2_Port28, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW1_Port27, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port28);
+  SW2_Port28_M(Rec := Rec_SW2_Port28, F := Sim_SW2_Port28, Dark := SW2_M.Down, Live := Live, LinkOk := Cable_SW1_Port27, LinkMbps := Cable_SW1_Port27_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW2_Port28);
   IF SW2_Port28.OperUp THEN SW2.PortsUp := SW2.PortsUp + 1; END_IF;
   SW3.PortsUp := 0;
   SW3_Port01_M(Rec := Rec_SW3_Port01, F := Sim_SW3_Port01, Dark := SW3_M.Down, Live := Live, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port01);
@@ -1351,15 +1378,15 @@ END_VAR
   IF SW3_Port22.OperUp THEN SW3.PortsUp := SW3.PortsUp + 1; END_IF;
   SW3_Port23_M(Rec := Rec_SW3_Port23, F := Sim_SW3_Port23, Dark := SW3_M.Down, Live := Live, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port23);
   IF SW3_Port23.OperUp THEN SW3.PortsUp := SW3.PortsUp + 1; END_IF;
-  SW3_Port24_M(Rec := Rec_SW3_Port24, F := Sim_SW3_Port24, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW3_Port24, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port24);
+  SW3_Port24_M(Rec := Rec_SW3_Port24, F := Sim_SW3_Port24, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW3_Port24, LinkMbps := Cable_SW3_Port24_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port24);
   IF SW3_Port24.OperUp THEN SW3.PortsUp := SW3.PortsUp + 1; END_IF;
-  SW3_Port25_M(Rec := Rec_SW3_Port25, F := Sim_SW3_Port25, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW3_Port25, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port25);
+  SW3_Port25_M(Rec := Rec_SW3_Port25, F := Sim_SW3_Port25, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW3_Port25, LinkMbps := Cable_SW3_Port25_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port25);
   IF SW3_Port25.OperUp THEN SW3.PortsUp := SW3.PortsUp + 1; END_IF;
-  SW3_Port26_M(Rec := Rec_SW3_Port26, F := Sim_SW3_Port26, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW3_Port26, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port26);
+  SW3_Port26_M(Rec := Rec_SW3_Port26, F := Sim_SW3_Port26, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW3_Port26, LinkMbps := Cable_SW3_Port26_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port26);
   IF SW3_Port26.OperUp THEN SW3.PortsUp := SW3.PortsUp + 1; END_IF;
-  SW3_Port27_M(Rec := Rec_SW3_Port27, F := Sim_SW3_Port27, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW3_Port27, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port27);
+  SW3_Port27_M(Rec := Rec_SW3_Port27, F := Sim_SW3_Port27, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW3_Port27, LinkMbps := Cable_SW3_Port27_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port27);
   IF SW3_Port27.OperUp THEN SW3.PortsUp := SW3.PortsUp + 1; END_IF;
-  SW3_Port28_M(Rec := Rec_SW3_Port28, F := Sim_SW3_Port28, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW2_Port27, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port28);
+  SW3_Port28_M(Rec := Rec_SW3_Port28, F := Sim_SW3_Port28, Dark := SW3_M.Down, Live := Live, LinkOk := Cable_SW2_Port27, LinkMbps := Cable_SW2_Port27_Mbps, Net := Sim_Net, Dt := PlantDtS, P := SW3_Port28);
   IF SW3_Port28.OperUp THEN SW3.PortsUp := SW3.PortsUp + 1; END_IF;
   (* VLANs: the configured membership, bent by the ports' VLAN faults: Access
      moves a port to one access VLAN, Prune takes one VLAN off it, Pvid
@@ -1536,12 +1563,12 @@ END_VAR
   NODE1_Drive_NVMe2_M(F := Sim_NODE1_Drive_NVMe2, P := NODE1_Drive_NVMe2);
   NODE1_Drive_NVMe3_M(F := Sim_NODE1_Drive_NVMe3, P := NODE1_Drive_NVMe3);
   NODE1_Nic_Slot2_P1_M(Rec := Rec_NODE1_Nic_Slot2_P1, LinkOk := Cable_NODE1_Nic_Slot2_P1, SpeedGbps := 0.0, Live := Live, P := NODE1_Nic_Slot2_P1);
-  NODE1_Nic_Slot2_P2_M(Rec := NODE1_Nic_Slot2_P2, LinkOk := Cable_SW1_Port25, SpeedGbps := Sim_SW1_Port25.SpeedMbps / 1000.0, Live := FALSE, P := NODE1_Nic_Slot2_P2);
+  NODE1_Nic_Slot2_P2_M(Rec := NODE1_Nic_Slot2_P2, LinkOk := Cable_SW1_Port25, SpeedGbps := Cable_SW1_Port25_Mbps / 1000.0, Live := FALSE, P := NODE1_Nic_Slot2_P2);
   NODE1_Nic_Slot3_P1_M(Rec := Rec_NODE1_Nic_Slot3_P1, LinkOk := Cable_NODE1_Nic_Slot3_P1, SpeedGbps := 0.0, Live := Live, P := NODE1_Nic_Slot3_P1);
-  NODE1_Nic_Slot3_P2_M(Rec := NODE1_Nic_Slot3_P2, LinkOk := Cable_SW2_Port26, SpeedGbps := Sim_SW2_Port26.SpeedMbps / 1000.0, Live := FALSE, P := NODE1_Nic_Slot3_P2);
+  NODE1_Nic_Slot3_P2_M(Rec := NODE1_Nic_Slot3_P2, LinkOk := Cable_SW2_Port26, SpeedGbps := Cable_SW2_Port26_Mbps / 1000.0, Live := FALSE, P := NODE1_Nic_Slot3_P2);
   NODE1_Nic_LAN1_M(Rec := NODE1_Nic_LAN1, LinkOk := NOT (Sim_NODE1_Nic_LAN1.Down OR NODE1_M.Off), SpeedGbps := 0.0, Live := FALSE, P := NODE1_Nic_LAN1);
   NODE1_Nic_LAN2_M(Rec := NODE1_Nic_LAN2, LinkOk := NOT (Sim_NODE1_Nic_LAN2.Down OR NODE1_M.Off), SpeedGbps := 0.0, Live := FALSE, P := NODE1_Nic_LAN2);
-  NODE1_Nic_BMC_M(Rec := NODE1_Nic_BMC, LinkOk := Cable_SW1_Port24, SpeedGbps := Sim_SW1_Port24.SpeedMbps / 1000.0, Live := FALSE, P := NODE1_Nic_BMC);
+  NODE1_Nic_BMC_M(Rec := NODE1_Nic_BMC, LinkOk := Cable_SW1_Port24, SpeedGbps := Cable_SW1_Port24_Mbps / 1000.0, Live := FALSE, P := NODE1_Nic_BMC);
   NODE2_Fan1_M(Rec := Rec_NODE2_Fan1, F := Sim_NODE2_Fan1, Boost := NODE2_M.FanBoost, Off := NODE2_M.Off, Live := Live, P := NODE2_Fan1);
   NODE2_Fan2_M(Rec := Rec_NODE2_Fan2, F := Sim_NODE2_Fan2, Boost := NODE2_M.FanBoost, Off := NODE2_M.Off, Live := Live, P := NODE2_Fan2);
   NODE2_Fan3_M(Rec := Rec_NODE2_Fan3, F := Sim_NODE2_Fan3, Boost := NODE2_M.FanBoost, Off := NODE2_M.Off, Live := Live, P := NODE2_Fan3);
@@ -1569,12 +1596,12 @@ END_VAR
   NODE2_Drive_NVMe2_M(F := Sim_NODE2_Drive_NVMe2, P := NODE2_Drive_NVMe2);
   NODE2_Drive_NVMe3_M(F := Sim_NODE2_Drive_NVMe3, P := NODE2_Drive_NVMe3);
   NODE2_Nic_Slot2_P1_M(Rec := Rec_NODE2_Nic_Slot2_P1, LinkOk := Cable_NODE2_Nic_Slot2_P1, SpeedGbps := 0.0, Live := Live, P := NODE2_Nic_Slot2_P1);
-  NODE2_Nic_Slot2_P2_M(Rec := NODE2_Nic_Slot2_P2, LinkOk := Cable_SW2_Port25, SpeedGbps := Sim_SW2_Port25.SpeedMbps / 1000.0, Live := FALSE, P := NODE2_Nic_Slot2_P2);
+  NODE2_Nic_Slot2_P2_M(Rec := NODE2_Nic_Slot2_P2, LinkOk := Cable_SW2_Port25, SpeedGbps := Cable_SW2_Port25_Mbps / 1000.0, Live := FALSE, P := NODE2_Nic_Slot2_P2);
   NODE2_Nic_Slot3_P1_M(Rec := Rec_NODE2_Nic_Slot3_P1, LinkOk := Cable_NODE1_Nic_Slot2_P1, SpeedGbps := 0.0, Live := Live, P := NODE2_Nic_Slot3_P1);
-  NODE2_Nic_Slot3_P2_M(Rec := NODE2_Nic_Slot3_P2, LinkOk := Cable_SW3_Port26, SpeedGbps := Sim_SW3_Port26.SpeedMbps / 1000.0, Live := FALSE, P := NODE2_Nic_Slot3_P2);
+  NODE2_Nic_Slot3_P2_M(Rec := NODE2_Nic_Slot3_P2, LinkOk := Cable_SW3_Port26, SpeedGbps := Cable_SW3_Port26_Mbps / 1000.0, Live := FALSE, P := NODE2_Nic_Slot3_P2);
   NODE2_Nic_LAN1_M(Rec := NODE2_Nic_LAN1, LinkOk := NOT (Sim_NODE2_Nic_LAN1.Down OR NODE2_M.Off), SpeedGbps := 0.0, Live := FALSE, P := NODE2_Nic_LAN1);
   NODE2_Nic_LAN2_M(Rec := NODE2_Nic_LAN2, LinkOk := NOT (Sim_NODE2_Nic_LAN2.Down OR NODE2_M.Off), SpeedGbps := 0.0, Live := FALSE, P := NODE2_Nic_LAN2);
-  NODE2_Nic_BMC_M(Rec := NODE2_Nic_BMC, LinkOk := Cable_SW2_Port24, SpeedGbps := Sim_SW2_Port24.SpeedMbps / 1000.0, Live := FALSE, P := NODE2_Nic_BMC);
+  NODE2_Nic_BMC_M(Rec := NODE2_Nic_BMC, LinkOk := Cable_SW2_Port24, SpeedGbps := Cable_SW2_Port24_Mbps / 1000.0, Live := FALSE, P := NODE2_Nic_BMC);
   NODE3_Fan1_M(Rec := Rec_NODE3_Fan1, F := Sim_NODE3_Fan1, Boost := NODE3_M.FanBoost, Off := NODE3_M.Off, Live := Live, P := NODE3_Fan1);
   NODE3_Fan2_M(Rec := Rec_NODE3_Fan2, F := Sim_NODE3_Fan2, Boost := NODE3_M.FanBoost, Off := NODE3_M.Off, Live := Live, P := NODE3_Fan2);
   NODE3_Fan3_M(Rec := Rec_NODE3_Fan3, F := Sim_NODE3_Fan3, Boost := NODE3_M.FanBoost, Off := NODE3_M.Off, Live := Live, P := NODE3_Fan3);
@@ -1602,10 +1629,10 @@ END_VAR
   NODE3_Drive_NVMe2_M(F := Sim_NODE3_Drive_NVMe2, P := NODE3_Drive_NVMe2);
   NODE3_Drive_NVMe3_M(F := Sim_NODE3_Drive_NVMe3, P := NODE3_Drive_NVMe3);
   NODE3_Nic_Slot2_P1_M(Rec := Rec_NODE3_Nic_Slot2_P1, LinkOk := Cable_NODE1_Nic_Slot3_P1, SpeedGbps := 0.0, Live := Live, P := NODE3_Nic_Slot2_P1);
-  NODE3_Nic_Slot2_P2_M(Rec := NODE3_Nic_Slot2_P2, LinkOk := Cable_SW1_Port26, SpeedGbps := Sim_SW1_Port26.SpeedMbps / 1000.0, Live := FALSE, P := NODE3_Nic_Slot2_P2);
+  NODE3_Nic_Slot2_P2_M(Rec := NODE3_Nic_Slot2_P2, LinkOk := Cable_SW1_Port26, SpeedGbps := Cable_SW1_Port26_Mbps / 1000.0, Live := FALSE, P := NODE3_Nic_Slot2_P2);
   NODE3_Nic_Slot3_P1_M(Rec := Rec_NODE3_Nic_Slot3_P1, LinkOk := Cable_NODE2_Nic_Slot2_P1, SpeedGbps := 0.0, Live := Live, P := NODE3_Nic_Slot3_P1);
-  NODE3_Nic_Slot3_P2_M(Rec := NODE3_Nic_Slot3_P2, LinkOk := Cable_SW3_Port25, SpeedGbps := Sim_SW3_Port25.SpeedMbps / 1000.0, Live := FALSE, P := NODE3_Nic_Slot3_P2);
+  NODE3_Nic_Slot3_P2_M(Rec := NODE3_Nic_Slot3_P2, LinkOk := Cable_SW3_Port25, SpeedGbps := Cable_SW3_Port25_Mbps / 1000.0, Live := FALSE, P := NODE3_Nic_Slot3_P2);
   NODE3_Nic_LAN1_M(Rec := NODE3_Nic_LAN1, LinkOk := NOT (Sim_NODE3_Nic_LAN1.Down OR NODE3_M.Off), SpeedGbps := 0.0, Live := FALSE, P := NODE3_Nic_LAN1);
   NODE3_Nic_LAN2_M(Rec := NODE3_Nic_LAN2, LinkOk := NOT (Sim_NODE3_Nic_LAN2.Down OR NODE3_M.Off), SpeedGbps := 0.0, Live := FALSE, P := NODE3_Nic_LAN2);
-  NODE3_Nic_BMC_M(Rec := NODE3_Nic_BMC, LinkOk := Cable_SW3_Port24, SpeedGbps := Sim_SW3_Port24.SpeedMbps / 1000.0, Live := FALSE, P := NODE3_Nic_BMC);
+  NODE3_Nic_BMC_M(Rec := NODE3_Nic_BMC, LinkOk := Cable_SW3_Port24, SpeedGbps := Cable_SW3_Port24_Mbps / 1000.0, Live := FALSE, P := NODE3_Nic_BMC);
 END_PROGRAM

@@ -624,7 +624,25 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /assets/", handleAsset)
 		mux.HandleFunc("GET /", s.handleIndex)
 	}
-	return withCORS(s.proxyStandby(mux))
+	return withCORS(s.proxyStandby(apiNotFound(mux)))
+}
+
+// apiNotFound makes every /api/ path no API route matches a JSON 404,
+// whatever else owns "/": without it the HMI's SPA fallback ("GET /") answered
+// a typo'd endpoint with index.html (200, text/html), and a GET on a POST-only
+// route did the same. The SPA fallback stays for every non-/api path. It asks
+// the mux which pattern would serve the request rather than registering an
+// "/api/" catch-all, which would conflict with "GET /".
+func apiNotFound(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if _, pattern := mux.Handler(r); pattern == "" || pattern == "GET /" {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such API endpoint: " + r.Method + " " + r.URL.Path})
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // proxyStandby wraps mux so that on a standby replica, requests it cannot
@@ -1146,6 +1164,14 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 	// recipe name, a scenario), so a typo cannot turn a REAL into text.
 	// Anything else is refused here rather than answered 204 for a write
 	// that didn't happen.
+	// The name must be a declared tag. A write to anything else would create
+	// a top-level tag no program reads and a Sparkplug edge would publish as
+	// a bogus metric, so it is a 400 that names the tag. A CONSTANT is not a
+	// tag, so it lands here too: a project constant cannot be written.
+	if !s.declaredTag(req.Name) {
+		http.Error(w, "undefined tag "+req.Name+": not a declared tag, so there is nothing to write (a CONSTANT is not a tag and cannot be written)", http.StatusBadRequest)
+		return
+	}
 	switch v := req.Value.(type) {
 	case float64, bool:
 		s.rt.Tags().Set(req.Name, req.Value)
@@ -1160,6 +1186,30 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "value must be a number or boolean", http.StatusUnprocessableEntity)
 	}
+}
+
+// declaredTag reports whether name is a tag the controller declares: one in
+// the store, one the manifest types or a program binds (VAR_EXTERNAL or the
+// project's tag table), or a driver input or output not yet delivered. A
+// CONSTANT is none of these.
+func (s *Server) declaredTag(name string) bool {
+	if _, ok := s.rt.Tags().Canonical(name); ok || s.rt.Tags().TypeOf(name) != nil {
+		return true
+	}
+	for _, list := range [][]string{s.rt.Inputs(), s.rt.Outputs()} {
+		for _, n := range list {
+			if strings.EqualFold(n, name) {
+				return true
+			}
+		}
+	}
+	key := ir.NameKey(name)
+	for g := range s.rt.Globals() {
+		if ir.NameKey(g) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // refuseMemberWrite reports why a member write to this root tag must not

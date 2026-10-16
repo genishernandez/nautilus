@@ -35,6 +35,17 @@
 	// Whatever held keyboard focus when the editor opened (the ladder/SFC
 	// wrapper, the flow pane) gets it back on Enter/Esc — otherwise focus
 	// falls to <body> with the removed input and Del/N/M need another click.
+	// Keep the field (and its caption/error) inside the webview, 8 px from
+	// every edge — a retag opened near the left edge was clipped.
+	const MARGIN = 8;
+	const fieldW = $derived(edit ? Math.max(edit.at.w, edit.multiline ? 160 : 72) : 0);
+	const left = $derived(
+		edit ? Math.max(MARGIN, Math.min(edit.at.x, window.innerWidth - fieldW - MARGIN)) : 0
+	);
+	const top = $derived(
+		edit ? Math.max(MARGIN + 20, Math.min(edit.at.y, window.innerHeight - 30 - MARGIN)) : 0
+	);
+
 	let returnFocus: HTMLElement | null = null;
 	export function open(req: EditRequest) {
 		const ae = document.activeElement;
@@ -104,17 +115,17 @@
 
 {#if edit}
 	{#if edit.title}
-		<div class="fcap" style="left: {edit.at.x}px; top: {edit.at.y - 20}px">{edit.title}</div>
+		<div class="fcap" style="left: {left}px; top: {top - 20}px">{edit.title}</div>
 	{/if}
 	{#if edit.error}
-		<div class="ferr" role="alert" style="left: {edit.at.x}px; top: {edit.at.y + 24}px; max-width: {Math.max(edit.at.w, 260)}px">{edit.error}</div>
+		<div class="ferr" role="alert" style="left: {left}px; top: {top + 24}px; max-width: {Math.min(Math.max(edit.at.w, 260), window.innerWidth - left - MARGIN)}px">{edit.error}</div>
 	{/if}
 	{#if edit.multiline}
 		<textarea
 			bind:this={ta}
 			class="nx-input note"
 			spellcheck="false"
-			style="left: {edit.at.x}px; top: {edit.at.y - 2}px; width: {Math.max(edit.at.w, 160)}px; height: {(edit.value.split('\n').length + 1) * NOTE_LINE_H + 10}px; line-height: {NOTE_LINE_H}px"
+			style="left: {left}px; top: {top - 2}px; width: {fieldW}px; height: {(edit.value.split('\n').length + 1) * NOTE_LINE_H + 10}px; line-height: {NOTE_LINE_H}px"
 			bind:value={edit.value}
 			onkeydown={keydown}
 			onblur={blur}
@@ -123,7 +134,7 @@
 		<Suggest
 			bind:this={sg}
 			cls="line"
-			style="left: {edit.at.x}px; top: {edit.at.y - 2}px; width: {Math.max(edit.at.w, 72)}px"
+			style="left: {left}px; top: {top - 2}px; width: {fieldW}px"
 			bind:value={edit.value}
 			{items}
 			call={edit.suggest === 'functions'}

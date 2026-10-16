@@ -50,14 +50,14 @@ takes both ends down.
 |---|---|
 | `Sim_SW1_Port25.Down` | link lost: `OperUp` false, no traffic, `AdminUp` stays true (the monitor raises "link down"), and the server port at the other end loses link too |
 | `Sim_SW1_Port25.AdminDown` | shut by an operator: `AdminUp` and `OperUp` false, no alarm; the far end loses link |
-| `Sim_SW1_Port25.SpeedMbps` | negotiated speed override (10000 → 1000) at both ends, traffic capped to the line; 0 = as recorded |
+| `Sim_SW1_Port25.SpeedMbps` | negotiated speed override (10000 → 1000) at both ends (a switch or a server at the far end; set at both, the slower wins), traffic capped to the line; 0 = as recorded |
 | `Sim_SW1_Port25.ErrorRate` | errors per second added to the recording |
 | `Sim_Cable_SW3_Port25.Pulled` | the cable itself: both ends down |
-| `Sim_SW1.Dark` / `.Reboot` | the switch goes dark (its stand-in stops answering) / reboots: dark for 90 s, back with its uptime reset |
+| `Sim_SW1.Dark` / `.Reboot` | the switch goes dark (its stand-in stops answering) / reboots: dark for 90 s, back with its uptime reset (clearing the faults ends a reboot early) |
 | `Sim_NODE2.CpuLoad` | % busy, 0 = as recorded: power and the thermal model follow |
-| `Sim_NODE2.PowerOff` / `.Dark` | host off (standby power, fans stop, temperatures fall to the inlet, links drop) / the BMC stops answering |
+| `Sim_NODE2.PowerOff` / `.Dark` | host off (standby power, fans stop, temperatures fall to the inlet, host links drop; the BMC and its link stay up) / the BMC stops answering |
 | `Sim_NODE1_Fan3.Fail` | the fan stops; the others ramp; temperatures climb |
-| `Sim_NODE1_PSU2.InputLost` / `.Fail` | output 0, the other supply carries the load, the server stays up |
+| `Sim_NODE1_PSU2.InputLost` / `.Fail` | output 0, the others carry the load (two supplies: by their recorded shares; three or more: equally across the supplies that are up), the server stays up; every supply down is no power at all: host and BMC off, every link down |
 | `Sim_NODE3_Drive_NVMe2.Pulled` / `.Failing` | `Present` false / `PredictedFailure` and health Warning |
 | `Sim_NODE1_Nic_Slot2_P1.Down` | the server's port loses link (and the far end) |
 | `Sim_Room.InletDeltaC` | the room runs hot: every inlet, and everything behind it, rises |
@@ -76,7 +76,9 @@ it is a named constant there, to tune against a real box.
 
 `Scenario` (a STRING) sets a preset of fault inputs, so a demo is one write
 (`scenarios.st`). Presets only set inputs, so they compose; `normal` clears
-every fault (so does the `ClearFaults` pulse).
+every fault (so does the `ClearFaults` pulse). Writing the name already
+running is no change, so it does nothing; the `ScenarioRestart` pulse runs
+it again from its start.
 
 | Scenario | Sets |
 |---|---|
@@ -102,8 +104,16 @@ curl -X POST localhost:8087/api/tags -d '{"name":"Scenario","value":"cpu-overhea
 ## The replay clock is tags too
 
 `Replay_Speed` (default 60: the 68 h in 68 min), `Replay_Pause` and
-`Replay_SeekS` (unix seconds; a change jumps there) steer it; `Replay_At`,
+`Replay_SeekS` (unix seconds; a change jumps there, and 0 re-arms it, so a
+program pulsing T then 0 jumps to T every time) steer it; `Replay_At`,
 `Replay_From` and `Replay_To` report it. The node-3d HMI's clock writes them.
+
+The recording loads when the plant starts. If it is missing or unreadable,
+or `from:`/`to:` leave no window to loop, the replayed tags read
+NotConnected and `/api/drivers` gives the reason; the driver looks again
+every 10 s and loads the file once it changes, with no restart. A replayed
+tag the recording has no series for reads Bad: its constants are all it
+can deliver.
 
 ## Serving a monitoring project
 

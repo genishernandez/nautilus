@@ -156,6 +156,50 @@ func TestClientBasicFallback(t *testing.T) {
 	}
 }
 
+// A BMC still booting answers the session POST with a 503. That says
+// nothing about sessions: auto mode must not settle on basic auth, and the
+// next poll logs in properly.
+func TestClientTransientLoginFailureKeepsSessions(t *testing.T) {
+	t.Setenv("RF_TEST_PASSWORD", testPassword)
+	var mu sync.Mutex
+	booting := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		b := booting
+		mu.Unlock()
+		switch {
+		case r.Method == http.MethodPost && b:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case r.Method == http.MethodPost:
+			w.Header().Set("X-Auth-Token", "tok123")
+			w.WriteHeader(http.StatusCreated)
+		case r.Header.Get("X-Auth-Token") != "tok123":
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.Write([]byte(`{"ok":true}`))
+		}
+	}))
+	defer srv.Close()
+	c, _ := NewClient(testSource(srv.URL))
+	_, err := c.Get(context.Background(), "/redfish/v1/Systems/1")
+	if err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("login during boot: err = %v, want the 503", err)
+	}
+	noSecret(t, err)
+	if c.AuthMode() == AuthBasic {
+		t.Fatal("a 503 at login pinned auto mode to basic auth")
+	}
+	mu.Lock()
+	booting = false
+	mu.Unlock()
+	if r, err := c.Get(context.Background(), "/redfish/v1/Systems/1"); err != nil || r.Status != 200 {
+		t.Fatalf("after boot: %v %+v", err, r)
+	}
+	if c.AuthMode() != AuthSession || c.Sessions() != 1 {
+		t.Fatalf("mode %s, sessions %d", c.AuthMode(), c.Sessions())
+	}
+}
+
 // The wire shape of a login and a GET, byte for byte: what a BMC sees.
 func TestClientWireShape(t *testing.T) {
 	t.Setenv("RF_TEST_PASSWORD", testPassword)
@@ -196,6 +240,58 @@ func TestClientWireShape(t *testing.T) {
 	}
 	if c.sessionURI != "/redfish/v1/SessionService/Sessions/9" {
 		t.Fatalf("session uri = %q", c.sessionURI)
+	}
+}
+
+// An @odata.id is already percent-encoded; it reaches the BMC unchanged,
+// not double-encoded. A hand-written path with a raw space is encoded once.
+func TestClientPathEncoding(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.RequestURI)
+		mu.Unlock()
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c, err := NewClient(Source{ID: "X", Host: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		"/redfish/v1/Chassis/Front%20Panel",
+		"/redfish/v1/Chassis/A%2FB/Thermal",
+		"/redfish/v1/Chassis/Rear Panel",
+		"/redfish/v1/Chassis/100%",
+	} {
+		if _, err := c.Get(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{
+		"/redfish/v1/Chassis/Front%20Panel",
+		"/redfish/v1/Chassis/A%2FB/Thermal",
+		"/redfish/v1/Chassis/Rear%20Panel",
+		"/redfish/v1/Chassis/100%25",
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(seen, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("on the wire:\n%s\nwant:\n%s", strings.Join(seen, "\n"), strings.Join(want, "\n"))
+	}
+
+	// And the stand-in, keyed by @odata.id, answers the encoded id.
+	tree := smallTree()
+	tree["/redfish/v1/Chassis/Front%20Panel"] = json.RawMessage(`{"@odata.id":"/redfish/v1/Chassis/Front%20Panel","Id":"Front Panel"}`)
+	mock := mockup.New(tree, mockup.Options{})
+	if err := mock.Start("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mock.Stop)
+	mc, _ := NewClient(Source{ID: "X", Host: mock.URL()})
+	if r, err := mc.Get(context.Background(), "/redfish/v1/Chassis/Front%20Panel"); err != nil || r.Status != 200 {
+		t.Fatalf("stand-in GET of an encoded id: %v %+v", err, r)
 	}
 }
 

@@ -142,6 +142,51 @@ func lastPoll(d *snmp.Driver, id string) int64 {
 	return n
 }
 
+// rateWant is one rate member and the value it should read, within tol
+// (absolute).
+type rateWant struct {
+	tag, member string
+	want, tol   float64
+}
+
+// waitRates waits for one read in which every rate is within tolerance, and
+// returns it. A rate over a single 50 ms rig interval is the counter's
+// delta over the driver's sample-time delta, and the two clocks are not the
+// same: the agent computes the counter when it serves the request, the
+// driver stamps the sample when the response is handed to it. Under load
+// (CI, -race, -cpu 1) the gap between the two varies by several
+// milliseconds poll to poll, which is ±10% of a 50 ms interval — so any ONE
+// poll's rate can be that far off with the product working exactly right
+// (at a real 10 s interval the same jitter is 0.05%). The rate the counter
+// moves at is what the polls agree on once an interval lands without a
+// scheduling hiccup; a wrong rate (bad scale, a stuck 0, a rate across the
+// wrong samples) never reads within tolerance, and times out with the last
+// values seen.
+func waitRates(t *testing.T, d *snmp.Driver, wants ...rateWant) nio.Values {
+	t.Helper()
+	var last []float64
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		vals := read(t, d)
+		last = last[:0]
+		ok := true
+		for _, w := range wants {
+			got := member(t, vals, w.tag, w.member).F
+			last = append(last, got)
+			ok = ok && math.Abs(got-w.want) <= w.tol
+		}
+		if ok {
+			return vals
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for i, w := range wants {
+		t.Errorf("%s.%s = %v, want %v ± %v", w.tag, w.member, last[i], w.want, w.tol)
+	}
+	t.FailNow()
+	return nil
+}
+
 // waitPolls waits until n more complete polls have landed.
 func waitPolls(t *testing.T, d *snmp.Driver, id string, n int) {
 	t.Helper()
@@ -248,20 +293,11 @@ func TestDriverCounterRate(t *testing.T) {
 		// Rate members read 0 for exactly one interval (brief §5).
 		t.Logf("InBps after the first poll = %v", v.F)
 	}
-	waitPolls(t, d, "SW1", 4)
-	vals = read(t, d)
-	in := member(t, vals, "SW1_Port01", "InBps").F
-	if math.Abs(in-8*octetsPerSec)/(8*octetsPerSec) > 0.15 {
-		t.Errorf("InBps = %v, want ≈ %v", in, 8*octetsPerSec)
-	}
-	pct := member(t, vals, "SW1_Port01", "InPct").F
-	if math.Abs(pct-0.1) > 0.015 {
-		t.Errorf("InPct = %v, want ≈ 0.1 (1 Mb/s of 1000)", pct)
-	}
-	er := member(t, vals, "SW1_Port03", "ErrorRate").F
-	if math.Abs(er-400) > 60 {
-		t.Errorf("ErrorRate = %v, want ≈ 400", er)
-	}
+	vals = waitRates(t, d,
+		rateWant{"SW1_Port01", "InBps", 8 * octetsPerSec, 0.15 * 8 * octetsPerSec},
+		rateWant{"SW1_Port01", "InPct", 0.1, 0.015}, // 1 Mb/s of 1000
+		rateWant{"SW1_Port03", "ErrorRate", 400, 60},
+	)
 	if v := member(t, vals, "SW1_Port02", "InBps").F; v != 0 {
 		t.Errorf("a still counter rates %v", v)
 	}

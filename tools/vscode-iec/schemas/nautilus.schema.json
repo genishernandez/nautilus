@@ -190,6 +190,39 @@
               "type": "string",
               "description": "Task the program is scheduled in (default MainTask)."
             },
+            "continuous": {
+              "type": "boolean",
+              "description": "Schedule the program in a CONTINUOUS Logix task, as the controller it was imported from did; the task's scan: is then only nautilus's own rate. Default false: a PERIODIC task at scan:."
+            },
+            "all-tags": {
+              "type": "boolean",
+              "description": "Write every manifest tag as a controller tag, whether or not a program names it, as `naut logix import` sets for a project whose tag file is the controller's tag set: a tag only an external client reads or writes is still the controller's. Default false: a tag no program names is not written. A tag with neither type: nor init: has no type to write either way, and an unnamed one whose type the Logix subset lacks (a STRING) is left out."
+            },
+            "controller-scoped": {
+              "type": "array",
+              "description": "Program variables written as controller tags rather than program tags. `naut logix import` lists a timer or counter the export had at controller scope (a block instance is program-scoped in nautilus), so the write-back keeps its tag path (AcceptTmr.ACC, not Program:MainProgram.AcceptTmr.ACC) and its description.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "A VAR of the task program."
+                  },
+                  "desc": {
+                    "type": "string",
+                    "description": "The Logix tag's description."
+                  }
+                }
+              }
+            },
+            "hardware": {
+              "type": "string",
+              "description": "An L5X, relative to the project, whose <Modules> section is the controller's I/O configuration: the chassis, its modules, and the adapters and modules beyond it that alias: tags name. The writer carries it into every project it writes, unchanged, in place of the controller's generated Local module, and refuses an alias of a rack point whose module it lacks (logix/io-module). `naut logix import --project` writes one, hardware.L5X, from an export with I/O modules; a Logix Designer export of the whole project works as it is. Its Local module must be the target's processor at the target's revision."
+            },
             "side": {
               "type": [
                 "object",
@@ -706,6 +739,12 @@
           "type": "string",
           "description": "Gate births on this SCADA host's STATE topic."
         },
+        "primary-host-offline": {
+          "type": "string",
+          "enum": ["buffer", "disconnect"],
+          "default": "buffer",
+          "description": "What the node does when the primary host's STATE goes offline. buffer (the default): stay connected and born, send no NDEATH, and stop publishing data until the host returns (store-forward buffers it and replays it as historical). disconnect: the Sparkplug 3.0 behaviour; publish NDEATH, disconnect, connect again with the next bdSeq, and birth once the host is back online. Needs primary-host."
+        },
         "publish-interval": {
           "$ref": "#/definitions/duration",
           "description": "How often changed metrics are published."
@@ -715,14 +754,31 @@
           "description": "File persisting bdSeq across restarts."
         },
         "device": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Publish the field driver's input tags as a Sparkplug DEVICE with this id; its DBIRTH/DDEATH follow the driver's connection health. Empty means everything publishes at node level."
+          "not": {},
+          "deprecated": true,
+          "description": "Removed. Each field connection is now its own Sparkplug device, named after its driver (eip, sparkplug-host) or its source id (modbus, snmp, redfish, prometheus), with its own DBIRTH/DDEATH. Delete this key; give a driver a name: to choose its device id."
+        },
+        "writable": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Globs over tag names or UDT member paths (Motor1.START, Pump*.SpeedSP) that NCMD/DCMD may write. A pattern on a tag opens its members. Omit and the node is read-only: every write is refused and only Node Control/Rebirth is honoured."
         },
         "store-forward": {
           "type": "integer",
           "minimum": 1,
           "description": "Buffer up to this many data messages while the broker (or the primary host) is unreachable and replay them, marked historical, on reconnect. Omit to disable."
+        },
+        "store-forward-file": {
+          "type": "string",
+          "description": "Journal the store-forward buffer to this file so a restart, upgrade or crash during an outage does not lose it: the next start loads it and replays it, marked historical, after its first birth. Relative to the working directory. Omit to buffer in memory only (the default). Needs store-forward."
+        },
+        "flatten-udts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Publish each UDT member as a plain metric named by its path (P101/Running) instead of the tag as one Sparkplug Template, for hosts that do not read Templates. Commands address members by the same name."
         },
         "default-class": {
           "$ref": "#/definitions/rbe",
@@ -815,7 +871,7 @@
         },
         "site-from": {
           "type": "string",
-          "description": "Regexp over the TAG NAME whose first capture group becomes a definition's site, e.g. \"^([A-Z]+[0-9]+)_\" turns RTU9_WEL15_FIT_001 into site RTU9. Site is the alarm table's sort and filter axis and the `{site}` placeholder in a rule's templates. Omit it and site is empty."
+          "description": "Regexp over the TAG NAME whose first capture group becomes a definition's site, e.g. \"^([A-Z]+[0-9]+)_\" turns RTU9_ZONE15_FIT_001 into site RTU9. Site is the alarm table's sort and filter axis and the `{site}` placeholder in a rule's templates. Omit it and site is empty."
         },
         "area-from": {
           "type": "string",

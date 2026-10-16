@@ -66,8 +66,8 @@ the same shape `examples/batch-skid/nautilus.yaml` demonstrates publicly, at
 a scale (7 tags) small enough to read on one screen:
 
 ```yaml
-- { name: RTU60_13XFR9_GLV_001, role: input, desc: "Gate valve equipment descriptor
-    (EQ_VLV_DSC_new UDT: OPNST/CLSST/TRNST, AUTOST, ANYFAULT, INTERLOCK, COSALM, …)" }
+- { name: RTU21_XFR4_GLV_001, role: input, desc: "Gate valve equipment descriptor
+    (ValveDescriptor UDT: OPNST/CLSST/TRNST, AUTOST, ANYFAULT, INTERLOCK, COSALM, …)" }
 ```
 
 That line is the whole brief. The type is real, the driver delivers it, ST reads
@@ -586,8 +586,8 @@ because documentation is not a declaration:
 
 ```yaml
 tag-meta:                       # layers onto a generated tag, never redeclares it
-  P2P_RTU44B_RES13_LIT_00A_LI: { desc: "Reservoir 13 level, sight A" }
-  RTU60_ZONE13_PIT_001.AI:     { unit: psi }
+  P2P_RTU22B_TNK13_LIT_00A_LI: { desc: "Tank 13 level, sight A" }
+  RTU21_PRV4_PIT_001.AI:       { unit: psi }
 ```
 
 This is load-bearing, not a convenience. `eip/codegen` and `eip/logix`
@@ -701,12 +701,12 @@ computes upstream, and anything that wants sequencing is first-scan logic.
 
 *Built.* `ir.SeedFromInit(t, init)` (`lang/ir/seed.go`) is the implementation:
 `init == nil` still returns `Zero(t)`; a `map[string]any` sets the members it
-names — recursively for a nested struct member, e.g. `LVL: { CTL1HSP: 60.0 }`
+names — recursively for a nested struct member, e.g. `LVL: { HSP: 60.0 }`
 — and leaves every other member, at any depth, at zero of its own field type.
 `runtime.expandTags` (`runtime/tagdef.go`) calls it for a typed tag whose
 `Init` is non-nil, instead of handing the raw manifest value to `Tags.Set` —
 which has no case for a struct map and would previously have done nothing.
-Errors name the member path: `tag WEL15_FIT_001: init: unknown member RAWMN
+Errors name the member path: `tag ZONE15_FIT_001: init: unknown member RAWMN
 (did you mean RAWMIN?)`, with the `did you mean` suggestion (Levenshtein,
 ≤2 edits) included when one is close. A struct-typed tag given a scalar
 `init:` — the case this section flagged as needing to be an error, not a
@@ -716,7 +716,7 @@ flow-style shape back out, so a generator (`naut eip tags`, `nautilus
 tags import-csv`) round-trips a struct's per-member init exactly like a
 hand-written one. This was Riverbend WTP's motivating case: a site's ~55-line
 first-scan `CfgDone` block of UDT-field assignments — RAWMIN/RAWMAX/HHSP/…,
-`LVL.CTL1HSP`/`LVL.CTL1LSP` — collapses into the tag's own `init:`, in the
+`LVL.HSP`/`LVL.LSP` — collapses into the tag's own `init:`, in the
 manifest that already declares the tag.
 
 ### 4.5 Does `TagMeta` need to be per-field?

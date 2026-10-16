@@ -75,6 +75,8 @@ func TestDecodeGoldenResponse(t *testing.T) {
 		vb("1.3.6.1.2.1.2.2.1.6.1", tlv(0x04, []byte{0x00, 0x00, 0x5e, 0x00, 0x53, 0x01})),                       // a MAC
 		vb("1.3.6.1.2.1.1.2.0", tlv(0x06, oidBytes("1.3.6.1.4.1.32473.1.28"))),                                   // OID
 		vb("1.3.6.1.2.1.4.20.1.1.192.0.2.1", []byte{0x40, 0x04, 192, 0, 2, 1}),                                   // IpAddress
+		vb("1.3.6.1.4.1.2021.10.1.6.1", tlv(0x44, []byte{0x9f, 0x78, 0x04, 0x3f, 0xc0, 0x00, 0x00})),             // net-snmp Opaque Float 1.5
+		vb("1.3.6.1.4.1.2021.10.1.6.2", tlv(0x44, []byte{0x9f, 0x79, 0x08, 0x3f, 0xd0, 0, 0, 0, 0, 0, 0})),       // net-snmp Opaque Double 0.25
 		vb("1.3.6.1.2.1.2.2.1.8.99", []byte{0x81, 0x00}),                                                         // noSuchInstance
 		vb("1.3.6.1.2.1.99", []byte{0x82, 0x00}),                                                                 // endOfMibView
 	}
@@ -103,6 +105,8 @@ func TestDecodeGoldenResponse(t *testing.T) {
 		{hw.RawStringVal("00:00:5E:00:53:01"), true},
 		{hw.RawStringVal("1.3.6.1.4.1.32473.1.28"), true},
 		{hw.RawStringVal("192.0.2.1"), true},
+		{hw.RawFloatVal(1.5), true},
+		{hw.RawFloatVal(0.25), true},
 		{hw.Raw{}, false},
 		{hw.Raw{}, false},
 	}
@@ -387,6 +391,100 @@ func TestPollTransportErrorRedials(t *testing.T) {
 	}
 }
 
+// sysUpTime tells an agent restart from a wrap. A 32-bit counter high in
+// its range that comes back small is a plausible wrap by itself; when the
+// agent's uptime went backwards (it restarted after the last sample), no
+// rate is computed across it. With the uptime still climbing — or frozen,
+// as a stand-in's recorded value is — the same step is a wrap and rates.
+func TestPollAgentRestartIsNotAWrap(t *testing.T) {
+	const counter, uptime = "1.3.6.1.2.1.31.1.1.1.6.1", "1.3.6.1.2.1.1.3.0"
+	set := func(g *memGetter, oid string, v uint64) {
+		for i := range g.w {
+			if g.w[i].OID == oid {
+				g.w[i].Uint = v
+			}
+		}
+	}
+	m := portManifest(1)
+	mb := m.Tags[1].Members["InBps"]
+	mb.Width = 32
+	m.Tags[1].Members["InBps"] = mb
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		first   uint64 // uptime ticks at the first poll
+		uptime  uint64 // and at the second
+		wantHit bool
+	}{
+		{"agent restarted", 12345, 1, false},
+		{"agent up all along", 12345, 12345 + 5, true},
+		// A stand-in serving a recorded constant: t − U creeps past the
+		// last sample, but nothing went backwards — no restart.
+		{"uptime frozen", 1, 1, true},
+		// Backwards, but to 42 s: a restart long before the last sample
+		// (40 ms ago) — what a plant setting UptimeS does. The counter
+		// never started over, so the sample is kept and the step rates.
+		{"uptime back to before the last sample", 1_000_000, 4200, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &memGetter{w: portWalk(1)}
+			d, _ := newMem(t, m, g)
+			set(g, counter, 1<<32-1000)
+			set(g, uptime, tc.first)
+			if _, err := d.poll(ctx, "SW1", hw.DefaultClass); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(40 * time.Millisecond) // the restart lands after the first sample
+			set(g, counter, 400)
+			set(g, uptime, tc.uptime)
+			res, err := d.poll(ctx, "SW1", hw.DefaultClass)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, ok := update(res, "SW1_Port01", "InBps")
+			if ok != tc.wantHit {
+				t.Fatalf("InBps delivered = %v (%v), want %v", ok, v.F, tc.wantHit)
+			}
+			if !tc.wantHit {
+				// The sample after the restart is the new baseline.
+				time.Sleep(20 * time.Millisecond)
+				set(g, counter, 1400)
+				set(g, uptime, tc.uptime+3)
+				res, _ = d.poll(ctx, "SW1", hw.DefaultClass)
+				if _, ok := update(res, "SW1_Port01", "InBps"); !ok {
+					t.Fatal("the poll after a restart must rate again")
+				}
+			}
+		})
+	}
+
+	// A class with rate bindings reads sysUpTime even when no member binds
+	// it — one OID on a Get the class may not otherwise send — and an agent
+	// without it costs nothing but the detection: no tag turns Bad.
+	m = portManifest(1)
+	m.Tags = m.Tags[1:] // drop the Switch tag that binds UptimeS
+	g := &memGetter{w: portWalk(1)}
+	d, _ := newMem(t, m, g)
+	res, err := d.poll(ctx, "SW1", hw.DefaultClass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(g.calls, "|"), "get 3") { // OperUp.1, InBps.1 (below the walk threshold) + sysUpTime
+		t.Errorf("calls = %v", g.calls)
+	}
+	var kept walk.Walk
+	for _, v := range g.w {
+		if v.OID != uptime {
+			kept = append(kept, v)
+		}
+	}
+	g.w = kept
+	if res, err = d.poll(ctx, "SW1", hw.DefaultClass); err != nil || len(res.Bad) != 0 {
+		t.Fatalf("an agent without sysUpTime: err %v, Bad %v", err, res.Bad)
+	}
+}
+
 // The explanation a commissioning tech gets for each failure.
 func TestExplain(t *testing.T) {
 	s := &session{src: Source{ID: "SW1", Host: "192.0.2.2", Version: V3, User: "nautilus"}}
@@ -411,13 +509,14 @@ func TestExplain(t *testing.T) {
 }
 
 // Writes: set: maps the command value; a value set: does not name is an
-// error naming the keys; without set:, BOOL is 1/0.
+// error naming the keys; without set:, an INT is written as itself (a BOOL
+// without set: never gets this far — Validate refuses it).
 func TestWriteMapping(t *testing.T) {
 	g := &memGetter{w: portWalk(1)}
 	m := portManifest(1)
 	m.Writes = []Write{
 		{Name: "SW1_Port01_Cmd", Tag: "SW1_Port01", Member: "OperUp", OID: "1.3.6.1.2.1.2.2.1.7.1", Set: map[string]int64{"true": 1, "false": 2}},
-		{Name: "SW1_Raw_Cmd", Tag: "SW1_Port01", Member: "OperUp", OID: "1.3.6.1.2.1.2.2.1.7.1"},
+		{Name: "SW1_Raw_Cmd", Tag: "SW1_Port01", Member: "Index", OID: "1.3.6.1.2.1.2.2.1.7.1"},
 	}
 	d, _ := newMem(t, m, g)
 	ctx := context.Background()
@@ -427,8 +526,11 @@ func TestWriteMapping(t *testing.T) {
 	if err := d.write(ctx, "SW1", hw.WriteDecl{Name: "SW1_Port01_Cmd"}, ir.IntVal(7)); err == nil || !strings.Contains(err.Error(), "false, true") {
 		t.Errorf("unmapped value = %v", err)
 	}
-	if err := d.write(ctx, "SW1", hw.WriteDecl{Name: "SW1_Raw_Cmd"}, ir.BoolVal(true)); err != nil {
+	if err := d.write(ctx, "SW1", hw.WriteDecl{Name: "SW1_Raw_Cmd"}, ir.IntVal(2)); err != nil {
 		t.Fatal(err)
+	}
+	if err := d.write(ctx, "SW1", hw.WriteDecl{Name: "SW1_Raw_Cmd"}, ir.BoolVal(false)); err == nil || !strings.Contains(err.Error(), "needs set:") {
+		t.Errorf("a BOOL with no set: must not be guessed at: %v", err)
 	}
 	if strings.Join(g.calls, "|") != "set 1.3.6.1.2.1.2.2.1.7.1|set 1.3.6.1.2.1.2.2.1.7.1" {
 		t.Errorf("calls = %v", g.calls)

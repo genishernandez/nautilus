@@ -21,6 +21,7 @@ func TestGolden(t *testing.T) {
 	cases := map[string]Options{
 		"demoline": demoOpts(),
 		"subset":   {},
+		"arrays":   {},
 	}
 	for name, opts := range cases {
 		t.Run(name, func(t *testing.T) {

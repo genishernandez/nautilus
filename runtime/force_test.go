@@ -112,30 +112,45 @@ func TestForceInputOverridesDriver(t *testing.T) {
 }
 
 // A forced output is re-applied after the program every scan, so the
-// driver is handed the forced value whatever the logic computed.
+// driver is handed the forced value whatever the logic computed. Alarm is
+// Level > 80 and never reads itself back, so with the level at 95 the logic
+// writes TRUE on every scan the force holds it FALSE: a force laid on once
+// would be overwritten by the next scan. (A seal-in is the wrong rig for
+// this: it reads its coil back, so a forced FALSE makes the logic compute
+// FALSE too.)
 func TestForceOutputReappliedAfterLogic(t *testing.T) {
 	rt, d := newForceRig(t, nil)
-	d.set("StartPB", true)
+	d.set("Level", 95.0)
 	rt.Scan()
-	d.set("StartPB", false)
-	rt.Scan()
-	if d.output("Motor") != true {
-		t.Fatal("setup: the seal-in should hold Motor on")
+	if !rt.Tags().Bool("Alarm") || d.output("Alarm") != true {
+		t.Fatal("setup: Level 95 should drive Alarm on")
 	}
-	if err := rt.Tags().Force("Motor", false); err != nil {
+	if err := rt.Tags().Force("Alarm", false); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		rt.Scan() // the logic writes Motor := TRUE every scan (sealed)
+		rt.Scan() // the logic writes Alarm := TRUE every scan
+		if rt.Tags().Bool("Alarm") || d.output("Alarm") != false {
+			t.Fatalf("scan %d: forced output not held: tag %v, driver %v", i+1, rt.Tags().Bool("Alarm"), d.output("Alarm"))
+		}
 	}
-	if rt.Tags().Bool("Motor") || d.output("Motor") != false {
-		t.Fatalf("forced output not held: tag %v, driver %v", rt.Tags().Bool("Motor"), d.output("Motor"))
+	// The force table's actual is the logic's own latest write, TRUE — not
+	// the forced FALSE.
+	fs := rt.Tags().Forces()
+	if len(fs) != 1 || fs[0].Name != "Alarm" || fs[0].Value != false || fs[0].Actual != true {
+		t.Fatalf("Forces() = %+v, want Alarm forced false over the logic's true", fs)
 	}
-	// The logic's own result is what the force table reports as actual.
-	// (The seal-in reads Motor back, and the forced FALSE breaks it — the
-	// same thing a forced output does to a seal-in on any PLC.)
-	if fs := rt.Tags().Forces(); len(fs) != 1 || fs[0].Actual == nil {
-		t.Fatalf("Forces() = %+v, want the logic's value as actual", fs)
+	// Removing the force puts the logic's value back at once, and the next
+	// scan hands it to the driver.
+	if !rt.Tags().Unforce("Alarm") {
+		t.Fatal("Unforce reported no force on Alarm")
+	}
+	if !rt.Tags().Bool("Alarm") {
+		t.Fatal("Alarm after unforce: want the logic's true straight away")
+	}
+	rt.Scan()
+	if d.output("Alarm") != true {
+		t.Fatalf("driver Alarm = %v after unforce; want the logic's true", d.output("Alarm"))
 	}
 }
 
@@ -178,14 +193,20 @@ func TestForceGenerations(t *testing.T) {
 	if g, _ := tags.TagGeneration("Level"); g != g2 {
 		t.Error("re-forcing the same value moved the generation")
 	}
-	// A forced output: one push for the force, none while it holds.
-	if err := tags.Force("Motor", true); err != nil {
+	// A forced output: one push for the force, none while it holds. Level
+	// is forced to 60, so the logic writes Alarm := FALSE every scan
+	// against the forced TRUE; the re-applied force is no change, and the
+	// driver keeps the forced value.
+	if err := tags.Force("Alarm", true); err != nil {
 		t.Fatal(err)
 	}
 	before := d.writes
-	rt.Scan()
-	rt.Scan()
-	rt.Scan()
+	for i := 0; i < 3; i++ {
+		rt.Scan()
+		if d.output("Alarm") != true {
+			t.Fatalf("scan %d: driver Alarm = %v; want the forced true over the logic's false", i+1, d.output("Alarm"))
+		}
+	}
 	if d.writes-before != 1 {
 		t.Errorf("forced output pushed %d times over 3 scans; want exactly 1", d.writes-before)
 	}

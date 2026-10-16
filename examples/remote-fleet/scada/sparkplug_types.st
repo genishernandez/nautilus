@@ -20,6 +20,8 @@ END_TYPE
 
 VAR_EXTERNAL
   Booster1_DischargePress : LREAL;
+  Booster1_FM1_FM1_FlowLps : LREAL;
+  Booster1_FM1__Online : BOOL;
   Booster1_Pump1 : Pump;
   Booster1_Pump1_SpeedSP : LREAL;
   Booster1_Pump2 : Pump;
@@ -29,8 +31,6 @@ VAR_EXTERNAL
   Booster1__LastBirthMs : LINT;
   Booster1__Online : BOOL;
   Booster1__Rebirth : BOOL;
-  Booster1_plc1_FM1_FlowLps : LREAL;
-  Booster1_plc1__Online : BOOL;
   Well1_Pump1 : Pump;
   Well1_Pump1_SpeedSP : LREAL;
   Well1_WellLevel : LREAL;

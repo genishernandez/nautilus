@@ -12,6 +12,7 @@ import (
 	"github.com/joyautomation/nautilus/internal/stproject"
 	nio "github.com/joyautomation/nautilus/io"
 	"github.com/joyautomation/nautilus/lang/ir"
+	"github.com/joyautomation/nautilus/lang/st"
 	"github.com/joyautomation/nautilus/retain"
 )
 
@@ -183,6 +184,16 @@ type Runtime struct {
 	cpus        []int // main task thread placement, see Options.CPUs
 	prio        int
 
+	// retainSkipped remembers which retained tags retainState has already
+	// logged as unretainable (see retainable), so the 2-second saver names
+	// each one once rather than on every tick.
+	retainSkipped sync.Map
+
+	// discardedPrograms is, per task, the source of the last retained online
+	// edit a deploy replaced (see loadRetained), carried in every save as
+	// retain.State.DiscardedPrograms so the edit stays recoverable. Under mu.
+	discardedPrograms map[string]string
+
 	// alwaysWrite / outGen / outSent implement the output push rule (see
 	// Options.AlwaysWriteOutputs): outGen is the tag store's output-write
 	// generation at the last SUCCESSFUL WriteOutputs, so a scan that finds
@@ -289,6 +300,12 @@ type ScanStats struct {
 	// needed it, so the dashboard must show it while it is fixable.
 	RetainErrors    uint64 `json:"retainErrors,omitempty"`
 	LastRetainError string `json:"lastRetainError,omitempty"`
+	// RetainDiscardedEdits names the tasks whose retained online edit was
+	// dropped since start because a different build had been deployed over
+	// it (see loadRetained). Not an error — a deploy replaces an edit, as a
+	// download does on a PLC — but an edit that was never pulled into git is
+	// gone, and that must be visible, not just logged.
+	RetainDiscardedEdits []string `json:"retainDiscardedEdits,omitempty"`
 
 	// Fault counters: input reads that failed (the scan ran on last-known
 	// values) and program scans that errored.
@@ -326,6 +343,7 @@ func New(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	lopts := scope.LowerOpts()
+	lopts.Peers = peersOf(o)
 	prog, err := CompileWith(o.Program, lopts)
 	if err != nil {
 		return nil, err
@@ -448,6 +466,34 @@ func New(o Options) (*Runtime, error) {
 	r.stats.Periods = make([]float64, 0, historyLen)
 	r.stats.Histogram = make([]int, histBuckets)
 	return r, nil
+}
+
+// peersOf describes every program of the resource as a peer (#327): a
+// program that names another's instance (`t1.Q`, `A.t1.Q`) is told that
+// tasks share only tags, instead of only that t1 is undeclared. A source
+// that does not parse is left out; its own compile reports it.
+func peersOf(o Options) []st.PeerProgram {
+	if len(o.Tasks) == 0 {
+		return nil
+	}
+	var peers []st.PeerProgram
+	if p, ok := PeerOf(o.Program, MainTaskName); ok {
+		peers = append(peers, p)
+	}
+	for i, td := range o.Tasks {
+		src := td.Program
+		if len(td.Libraries) > 0 {
+			src = stproject.Join(td.Libraries, src)
+		}
+		name := td.Name
+		if name == "" {
+			name = fmt.Sprintf("task%d", i+1)
+		}
+		if p, ok := PeerOf(src, name); ok {
+			peers = append(peers, p)
+		}
+	}
+	return peers
 }
 
 // tagScopeFor resolves the tags every program sees without declaring
@@ -854,17 +900,38 @@ func runLoop(ctx context.Context, period time.Duration, scan func(due time.Time)
 	if setup != nil {
 		setup() // on the locked thread: affinity and priority stick to it
 	}
-	start := time.Now()
+	runSchedule(ctx, period, wallLoopClock{}, scan, missed)
+}
+
+// loopClock is the time runSchedule keeps its schedule against: the wall
+// clock and the platform sleep in production, a virtual one under test so
+// the schedule's arithmetic is checked exactly rather than within a
+// shared runner's jitter.
+type loopClock interface {
+	Now() time.Time
+	SleepUntil(ctx context.Context, deadline time.Time) bool
+}
+
+type wallLoopClock struct{}
+
+func (wallLoopClock) Now() time.Time { return time.Now() }
+func (wallLoopClock) SleepUntil(ctx context.Context, deadline time.Time) bool {
+	return sleepUntil(ctx, deadline)
+}
+
+// runSchedule is runLoop's schedule on a given clock.
+func runSchedule(ctx context.Context, period time.Duration, clk loopClock, scan func(due time.Time), missed func(uint64)) {
+	start := clk.Now()
 	for n := int64(1); ; n++ {
 		next := start.Add(time.Duration(n) * period)
-		if behind := -time.Until(next); behind > 0 {
+		if behind := clk.Now().Sub(next); behind > 0 {
 			if k := int64(behind / period); k > 0 {
 				n += k
 				next = start.Add(time.Duration(n) * period)
 				missed(uint64(k))
 			}
 		}
-		if !sleepUntil(ctx, next) {
+		if !clk.SleepUntil(ctx, next) {
 			return
 		}
 		scan(next)
@@ -1117,6 +1184,9 @@ func (r *Runtime) Stats() ScanStats {
 	s.Recent = append([]float64(nil), r.stats.Recent...)
 	s.Periods = append([]float64(nil), r.stats.Periods...)
 	s.Histogram = append([]int(nil), r.stats.Histogram...)
+	if len(r.stats.RetainDiscardedEdits) > 0 {
+		s.RetainDiscardedEdits = append([]string(nil), r.stats.RetainDiscardedEdits...)
+	}
 	s.Lateness = r.late.snapshot()
 	r.mu.Unlock()
 	for _, tr := range r.tasks {

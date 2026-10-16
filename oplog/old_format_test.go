@@ -19,6 +19,7 @@ func TestOldFormatFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer n.Close() // Windows cannot delete the temp dir under an open file
 	if n.LastSeq() != 2 || applied != 2 {
 		t.Fatalf("old-format entries: lastSeq %d, applied %d; want 2, 2", n.LastSeq(), applied)
 	}

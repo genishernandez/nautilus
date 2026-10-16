@@ -362,6 +362,21 @@ END_PROGRAM
 			line:    6,
 		},
 		{
+			name: "indicator on a transition",
+			src: `PROGRAM P
+VAR Ind : BOOL; END_VAR
+SFC
+INITIAL_STEP S0:
+END_STEP
+TRANSITION t FROM S0 TO S0 (Ind) := TRUE;
+END_TRANSITION
+END_SFC
+END_PROGRAM
+`,
+			wantErr: "transition t: indicator variables on a transition are not supported — a transition is",
+			line:    6,
+		},
+		{
 			name: "missing END_ACTION",
 			src: `PROGRAM P
 VAR END_VAR

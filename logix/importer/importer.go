@@ -89,7 +89,8 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	}
 	c := f.Controller
 	p := &Project{Files: map[string][]byte{}}
-	im := &importer{file: f, opts: opts, proj: p, aois: map[string]*l5x.AddOnInstruction{}, ctrl: map[string]*l5x.Tag{}}
+	im := &importer{file: f, opts: opts, proj: p, aois: map[string]*l5x.AddOnInstruction{}, ctrl: map[string]*l5x.Tag{},
+		moved: map[string]bool{}, external: map[string]bool{}}
 	for _, a := range c.AOIs {
 		im.aois[strings.ToLower(a.Name)] = a
 	}
@@ -135,8 +136,8 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 		if task == nil {
 			p.note(prog.Name, -1, "unscheduled", "the program is in no task; imported with the default scan")
 		}
-		for _, file := range im.importProgram(prog) {
-			tasks = append(tasks, manifestTask{File: file, Task: task})
+		for _, pf := range im.importProgram(prog) {
+			tasks = append(tasks, manifestTask{progFile: pf, Task: task})
 		}
 	}
 
@@ -146,11 +147,33 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range tags {
-		if im.written[strings.ToLower(tags[i].Name)] {
-			tags[i].Role = "output"
-		}
+	byIdent := map[string]*l5x.Tag{}
+	for _, t := range c.Tags {
+		byIdent[l5x.Ident(t.Name)] = t
 	}
+	kept := tags[:0]
+	for _, t := range tags {
+		k := strings.ToLower(t.Name)
+		if im.moved[k] && !im.external[k] {
+			continue // a block instance now, declared by its program
+		}
+		if im.written[k] {
+			t.Role = "output"
+		}
+		// Every controller tag is written back (target.logix.all-tags),
+		// named by a routine or not, so each carries the type that
+		// writes it (#370); one no write can create is reported.
+		if src := byIdent[t.Name]; src != nil {
+			if t.Type == "" {
+				t.Type = im.tagType(src, t.Init)
+			}
+			if why := im.notWritten(src, t); why != "" && !im.external[k] {
+				p.note("", -1, "tag", t.Name+" ("+logixTypeOf(src)+"): "+why)
+			}
+		}
+		kept = append(kept, t)
+	}
+	tags = kept
 	// Rack points the logic named directly (Local:1:I.Data.3) become alias
 	// tags: the program names the tag, the manifest carries the binding.
 	names := make([]string, 0, len(im.ioAliases))
@@ -179,14 +202,82 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 		return nil, err
 	}
 	p.Files["tags/logix.yaml"] = raw
+	if hw := hardwareFile(f); hw != nil {
+		p.Files[HardwareFile] = hw
+		im.hardware = HardwareFile
+	}
 	p.Files["nautilus.yaml"] = im.manifest(tasks)
-	sort.Slice(p.Notes, func(i, j int) bool {
+	sort.SliceStable(p.Notes, func(i, j int) bool {
 		if p.Notes[i].Owner != p.Notes[j].Owner {
 			return p.Notes[i].Owner < p.Notes[j].Owner
 		}
 		return p.Notes[i].Rung < p.Notes[j].Rung
 	})
 	return p, nil
+}
+
+// tagType is the type: a controller tag's tag-file entry needs so that a
+// write-back creates it with its Logix type: "" when its init: already
+// implies that type (a BOOL, a REAL, a STRING) or it has no nautilus type
+// at all (a firmware structure, a block instance, a multi-dimensional
+// array). An alias tag is typed through its target.
+func (im *importer) tagType(t *l5x.Tag, init any) string {
+	dtype, dims := t.DataType, t.Dimensions
+	if t.AliasFor != "" {
+		var err *refusal
+		if dtype, dims, err = im.aliasType(t); err != nil {
+			return ""
+		}
+	}
+	if im.aois[strings.ToLower(dtype)] != nil {
+		return "" // a block instance, never a tag
+	}
+	typ, ok := im.typeText(dtype, dims)
+	if !ok {
+		return ""
+	}
+	switch init.(type) {
+	case bool:
+		if typ == "BOOL" {
+			return ""
+		}
+	case float64:
+		if typ == "REAL" {
+			return ""
+		}
+	}
+	return typ
+}
+
+// notWritten says why a write-back cannot create a controller tag no
+// routine names, or "" when it can: one with no nautilus type stays in
+// the tag file untyped, as documentation; one whose type nautilus has
+// but the Logix target's v1 subset lacks is skipped by the writer.
+func (im *importer) notWritten(src *l5x.Tag, t tagfile.Tag) string {
+	if t.Type == "" && t.Init == nil {
+		return "no nautilus type, so the tag file documents it untyped and a write-back does not create it"
+	}
+	dtype := src.DataType
+	if src.AliasFor != "" {
+		dtype, _, _ = im.aliasType(src)
+	}
+	switch up := strings.ToUpper(dtype); up {
+	case "STRING", "LINT", "USINT", "UINT", "UDINT", "ULINT":
+		return "the Logix target's subset has no " + up + ", so a write-back does not create it"
+	}
+	return ""
+}
+
+// logixTypeOf is a tag's Logix type as a note shows it.
+func logixTypeOf(t *l5x.Tag) string {
+	typ := t.DataType
+	if typ == "" && t.AliasFor != "" {
+		typ = "alias of " + t.AliasFor
+	}
+	if t.Dimensions != "" {
+		typ += "[" + t.Dimensions + "]"
+	}
+	return typ
 }
 
 func (p *Project) note(owner string, rung int, reason, text string) {
@@ -229,9 +320,16 @@ type importer struct {
 	// written collects controller tags the imported logic drives, for
 	// the tag file's roles.
 	written map[string]bool
+	// moved are controller tags declared as block instances in a program
+	// (program-scoped in nautilus); external are controller tags some
+	// program declares VAR_EXTERNAL. A moved tag nothing names as a tag
+	// stays out of the tag file.
+	moved, external map[string]bool
 	// ioAliases are the alias tags the import made for rack points the
 	// logic named directly: tag name → Logix operand.
 	ioAliases map[string]string
+	// hardware is the project's hardware configuration file, "" for none.
+	hardware string
 	// usesDialect is set when a routine needed a dialect block (TONR);
 	// the manifest then opts into dialect: logix.
 	usesDialect bool
@@ -255,7 +353,7 @@ func declaredTypes(src string) map[string]bool {
 }
 
 type manifestTask struct {
-	File string
+	progFile
 	Task *l5x.Task
 }
 
@@ -310,14 +408,56 @@ func (im *importer) manifest(tasks []manifestTask) []byte {
 	if im.opts.Host != "" {
 		fmt.Fprintf(&b, "    host: %s\n", im.opts.Host)
 	}
+	if im.hardware != "" {
+		// The export's I/O modules, which the alias tags land on (#275).
+		fmt.Fprintf(&b, "    hardware: %s\n", im.hardware)
+	}
+	// The tag file is the controller's tag set: write every tag back,
+	// named by a routine or not (#370).
+	b.WriteString("    all-tags: true\n")
+	if len(im.moved) > 0 {
+		// Controller-scoped timers, counters and AOI instances are block
+		// instances in their program now; written back at controller
+		// scope, with their descriptions (#371).
+		names := make([]string, 0, len(im.moved))
+		for k := range im.moved {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		b.WriteString("    controller-scoped:\n")
+		for _, k := range names {
+			t := im.ctrl[k]
+			fmt.Fprintf(&b, "      - { name: %s", l5x.Ident(t.Name))
+			if d := strings.TrimSpace(t.Description); d != "" {
+				fmt.Fprintf(&b, ", desc: %s", yamlQuote(d))
+			}
+			b.WriteString(" }\n")
+		}
+	}
 	if len(tasks) == 1 {
-		// One program: tell the writer its Logix names, so a deploy puts
-		// it back where it was.
-		if t := tasks[0]; t.Task != nil {
+		// One program: tell the writer its Logix names, so a deploy (or
+		// `naut logix write`) puts it back where it was.
+		t := tasks[0]
+		if t.Program != "" && t.Program != l5x.Ident(t.Program) {
+			fmt.Fprintf(&b, "    program: %s\n", t.Program)
+		}
+		if t.Routine != "" && t.Routine != "MainRoutine" {
+			fmt.Fprintf(&b, "    routine: %s\n", t.Routine)
+		}
+		if t.Task != nil {
 			fmt.Fprintf(&b, "    task: %s\n", t.Task.Name)
+			if t.Task.Type == "CONTINUOUS" {
+				b.WriteString("    continuous: true\n")
+			}
 		}
 	}
 	return []byte(b.String())
+}
+
+// yamlQuote is s as a YAML double-quoted scalar.
+func yamlQuote(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
+	return `"` + r.Replace(s) + `"`
 }
 
 func (im *importer) fileName(base, ext string) string {

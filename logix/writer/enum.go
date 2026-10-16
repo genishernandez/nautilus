@@ -16,7 +16,8 @@ import (
 //	State : Mode   (VAR, VAR_EXTERNAL, a manifest tag)   a DINT tag
 //	init: Run / := Run / the type's default           Value="10"
 //	Run, Mode#Run   (ST, a rung's operand or { := })   10
-//	TO_INT(State), TO_Mode(n)                         State, n
+//	TO_DINT(State), TO_Mode(n)                        State, n
+//	TO_INT(State)                                     State wrapped to 16 bits (convert.go)
 //
 // The member names are not on the controller: a reader of the routine
 // sees 10, and the importer brings the tag back as a DINT. A Logix

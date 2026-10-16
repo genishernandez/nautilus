@@ -1,0 +1,887 @@
+page: website/src/content/docs/guides/logix-authoring.md
+title: Authoring for Logix (experimental)
+prefix: LGA
+claims:
+  - id: LGA-001
+    claim: >-
+      The manifest tags a program names become controller-scope Logix tags
+      carrying their initial values and descriptions; a tag no program names
+      is not written, unless `target.logix` sets `all-tags: true`, and then
+      every manifest tag with a type the subset carries is a controller
+      tag, named or not.
+    source: "#a-project-with-a-logix-target"
+    tests:
+      - go ./logix/writer TestManifestInitsAndDescriptionsLandOnControllerTags
+      - go ./logix/writer TestImplicitTagsBecomeControllerTags
+      - go ./logix/writer TestAllTagsWritesTagsNoProgramNames
+      - go ./logix/writer TestAllTagsSkipsWhatLogixCannotCarry
+      - go ./cmd/naut TestLogixDeployAllTagsAndControllerScoped
+    note: >-
+      TestAllTagsWritesTagsNoProgramNames writes the same ladder and ST
+      programs with all-tags off (the unnamed DINT, REAL and INT array are
+      not written) and on (each is, typed, seeded and described from the
+      manifest; the side code's heartbeat stays the side code's). An
+      unnamed tag the subset cannot carry (a STRING, a LINT) is not written
+      and refuses nothing, where the same tag named is refused. The CLI
+      test reads all-tags from nautilus.yaml through both `naut logix deploy`
+      (to a fake agent) and `naut logix write`.
+
+  - id: LGA-002
+    claim: >-
+      `VAR_EXTERNAL` is optional: a ladder or ST program that names a
+      manifest tag it did not declare still gets its controller tag, typed
+      from the manifest. A manifest tag with no `role:` stops `naut logix
+      deploy` and `naut logix write` with an error naming the tag.
+    source: "#a-project-with-a-logix-target"
+    tests:
+      - go ./logix/writer TestImplicitTagsBecomeControllerTags
+      - go ./logix/writer TestImplicitTagsInST
+      - go ./logix/writer TestImplicitTagsLadderMembersAndLiterals
+      - go ./cmd/naut TestLogixDeployTypesUndeclaredTagsFromTheManifest
+      - go ./cmd/naut TestLogixDeployRefusesATagWithNoRole
+    note: >-
+      The CLI test deploys (to a fake agent) and writes a project whose ladder
+      names four manifest tags it never declares: each becomes a controller
+      tag typed from nautilus.yaml, `type:` where given (INT over the REAL
+      `init: 0` would imply; DINT with no init) and else the type `init:`
+      implies (REAL, BOOL); a manifest tag no rung names is not written. A
+      tag with no role: is refused by name (exit 2) by `naut logix deploy`,
+      before anything reaches the agent, and by `naut logix write`.
+
+  - id: LGA-003
+    claim: >-
+      The task becomes a periodic Logix task at the task's scan rate, the
+      program a Logix program and its rungs the `MainRoutine`.
+    source: "#a-project-with-a-logix-target"
+    tests:
+      - go ./logix/writer TestTaskSchedulesTheProgram
+      - go ./logix/writer TestDemoLineMatchesTheRealExport
+      - go ./cmd/naut TestLogixDeployNamesTheTaskProgramAndRoutine
+    note: >-
+      The CLI test deploys a project (to a fake agent) and reads the L5X it
+      sends: a PERIODIC task at the task's 250 ms scan scheduling the program,
+      the program named for the POU with the rungs as MainRoutine and its VAR
+      as program (not controller) tags, and with `program`, `routine` and
+      `task` under target.logix the three renamed.
+
+  - id: LGA-004
+    claim: >-
+      `side.heartbeat` adds a second Logix program, `Nautilus`, scheduled
+      after the user's, that counts task scans in the named DINT and never
+      touches the user's routine.
+    source: "#a-project-with-a-logix-target"
+    tests:
+      - go ./logix/writer TestSideCodeHeartbeat
+
+  - id: LGA-005
+    claim: >-
+      The Logix target takes one task running one ladder or structured text
+      program; a multi-task project and FBD or SFC programs are refused.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./cmd/naut TestCheckTargetLogixRefusesOtherLanguages
+      - go ./cmd/naut TestLogixTargetRefusesSFCAndASecondTask
+    note: >-
+      FBD and SFC programs are refused by `naut check --target logix` (an SFC
+      chart that checks clean without the target); `naut logix deploy` refuses
+      an SFC task program and a project with two tasks.
+
+  - id: LGA-006
+    claim: >-
+      Contacts `X` `/X`, branches (nesting kept) and coils `( X )`
+      `( S X )` `( R X )` are written as `XIC` `XIO`, `[ , ]` and `OTE`
+      `OTL` `OTU`.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestNeutralTextSpelling
+
+  - id: LGA-007
+    claim: >-
+      Edge contacts and edge coils (`+X`, `-X`, `( P X )`, `( N X )`) are
+      written as `ONS` and `OSF` with generated storage bits.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestEdgeCoils
+      - go ./logix/writer TestEdgeAtBranchLegHead
+      - go ./logix/writer TestGolden/subset
+    note: "`-X` (to `OSF`) is asserted only through the subset golden snapshot."
+
+  - id: LGA-008
+    claim: >-
+      Compares become the Logix compare instructions (an expression operand
+      becomes `CMP`), and `{ y := expr }` becomes `MOVE`, `ADD`, `SUB`,
+      `MUL` or `DIV` for one operation on plain operands, `ABS` for
+      `ABS(x)`, and `CPT` for anything else (`MOD`, unary `-`, `SQRT` as
+      `SQR`, `**` or `EXPT`, nested expressions).
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestAssignmentsAndExpressionCompares
+      - go ./logix/writer TestGolden/subset
+      - go ./logix/writer TestLEIsAPlainCompare
+    note: >-
+      MOVE, ADD, SUB, MUL, DIV, ABS, CPT (including MOD, unary minus, SQRT,
+      ** and EXPT) and CMP are asserted, and the plain compares GE, NE, GT,
+      LT (golden snapshot) and LE.
+
+  - id: LGA-009
+    claim: >-
+      In ladder, `TON`, `TOF` and `CTU` blocks are written as the Logix
+      instructions on `TIMER` / `COUNTER` tags; in ST, as `TONR(t)` (with
+      `t.Reset := NOT IN`), `TOFR(t)` and `CTUD(c)` on `FBD_TIMER` /
+      `FBD_COUNTER` tags. Either way `t.Q` is written as `t.DN`, `t.ET` as
+      `t.ACC` and `c.CV` as `c.ACC`.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestNeutralTextSpelling
+      - go ./logix/writer TestCounterEndsItsRung
+      - go ./logix/writer TestOutputCapturesAndResetConditions
+      - go ./logix/writer TestGolden/subset
+      - go ./logix/writer TestStructuredText
+      - go ./logix/writer TestSTTOFAndCounterValue
+    note: >-
+      Ladder `TOF` and the `TIMER` / `COUNTER` tag types are asserted through
+      the subset golden snapshot; the ST TON and CTU forms and the
+      `FBD_TIMER` / `FBD_COUNTER` types by TestStructuredText, ST `TOF` and
+      `c.CV` by TestSTTOFAndCounterValue, ladder `c.CV` by
+      TestOutputCapturesAndResetConditions.
+
+  - id: LGA-010
+    claim: >-
+      `Word.3` is written as bit 3 of the word, as Logix spells it.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestBitAccessPassesThrough
+
+  - id: LGA-011
+    claim: >-
+      An array of timers or counters (`ARRAY [0..3] OF TON`) becomes one
+      Logix `TIMER` or `COUNTER` tag with the array's dimension
+      (`TIMER[4]`).
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestArraysOfBlocks
+
+  - id: LGA-012
+    claim: >-
+      TIME becomes a DINT of milliseconds where it feeds a preset, and the
+      elementary types BOOL, SINT, INT, DINT, REAL, LREAL map to the same
+      Logix types.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestTimerPresetLandsInTheTag
+      - go ./logix/writer TestGolden/subset
+    note: The elementary types are asserted through the subset golden snapshot (BOOL, SINT, INT, DINT, REAL, LREAL tags).
+
+  - id: LGA-013
+    claim: STRUCT types in a library become UDTs.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestUserDefinedTypes
+
+  - id: LGA-014
+    claim: >-
+      Enumerations become `DINT` tags, and a member, plain or qualified
+      (`Run`, `Mode#Run`), is written as its integer value.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestEnumerationsAreDINT
+
+  - id: LGA-015
+    claim: >-
+      A user FUNCTION_BLOCK, in ladder or ST, becomes an Add-On
+      Instruction.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestAddOnInstructionFromLadderBlock
+      - go ./logix/writer TestAddOnInstructionPowerAndST
+
+  - id: LGA-016
+    claim: >-
+      An ST program's assignments, IF, CASE, FOR, WHILE, REPEAT, EXIT,
+      operators and maths are written as Logix ST, close to as written.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestStructuredText
+      - go ./logix/writer TestStructuredTextLoopsAndExit
+    note: >-
+      Assignments, IF/ELSIF, CASE, FOR, operators and ABS/SQRT/EXPT are
+      asserted, and WHILE, REPEAT ... UNTIL and an EXIT inside an IF in the
+      loop, in order, as written.
+
+  - id: LGA-038
+    claim: >-
+      An ST conversion is written as Logix that computes nautilus's result:
+      a narrowing wraps in integer arithmetic, an integer meets REAL as
+      `(v * 1.0)` where it would otherwise divide as integers, a BOOL
+      becomes a number through an `IF`, and REAL to an integer as the whole
+      right-hand side into a tag of that integer type is a plain store,
+      which the controller rounds halves to even as nautilus does.
+    source: "#what-the-target-accepts"
+    tests:
+      - go ./logix/writer TestConversionsWritten
+      - go ./logix/writer TestGoldenConversions
+      - go ./logix/writer TestNarrowingWrapMatchesNautilus
+      - go ./logix/writer TestRealToIntegerStores
+      - naut logix/writer/testdata/conformance/conversions case 1, xd = 70000, xr = 2.5
+      - naut logix/writer/testdata/conformance/conversions case 10, xd = 5, xr = 3.5
+      - naut logix/writer/testdata/conformance/conversions case 11, xd = -5, xr = -3.5
+    partial: true
+    note: >-
+      The tests assert what is written and that the wrap equals nautilus's
+      narrowing under either MOD sign rule. The conformance project
+      `logix/writer/testdata/conformance/conversions` writes every written
+      class into its own tag (and passes a conversion to a user block's
+      input); its 12 scenarios pass on nautilus in CI (the three cited) and
+      passed unchanged on an Echo v38 controller with `naut test --target
+      logix` (#255, 2026-10-14), exact to the bit with float32-exact REAL
+      inputs. The controller run is not in CI.
+
+  - id: LGA-017
+    claim: >-
+      What the target cannot express is a `naut check` diagnostic that names
+      the construct, and the alternative where Logix has one, carries a
+      stable `logix/<rule>` ID and a line, and stops the writer from
+      emitting any document.
+    source: "#rejected-at-check-time-by-name"
+    tests:
+      - go ./logix/writer TestRejections
+      - go ./logix/writer TestStructuredTextRejections
+      - go ./logix/writer TestUserDefinedTypeRejections
+      - go ./logix/writer TestRefusalsTheTableNames
+      - go ./logix/writer TestSTAndTypeRefusalsHaveALineAndWriteNothing
+      - go ./logix/writer TestRefusalsNameTheAlternative
+    partial: true
+    note: >-
+      Every rule has a case, including trailing-underscore names
+      (logix/name) and an AOI with an array input or output (logix/type);
+      ladder, ST and user-type refusals each assert a line and that no
+      document is written. The alternative is asserted for twelve messages
+      across logix/name, fb-pin, operand, time, member and array-shape, not
+      for every message. The page names the exceptions with no alternative
+      (STRING, a self-containing type, a binding the compiler cannot read).
+
+  - id: LGA-039
+    claim: >-
+      `logix/conversion` refuses what the controller would compute
+      differently: REAL to an integer inside an expression or into a tag of
+      another type, an integer `/` whose quotient meets a REAL (stored into
+      a REAL, beside a REAL operand, compared with a REAL), and unsigned,
+      bit-string, LINT, LTIME and STRING conversions; an all-integer
+      division is written unchanged. On a rung the same integer `/` is
+      refused in a DIV or CPT into a REAL, a CPT beside a REAL and a CMP
+      against a REAL; into an integer it is written as DIV or CPT.
+    source: "#rejected-at-check-time-by-name"
+    tests:
+      - go ./logix/writer TestConversionsRefused
+      - go ./logix/writer TestIntegerDivisionUnchanged
+      - go ./logix/writer TestLadderIntegerDivision
+      - naut logix/writer/testdata/conformance/division minus seven by two truncates toward zero
+    note: >-
+      That Logix divides integers in REAL beside a REAL (7 / 2 = 3.5) was
+      observed on an Echo v38 controller, in ST (#361) and in ladder DIV,
+      CPT and CMP (#368), not in CI. The written forms (`conformance/division`:
+      DIV and CPT into an integer, a CMP against an integer, a quotient
+      through a DINT tag into a REAL) passed 4 of 4 scenarios on the same
+      controller; CI runs them on nautilus only.
+
+  - id: LGA-040
+    claim: >-
+      In an ST call to a user block, each input must be a tag, a member or
+      element of one, or a literal; an expression bound to an input is
+      refused by `logix/fb-pin` at check time. A negative number is written
+      as one (`-5`), and a conversion that is a plain store (`DINT_TO_REAL(a)`
+      into a REAL input) is written as its argument.
+    source: "#rejected-at-check-time-by-name"
+    tests:
+      - go ./logix/writer TestSTBlockCallInputs
+    note: >-
+      That the Logix SDK build refuses any expression as an Add-On
+      Instruction operand in ST (`(a / b)`, `(a)`, `-a`; RxSTX_E_UNEXPECTED_TOKEN)
+      while it takes `a`, `p.y`, `-5` and `2.5` was observed on the v38 SDK
+      (#368), not in CI. An element with a tag index (`arr[k]`) is accepted
+      by the writer but was not built.
+
+  - id: LGA-018
+    claim: >-
+      A project with a `target: logix` section gets the Logix rules from
+      `naut check` without asking, and `naut check --target logix` applies
+      them to any project.
+    source: "#rejected-at-check-time-by-name"
+    tests:
+      - go ./cmd/naut TestCheckRunsTheManifestTarget
+      - go ./cmd/naut TestCheckTargetLogix
+
+  - id: LGA-019
+    claim: >-
+      `dialect: logix` adds a `TONR` block to every program in the project,
+      with `Reset` clearing it while TRUE, and a free-running pulse spelled
+      `t:TONR(PT := T#1S, Reset := t.Q)`; the default dialect adds nothing.
+    source: "#vendor-idioms-dialect-logix"
+    tests:
+      - go ./internal/dialect TestLogixLibraryParsesAndIsDeclarationsOnly
+    partial: true
+    note: Only that the library parses and declares. No test runs a TONR on the nautilus runtime to check the Reset semantics.
+
+  - id: LGA-020
+    claim: >-
+      In ladder the writer emits a `TONR` as a `TON` with a `RES(t)` rung
+      ahead of the timer's rung; in ST, as `TONR(t);` on an `FBD_TIMER`
+      whose `.Reset` is TRUE while `Reset` is TRUE or `IN` is FALSE.
+    source: "#vendor-idioms-dialect-logix"
+    tests:
+      - go ./logix/writer TestTONR
+
+  - id: LGA-021
+    claim: >-
+      A tag's `alias:` is written as a Logix alias tag (`AliasFor`) and the
+      program names the tag; the nautilus runtime ignores the binding, so the
+      same source runs in simulation.
+    source: "#io-tag-aliases"
+    tests:
+      - go ./logix/writer TestAliasTags
+      - go ./cmd/naut TestAliasedTagsRunInSimulationAndDeployAsAliases
+    note: >-
+      One project with `alias:` on its tags: `naut test` runs its seal-in
+      scenario on the nautilus runtime, which ignores the binding, and the
+      deploy (to a fake agent) writes those tags as alias tags (AliasFor) with
+      the rung naming the tags.
+
+  - id: LGA-052
+    claim: >-
+      With `target.logix.hardware` set, the writer puts that L5X's
+      `<Modules>` section into the project unchanged, in place of the
+      generated controller module. An alias of a rack point whose module
+      the configuration lacks (a slot of `Local` or of an adapter, or a
+      module by name), or with no configuration at all, stops `naut logix
+      write` and `naut logix deploy` with `logix/io-module` naming the alias
+      and the module; a configuration whose `Local` module is not the
+      target's processor at its revision stops them with `logix/hardware`.
+      A project written with a configuration imports and builds in Logix
+      Designer with its aliases resolved.
+    source: "#io-tag-aliases"
+    tests:
+      - go ./logix/writer TestHardwareModulesWrittenVerbatim
+      - go ./logix/writer TestIOModuleRule
+      - go ./logix/writer TestHardwareMustMatchTheTarget
+      - go ./logix/writer TestRackPoint
+      - go ./cmd/naut TestAliasedTagsRunInSimulationAndDeployAsAliases
+      - go ./cmd/naut TestLogixImportHardwareRoundTrip
+      - go ./logix/writer TestSDKConvertAndBuild/ioline
+    partial: true
+    note: >-
+      The writer tests use a real Logix Designer v38.01 export with two 1756
+      modules in the controller's chassis and a 1734-AENT adapter with a
+      1734-IB8 under it (lang/l5x/testdata/ioline.L5X), in ladder and ST.
+      TestSDKConvertAndBuild/ioline imports and builds the written project
+      with the SDK; it runs only against a logixd (ws-test, #275), so CI
+      does not run it. Measured by hand on ws-test (Logix Designer v38.01,
+      Echo 5580, 2026-10-14): the same aliases with no modules import and
+      then fail the build with RxTAG_ALIAS_TARGET_NOT_FOUND, the failure
+      logix/io-module now reports at write time; the project with the
+      hardware configuration downloads, verifies, runs in Run, and writing
+      the input alias tags moves Local:1:I.Data and the seal-in drives
+      Local:2:O.Data. The rule checks that the module is there, not that
+      the point exists on it.
+
+  - id: LGA-022
+    claim: >-
+      `naut logix import --project` writes a nautilus project from a full
+      export: the manifest with `target: logix` filled from the controller
+      (and `dialect: logix` when the export uses its idioms), the tags with
+      their descriptions, UDTs as IEC types, every ladder routine as a
+      PROGRAM and every AOI as a FUNCTION_BLOCK in `lib/`.
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./cmd/naut TestLogixImportProject
+      - go ./logix/importer TestDemoLineImportsAndWritesBack
+      - go ./logix/importer TestUDTConformanceImportsAndWritesBack
+      - go ./logix/importer TestAOIConformanceImportsAndWritesBack
+      - go ./logix/importer TestDialectAndAliasImport
+      - go ./logix/importer TestEveryLadderRoutineBecomesAProgram
+    note: >-
+      TestEveryLadderRoutineBecomesAProgram imports an export with three
+      ladder routines in two programs: three PROGRAM files, each a task in the
+      manifest, each with its own rung; the manifest's target filled from the
+      controller (name, processor, revision); controller-scope descriptions in
+      the tag file.
+
+  - id: LGA-053
+    claim: >-
+      `naut logix import --project` of an export with I/O modules writes
+      `hardware.L5X`, the export's `<Modules>` section unchanged, and names
+      it in the manifest (`target.logix.hardware`), so the write-back
+      carries the same modules with the alias tags on them; an export whose
+      only module is the controller's own gets no hardware file.
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./logix/importer TestImportCarriesHardware
+      - go ./cmd/naut TestLogixImportHardwareRoundTrip
+      - go ./lang/l5x TestParseModules
+    note: >-
+      Line ends are made LF (XML reads CRLF the same); otherwise the
+      section is the export's bytes. Measured by hand on ws-test (Logix
+      Designer v38.01, 2026-10-14): the write-back of the imported
+      ioline export, imported into Logix Designer and exported again, has
+      a `<Modules>` section byte for byte the original export's.
+
+  - id: LGA-023
+    claim: >-
+      A rung with no nautilus form is kept as a comment and reported, never
+      guessed at.
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./logix/importer TestRefusalsKeepTheProgramValid
+      - go ./logix/importer TestVarietyReportsWhatItCannotCarry
+
+  - id: LGA-024
+    claim: >-
+      Alias tags and rack points the logic names directly become tags with
+      `alias:`, and a `RES` on a timer run by `TON` imports as `dialect:
+      logix` `TONR`. A rung that names an alias tag comes in like any other:
+      the tag takes its target's type, whether the target is a tag, a member
+      of a UDT or Add-On Instruction instance, an array element, a bit or a
+      rack point's bit. An alias the export cannot type, such as one of a
+      whole rack word with no module definition, is refused by name.
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./logix/importer TestDialectAndAliasImport
+      - go ./logix/importer TestEveryLadderRoutineBecomesAProgram
+      - go ./logix/importer TestAliasTagsInRungsImportAndRoundTrip
+      - go ./logix/importer TestAliasTagsTheExportCannotTypeAreRefusedByName
+    note: >-
+      Rack points named directly, the TONR fold, and an alias tag in the
+      export becoming a tag with `alias:` are asserted. A hand-built export
+      (logix/importer/testdata/aliases.L5X) has rungs naming an alias of each
+      target kind (Pump1Run; Pump1.Speed; the BIT member Pump1.Running; the
+      Add-On Instruction output Valve1Ctl.Open; TankStatus.5;
+      TankLevels[2]; Local:1:I.Data.3): every rung imports, each tag is
+      declared as its target's type (BOOL, REAL), and written back the rung
+      text is the export's with each tag an alias tag of the same target
+      (#330). Refused by name, each asserted: an alias of Local:2:I.Ch0Data
+      ("the export has no module definition to type it"), of a tag not in
+      the export, of a whole TIMER, of a member the target lacks, and a
+      program-scoped alias tag.
+
+  - id: LGA-044
+    claim: >-
+      An imported project writes back with the export's tags where the
+      export had them: a controller-scoped timer, counter or Add-On
+      Instruction instance, declared in its program, is listed under
+      `target.logix.controller-scoped` with its description and written back
+      at controller scope, and with `all-tags: true` a controller tag no
+      imported routine names is written back too, the tag file typing each
+      tag. A tag with no nautilus type, or one the subset lacks, is
+      reported. On the public yardstick
+      (`examples/batch-skid/line/Line.L5X`) the logic comparison finds no
+      differences.
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./cmd/naut TestLogixRoundTripYardstickCLI
+      - go ./logix/importer TestRoundTripPublicYardstick
+      - go ./logix/importer TestImportTypesEveryControllerTag
+      - go ./logix/writer TestControllerScopedVarBecomesAControllerTag
+      - go ./logix/writer TestControllerScopedAOIInstance
+      - go ./logix/writer TestControllerScopedRefusesWhatIsNotAProgramVar
+      - go ./cmd/naut TestLogixDeployAllTagsAndControllerScoped
+    note: >-
+      TestLogixRoundTripYardstickCLI runs import --project, naut check, naut
+      logix write and normalize --logic --check on the public yardstick: "the
+      same logic", every tag's value and description equal to the export's,
+      AcceptTmr and Line_BatchId among the controller tags and no program
+      tags. TestImportTypesEveryControllerTag asserts the tag file's types
+      (a DINT, an array, a tag with no value) and the report for a MESSAGE, a
+      multi-dimensional array, an unnamed TIMER and a LINT.
+
+  - id: LGA-045
+    claim: >-
+      An import carries each UDT's description and its members' into the
+      project, as the declarations' trailing comments, and a write puts them
+      back on the `<DataType>` and its `<Member>`s; the written file claims
+      the Logix Designer release of the target's own revision (36.00 for a
+      v36 controller, 38.01 for v38).
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./cmd/naut TestLogixRoundTripYardstickCLI
+      - go ./logix/importer TestRoundTripPublicYardstick
+      - go ./logix/writer TestUDTDescriptions
+      - go ./logix/writer TestUDTDescriptionsRoundTrip
+      - go ./logix/writer TestSoftwareRevisionFollowsTheTarget
+      - go ./lang/l5x TestTypesCarryDescriptions
+      - go ./lang/stgen TestRenderComments
+    partial: true
+    note: >-
+      On the public yardstick the written SoftwareRevision is the export's
+      (36.00) and LineStatus comes back with its description; member
+      descriptions are covered by the writer's own tests, since the
+      yardstick has none. Offline only: 38.01 is what ECHO1's real v38
+      exports carry; any other major's release is its ".00", which matches
+      the yardstick (a stand-in export) for v36 but no real export has
+      shown, and no v36 Logix Designer has opened a write-back.
+
+  - id: LGA-026
+    claim: >-
+      On a corpus of 52 real production exports, 97.9% of rungs import, 81%
+      of ladder routines import whole, and most complete routines write back
+      identically or equivalently.
+    source: "#bringing-an-existing-program-in"
+    tests:
+      - go ./logix/importer TestCorpus
+    partial: true
+    note: The corpus is private (NAUTILUS_L5X_CORPUS), so the test skips in CI; the figure is not independently checkable.
+
+  - id: LGA-027
+    claim: >-
+      `naut logix deploy` with no flag writes the project, has logixd import
+      and build it, and says whether the running controller could take the
+      change as an online edit or needs a download.
+    source: "#the-loop"
+    tests:
+      - go ./logix/deploy TestBuildOnlyReportsWhatTheControllerNeeds
+      - go ./logix/deploy TestEmptyControllerNeedsADownload
+      - go ./logix/deploy TestDeployBuildsAnAOIProjectInTwoSteps
+    partial: true
+    note: Run against a fake agent; no controller behind it in CI.
+
+  - id: LGA-028
+    claim: >-
+      `naut logix deploy --online` replaces the routine's rungs in the
+      running program and finalizes them, leaving the controller's mode, and
+      is refused when the tag set changed because an online edit cannot
+      create tags.
+    source: "#the-loop"
+    tests:
+      - go ./logix/deploy TestOnlineEditReplacesTheRungsAndVerifies
+      - go ./logix/deploy TestOnlineEditRefusesATagChange
+      - go ./logix/deploy TestSessionEditsWithoutReopening
+      - go ./logix/deploy TestSessionRefusesATagChange
+    partial: true
+    note: Run against a fake agent; real warm edits are verified on hardware only.
+
+  - id: LGA-029
+    claim: >-
+      `naut logix deploy --download` refuses without `--yes`, and the
+      controller must already be in Program mode or `--program-mode`
+      passed.
+    source: "#the-loop"
+    tests:
+      - go ./cmd/naut TestLogixDeployRefusals
+      - go ./logix/deploy TestDownloadVerifies
+    partial: true
+    note: The "controller must be in Program mode" refusal is not asserted separately; real downloads are verified on hardware only.
+
+  - id: LGA-030
+    claim: >-
+      Every deploy path ends by uploading the controller's program again and
+      comparing its logic with what was sent.
+    source: "#the-loop"
+    tests:
+      - go ./logix/deploy TestOnlineEditReplacesTheRungsAndVerifies
+      - go ./logix/deploy TestDownloadVerifies
+    partial: true
+    note: Verified against a fake agent that returns the sent logic.
+
+  - id: LGA-047
+    claim: >-
+      `naut logix deploy --download` keeps the controller's tag values: it
+      uploads the running controller before the build and writes into the
+      project the value of every tag with the same name, scope, type and
+      dimensions on both sides (a UDT's or Add-On Instruction's definition
+      the same too) that the project does not mark constant; a TIMER's or
+      COUNTER's preset comes from the project, its accumulator from the
+      controller. A tag whose type, dimensions or definition changed starts
+      at the project's value and is reported, as are new and removed tags.
+      `--reset-values` starts every tag at the project's value.
+    source: "#what-a-download-does-with-tag-values"
+    tests:
+      - go ./logix/deploy TestKeepValuesCarriesEveryKindOfValue
+      - go ./logix/deploy TestKeepValuesTakesPresetsFromTheProject
+      - go ./logix/deploy TestKeepValuesResetsWhatChanged
+      - go ./logix/deploy TestKeepValuesMatchesNamesWithoutCase
+      - go ./logix/deploy TestKeepValuesLeavesTheLogicAlone
+      - go ./logix/deploy TestDownloadKeepsTheControllersValues
+      - go ./logix/deploy TestBuildReportsTheValuePlan
+      - go ./logix/deploy TestHardwareDownloadKeepsValuesUnlessReset
+    partial: true
+    note: >-
+      The merge is tested against a real SDK upload of an Echo controller
+      (testdata/running.L5X: REAL, DINT, a nested UDT, a REAL array, a TIMER
+      and a COUNTER, controller and program scope) and, through the deploy,
+      against the fake agent (the upload precedes the import; with
+      ResetValues the project's values go). On an Echo controller (v38,
+      2026-10-14, #273) a changed project downloaded with every value kept, a
+      DINT → REAL tag reset, a new tag at its initial value, a changed timer
+      preset from the project and a counter's accumulator kept, and the
+      controller ran the new logic from the kept values; the hardware test
+      skips in CI.
+
+  - id: LGA-031
+    claim: >-
+      A program the target cannot express is refused before anything is
+      written: `naut logix deploy` stops on the diagnostic before the agent
+      is called.
+    source: "#rejected-at-check-time-by-name"
+    tests:
+      - go ./logix/deploy TestSubsetDiagnosticsStopEverything
+
+  - id: LGA-032
+    claim: >-
+      `naut logix mode [--yes run|program] <project-dir>` reads or changes
+      the controller's mode; a change takes `--yes`.
+    source: "#the-loop"
+    tests:
+      - go ./cmd/naut TestLogixModeRefusesAChangeWithoutConfirmation
+      - go ./cmd/naut TestLogixModeTakesTheProjectDirectory
+      - go ./cmd/naut TestLogixModeReadsAndChangesTheMode
+    partial: true
+    note: >-
+      The refusal without `--yes` is tested, and against a fake agent `naut
+      logix mode` reads the mode through a project uploaded from the named
+      controller (without changing it) and with `--yes program` changes it.
+      The controller's mode actually changing is the SDK's, verified on
+      hardware only.
+
+  - id: LGA-033
+    claim: >-
+      `naut logix write program.ld` writes an L5X without a project.
+    source: "#the-loop"
+    tests:
+      - go ./cmd/naut TestLogixWrite
+
+  - id: LGA-034
+    claim: >-
+      `naut test --target logix` runs the project's acceptance tests against
+      the controller over EtherNet/IP: `given` writes go to the controller,
+      `advance:` is wall time, `until`, `hold` and `always` are checked on
+      every poll, and it waits on the `side.heartbeat` scan counter.
+    source: "#the-loop"
+    tests:
+      - go ./acceptance TestLiveSealInAndAlarm
+      - go ./acceptance TestLiveUntilHoldAndAlways
+      - go ./acceptance TestLiveScansWaitOnTheHeartbeat
+    partial: true
+    note: >-
+      Run against a stand-in controller (mechanics only); no test drives a
+      real or emulated Logix controller through `naut test --target logix`.
+      always: catches a transient violation per poll; `advance:` as wall time
+      is asserted only as a positive elapsed time.
+
+  - id: LGA-035
+    claim: >-
+      The logixd agent URL comes from `target.logix.agent` and
+      `NAUTILUS_LOGIXD_URL` overrides it; the token comes only from
+      `NAUTILUS_LOGIXD_TOKEN`.
+    source: "#a-project-with-a-logix-target"
+    tests:
+      - go ./logix/logixd TestClientDefaultsFromEnvironment
+      - go ./cmd/naut TestLogixDeployFindsTheAgent
+    note: >-
+      With two fake agents: a deploy reaches the one named by
+      target.logix.agent and every request carries NAUTILUS_LOGIXD_TOKEN as
+      its bearer; with NAUTILUS_LOGIXD_URL set it reaches that one instead; a
+      manifest with a `token:` under target.logix is refused.
+
+  - id: LGA-036
+    claim: >-
+      Anything outside the subset is refused, not approximated.
+    source: "#what-it-does-not-do-yet"
+    tests:
+      - go ./logix/writer TestRejections
+      - go ./logix/writer TestStructuredTextRejections
+      - go ./logix/writer TestRefusalsTheTableNames
+      - go ./cmd/naut TestLogixTargetRefusesSFCAndASecondTask
+      - go ./cmd/naut TestCheckTargetLogixRefusesOtherLanguages
+    note: >-
+      Every rule in the page's table has a refusal case (trailing-underscore
+      names and an AOI with an array parameter included), and FBD and SFC
+      programs and a multi-task project are refused, each with nothing
+      written.
+
+  - id: LGA-037
+    claim: >-
+      An online edit keeps every value the controller holds; a download
+      keeps the values of the tags it can match and still stops the
+      controller.
+    source: "#what-it-does-not-do-yet"
+    tests:
+      - go ./logix/deploy TestHardwareDownloadKeepsValuesUnlessReset
+    partial: true
+    note: >-
+      Verified on hardware only: the test downloads DemoLine with its values
+      reset, sets HiLevelSP to 70 over EtherNet/IP, makes an online edit and
+      expects 70 kept, downloads again and expects 70 kept, then downloads
+      with ResetValues and expects the project's 85. It needs a controller
+      that may be stopped (NAUTILUS_LOGIX_DOWNLOAD_COMM_PATH,
+      NAUTILUS_LOGIX_HOST) and logixd, and skips in CI. Passed on an Echo
+      controller (v38) on 2026-10-14 in 466 s.
+
+  - id: LGA-046
+    claim: >-
+      The written project's `Local` module is Logix Designer's own for the
+      ControlLogix 5580 (1756-L8xE), CompactLogix 5370 (1769-L30ER to
+      1769-L36ERM) and CompactLogix 5380 (5069-L306ER to 5069-L3100ERM)
+      processors; for any other processor it is the 1756-L85E's, and
+      `naut logix write` and `naut logix deploy` warn that it is, and a
+      download from the editor reports the same warning in its progress.
+    source: "#what-it-does-not-do-yet"
+    tests:
+      - go ./logix/writer TestLocalModulesMatchExports
+      - go ./logix/writer TestLocalModule
+      - go ./cmd/naut TestLogixRoundTripYardstickCLI
+    partial: true
+    note: >-
+      TestLocalModulesMatchExports writes a project for each of the 25
+      processors with an export in logix/writer/testdata/local (empty
+      projects the SDK created on Logix Designer v38 and exported,
+      committed verbatim) and compares the `<Modules>`, `<EthernetPorts>`,
+      `<RedundancyInfo>` and `<Controller>` attributes with the export's;
+      the table has a row for exactly those. TestLocalModule pins three
+      families' modules and the warning for five processors with none;
+      TestLogixRoundTripYardstickCLI sees the yardstick's 1769-L33ER get its
+      own module and no warning. The deploy and serve call sites print the
+      same writer.LocalModuleWarning and have no test of their own. That
+      Logix Designer v38 imports (0 warnings, 0 errors) and builds a
+      written project was checked by hand on ws-test for 5069-L320ER,
+      5069-L340ERM, 1769-L33ER, 1769-L36ERM and 1756-L83E
+      (docs/design/logix-authoring.md, #373), not by a test here; no other
+      Logix Designer release has opened one.
+
+  - id: LGA-041
+    claim: >-
+      With `naut logix serve --project`, an online edit from the editor is
+      the same online edit `naut logix deploy --online` makes, and its
+      progress and result reach the editor as they happen; a change it
+      cannot carry is refused with the way to download it.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamOnlineEdit
+      - go ./logix/facade TestDeployStreamRefusal
+      - go ./logix/facade TestProgramPlaneDeploysAnOnlineEdit
+    partial: true
+    note: >-
+      Against a stand-in deploy function: the endpoint streams each progress
+      line, then the report, and serves the new source; a NeedsDownloadError
+      arrives as a 422 error event naming the download command. The deploy
+      itself (logix/deploy.Session) has its own fake-agent tests; neither
+      has run against a controller through the editor yet.
+
+  - id: LGA-042
+    claim: >-
+      A download from the editor is refused unless the request says yes;
+      it sends the project with the Program-mode choice made, re-reads
+      nautilus.yaml for it, releases the online session first and opens it
+      again afterwards, so the next online edit is warm.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamDownload
+      - go ./cmd/naut TestLogixServePlaneDownloadRewarmsTheSession
+      - go ./cmd/naut TestLogixServePlaneReleasesTheSessionBeforeADownload
+      - go ./logix/facade TestDeployStreamReportsADownloadBeforeItsWarmUp
+    partial: true
+    note: >-
+      Against the fake agent: no "yes" is a 400 and nothing runs; the held
+      session is deleted before /download, an upload reopens it after, and
+      the next edit makes no upload; a tag description added to
+      nautilus.yaml after the server started is in the project sent. Not yet
+      run against a controller.
+
+  - id: LGA-048
+    claim: >-
+      A download from the editor keeps the controller's tag values as the
+      CLI does unless the request says resetValues (the extension sends it
+      when nautilus.logix.resetValuesOnDownload is on), and its result
+      carries how many values were kept and which tags were reset, and why.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamDownload
+    partial: true
+    note: >-
+      Against a stand-in download function: resetValues reaches it, and the
+      done event carries valuesKept and resets (valuesKept -1 when values
+      were reset). On an Echo controller (2026-10-14, #273) a download from
+      the endpoint of an ST version of a ladder project kept 11 values and
+      reported the two tags whose type changed (TIMER → FBD_TIMER, COUNTER →
+      FBD_COUNTER). The modal wording and the setting are the extension's
+      (logixDeployLogic.test.ts).
+
+  - id: LGA-049
+    claim: >-
+      A download from the editor reports as soon as it has verified: the
+      online session for the next edit opens after the report, its
+      progress following on the same stream, and an edit pushed meanwhile
+      waits for that session and says so. Every result's time is the
+      whole wait from the request, and a warm edit's progress reaches the
+      editor as it happens.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamReportsADownloadBeforeItsWarmUp
+      - go ./logix/facade TestDeployStreamWarmsOnlyAfterADownload
+      - go ./logix/facade TestDeployStreamFlushesAtOnce
+      - go ./logix/facade TestDeployStreamElapsedIsTheWholeWait
+      - go ./cmd/naut TestLogixServePlaneDownloadRewarmsTheSession
+      - go ./cmd/naut TestLogixServePlaneEditWaitsForTheWarmUp
+    partial: true
+    note: >-
+      Against stand-in deploy functions and the fake agent: the done event
+      is read while Warm is still blocked, GET /api/program shows no deploy
+      in progress and an online edit goes through meanwhile, and the
+      warm-up's line follows the report; elapsedMs counts a 150 ms wait
+      the report's own 20 ms (deployMs) does not; the first line arrives
+      while the deploy is still blocked; an edit queued behind the warm-up
+      gets "waiting for the online session…" and then edits without an
+      upload, each stream with its own lines; a warm edit logs
+      "replacing …" and "verifying …" before its result. The extension
+      shows the summary on the done event (logixDeployLogic.test.ts). Not
+      yet re-measured on a controller (the #375 numbers predate it).
+
+  - id: LGA-050
+    claim: >-
+      A plain download refused because the controller is in Run is
+      answered with what to do — "Switch to Program Mode and Download" —
+      instead of the SDK's raw RxE_INVALID_START_STATE, which stays
+      available underneath; the editor offers the Program-mode download.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/deploy TestDownloadInRunSaysToSwitchToProgramMode
+      - go ./logix/facade TestDeployStreamStartStateRefusal
+    partial: true
+    note: >-
+      Against the fake agent, which refuses a download in Run as the SDK
+      does: the error is a StartStateError naming the mode and the way out,
+      without the SDK code, and its Raw keeps the SDK's message and status
+      lines; asked for Program mode and refused all the same, the SDK's
+      answer goes as it is. The stream answers 409 with needsProgramMode
+      and the raw text as detail. The button is the extension's
+      (logixDeployLogic.test.ts). The SDK's wording is from the #375 run on
+      an Echo controller; the new message has not been seen on one.
+
+  - id: LGA-051
+    claim: >-
+      A plain download to a controller in Run (or Remote Run) is refused as
+      soon as the controller's mode is read, before the project is imported
+      or built, with the same answer as the SDK's late refusal; asking for
+      Program mode skips the check, and a mode read that fails does not
+      block the download. An online edit's done event carries no
+      download-only fields (valuesKept, resets).
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/deploy TestDownloadInRunRefusedBeforeBuild
+      - go ./logix/deploy TestDownloadProgramModeSkipsTheModeCheck
+      - go ./logix/deploy TestDownloadModeReadFailureFallsThrough
+      - go ./cmd/naut TestLogixServePlaneRefusesADownloadInRunUpFront
+      - go ./logix/facade TestDeployStreamOnlineEdit
+    partial: true
+    note: >-
+      Against the fake agent, which reports a mode: in Run and Remote Run no
+      build, save or download call is made after the refusal (with and
+      without reset-values); Program mode on the request or on the
+      controller goes ahead; a failing mode read reaches the build and the
+      SDK's own refusal. Not yet seen on a controller: the time saved
+      (the SDK's refusal came after ~76 s on Echo).
+
+  - id: LGA-043
+    claim: >-
+      Only one deploy runs at a time, and a deploy whose base is not what
+      the controller runs is refused before anything is sent.
+    source: "#from-the-editor"
+    tests:
+      - go ./logix/facade TestDeployStreamUpfrontRefusals

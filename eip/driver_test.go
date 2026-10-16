@@ -84,32 +84,19 @@ func startEmulatorWith(t *testing.T, denyStructRoots bool) (host string, port in
 	for _, tc := range tags {
 		store.Set(tc.Path, tc.LeafType, tc.Default)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
-	}
-	port = ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-
-	srv := logixserver.NewServer(store, schema, name, addr, nil)
+	// Bind :0 inside the server and read the real address back: no window
+	// between choosing a port and listening on it for another test to take.
+	srv := logixserver.NewServer(store, schema, name, "127.0.0.1:0", nil)
 	srv.DenyStructRoots = denyStructRoots
+	if err := srv.Listen(); err != nil {
+		t.Fatalf("emulator listen: %v", err)
+	}
+	_, ps, _ := net.SplitHostPort(srv.Addr())
+	port, _ = strconv.Atoi(ps)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = srv.Run(ctx) }()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err == nil {
-			_ = c.Close()
-			return "127.0.0.1", port, store
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("emulator never came up on %s", addr)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	return "127.0.0.1", port, store
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -229,6 +216,12 @@ func TestDriverLeafModeFallback(t *testing.T) {
 	if vals["Speed"] != 42.5 {
 		t.Errorf("Speed = %v, want 42.5", vals["Speed"])
 	}
+	// The same values come out of a plain whole-struct read, so they prove
+	// nothing about the path taken: the driver must report that the refused
+	// roots dropped both struct bindings (TRS, TRSCmd) to member-wise reads.
+	if h := d.Health(); h.LeafMode != 2 {
+		t.Errorf("Health().LeafMode = %d, want 2 (TRS and TRSCmd read member-wise)", h.LeafMode)
+	}
 }
 
 // TestRuntimeRoundTrip runs the full stack: emulator ← eip.Driver ← runtime
@@ -251,6 +244,9 @@ func TestRuntimeRoundTrip(t *testing.T) {
 		v, err := d.ReadInputs()
 		return err == nil && v["Speed"] != nil && v["TRS"] != nil
 	})
+	if h := d.Health(); h.LeafMode != 0 {
+		t.Errorf("whole-struct reads work here, but Health().LeafMode = %d", h.LeafMode)
+	}
 
 	program := `
 TYPE

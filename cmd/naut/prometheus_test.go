@@ -11,6 +11,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,5 +175,39 @@ func TestPrometheusServeAnswersHTTP(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "node_load1 0.5") {
 		t.Errorf("serve did not answer with the seeded body:\n%s", got)
+	}
+}
+
+// A scrape the timeout cuts off mid-body is an error, not a short
+// /metrics: importing half a body would generate a manifest missing every
+// metric past the cut, with nothing to say so.
+func TestScrapeOnceTimeoutIsAnError(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = io.WriteString(w, "# TYPE node_load1 gauge\nnode_load1 0.5\n")
+		w.(http.Flusher).Flush()
+		select { // hold the body open past the client's timeout
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	body, err := scrapeOnce(srv.URL, 200*time.Millisecond)
+	if err == nil {
+		t.Fatalf("a timed-out body was accepted as complete: %q", body)
+	}
+	if !strings.Contains(err.Error(), "--timeout") {
+		t.Errorf("the error should say how to fix it: %v", err)
+	}
+
+	whole := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "node_load1 0.5\n")
+	}))
+	defer whole.Close()
+	if body, err := scrapeOnce(whole.URL, time.Second); err != nil || string(body) != "node_load1 0.5\n" {
+		t.Fatalf("a complete body: %q, %v", body, err)
 	}
 }
